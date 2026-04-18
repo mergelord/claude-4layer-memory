@@ -9,10 +9,9 @@ Layer 2: LLM-based semantic checks (contradictions, outdated claims)
 """
 
 import sys
-import os
 from pathlib import Path
 import re
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import List, Dict, Set, Tuple
 import json
 
