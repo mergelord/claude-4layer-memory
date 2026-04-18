@@ -38,8 +38,9 @@ if sys.platform == 'win32':
     Colors.disable()
 
 class MemoryLint:
-    def __init__(self, memory_path: Path):
+    def __init__(self, memory_path: Path, quick_mode: bool = False):
         self.memory_path = memory_path
+        self.quick_mode = quick_mode
         self.errors = []
         self.warnings = []
         self.info = []
@@ -319,7 +320,10 @@ class MemoryLint:
 
     def run_layer1(self) -> bool:
         """Run Layer 1: Deterministic checks"""
-        self.print_header("Memory Lint - Layer 1: Deterministic Checks")
+        if self.quick_mode:
+            self.print_header("Memory Lint - Quick Check")
+        else:
+            self.print_header("Memory Lint - Layer 1: Deterministic Checks")
 
         if not self.memory_path.exists():
             self.print_error(f"Memory directory not found: {self.memory_path}")
@@ -327,19 +331,28 @@ class MemoryLint:
 
         self.print_ok(f"Memory directory: {self.memory_path}")
 
-        # Run all checks
+        # Run checks (quick mode: only critical)
         self.check_ghost_links()
-        self.check_orphan_files()
-        self.check_duplicates()
-        self.check_hot_memory_age()
-        self.check_warm_memory_age()
-        self.check_file_sizes()
+
+        if not self.quick_mode:
+            self.check_orphan_files()
+            self.check_duplicates()
+            self.check_hot_memory_age()
+            self.check_warm_memory_age()
+            self.check_file_sizes()
 
         # Summary
-        self.print_section("Layer 1 Summary")
-        print(f"Errors: {Colors.RED}{len(self.errors)}{Colors.END}")
-        print(f"Warnings: {Colors.YELLOW}{len(self.warnings)}{Colors.END}")
-        print(f"Info: {Colors.CYAN}{len(self.info)}{Colors.END}")
+        if self.quick_mode:
+            if len(self.errors) == 0:
+                self.print_ok("Quick check passed")
+            else:
+                self.print_section("Quick Check Summary")
+                print(f"Errors: {Colors.RED}{len(self.errors)}{Colors.END}")
+        else:
+            self.print_section("Layer 1 Summary")
+            print(f"Errors: {Colors.RED}{len(self.errors)}{Colors.END}")
+            print(f"Warnings: {Colors.YELLOW}{len(self.warnings)}{Colors.END}")
+            print(f"Info: {Colors.CYAN}{len(self.info)}{Colors.END}")
 
         return len(self.errors) == 0
 
@@ -595,6 +608,11 @@ def main():
         '--report',
         help='Save report to JSON file'
     )
+    parser.add_argument(
+        '--quick',
+        action='store_true',
+        help='Quick mode: only critical checks (ghost links, errors)'
+    )
 
     args = parser.parse_args()
 
@@ -605,12 +623,12 @@ def main():
         memory_path = Path.home() / ".claude" / "memory"
 
     # Run lint
-    lint = MemoryLint(memory_path)
+    lint = MemoryLint(memory_path, quick_mode=args.quick)
 
     if args.layer in ['1', 'all']:
         success = lint.run_layer1()
 
-    if args.layer in ['2', 'all']:
+    if args.layer in ['2', 'all'] and not args.quick:
         lint.run_layer2()
 
     # Save report

@@ -24,9 +24,29 @@ Memory Lint validates your memory structure and content in two layers:
 - Consistency verification
 - Completeness analysis
 
+**Quick Mode** (v1.1+)
+- Fast validation for SessionStart hooks
+- Only checks critical errors (ghost links)
+- Completes in <1 second
+- Suitable for automatic execution
+
 ---
 
 ## Usage
+
+### Quick Check (SessionStart Hook)
+
+**Fastest option - only critical errors:**
+
+```bash
+# Windows
+python memory_lint.py --layer 1 --quick
+
+# Linux/Mac
+python memory_lint.py --layer 1 --quick
+```
+
+**Use case:** Automatic validation on session start without delays.
 
 ### Check Global Memory
 
@@ -57,18 +77,44 @@ memory_lint_project.bat C:\path\to\project
 ### Direct Python Usage
 
 ```bash
-# Global memory
-python memory_lint.py ~/.claude/memory
+# Quick check (fast, only ghost links)
+python memory_lint.py ~/.claude/memory --layer 1 --quick
+
+# Full Layer 1 check
+python memory_lint.py ~/.claude/memory --layer 1
+
+# Full check (Layer 1 + Layer 2)
+python memory_lint.py ~/.claude/memory --layer all
 
 # Project memory
-python memory_lint.py ~/.claude/projects/C--BAT-my-project/memory
+python memory_lint.py ~/.claude/projects/C--BAT-my-project/memory --layer 1 --quick
 
 # Save report to JSON
 python memory_lint.py ~/.claude/memory --report lint_report.json
-
-# Run only Layer 1
-python memory_lint.py ~/.claude/memory --layer 1
 ```
+
+### SessionStart Hook Integration
+
+Add to `~/.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "python C:/Users/USERNAME/.claude/hooks/memory_lint.py --layer 1 --quick"
+      }
+    ]
+  }
+}
+```
+
+**Benefits:**
+- Automatic validation on every session start
+- Immediate feedback on memory integrity
+- No startup delays (<1 second)
+- Only alerts on critical errors
 
 ---
 

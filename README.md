@@ -13,7 +13,7 @@
 - **4-Layer Memory Architecture** - HOT (24h) → WARM (14d) → COLD (permanent) → SEMANTIC (indexed)
 - **Dual-Level System** - Global memory (cross-project) + Project memory (project-specific)
 - **Semantic Search** - Find information by meaning, not keywords (multilingual support)
-- **Memory Lint** - Two-layer validation (deterministic + semantic checks)
+- **Memory Lint** - Two-layer validation with quick mode for SessionStart hooks
 - **Auto-Discovery** - Automatically detects and indexes projects
 - **Smart Filtering** - Protects against indexing system directories
 - **Health Monitoring** - Automatic rotation, corruption detection
@@ -252,7 +252,20 @@ l4_search_all.bat "how to handle Unicode errors"
 l4_search.bat "API integration"
 ```
 
-### Example 3: Health Check
+### Example 3: Memory Lint Quick Check
+
+```bash
+# Quick check (SessionStart hook - fast)
+python scripts/memory_lint.py --layer 1 --quick
+
+# Full Layer 1 check
+python scripts/memory_lint.py --layer 1
+
+# Full check with semantic analysis
+python scripts/memory_lint.py --layer all
+```
+
+### Example 4: Health Check
 
 ```bash
 # Check memory system health
