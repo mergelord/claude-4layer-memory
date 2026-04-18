@@ -29,6 +29,10 @@ jobs:
         pip install -r requirements.txt
         pip install -r requirements-dev.txt
 
+    - name: Run pytest
+      run: |
+        pytest tests/ -v --tb=short
+
     - name: Run memory lint (quick check)
       run: |
         python scripts/memory_lint.py --help

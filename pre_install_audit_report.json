@@ -1,8 +1,8 @@
 {
-  "timestamp": "2026-04-19T00:05:03.468270",
+  "timestamp": "2026-04-19T02:53:03.574898",
   "claude_dir": "C:\\Users\\MYRIG\\.claude",
   "stats": {
-    "existing_hooks": 48,
+    "existing_hooks": 55,
     "has_memory": true,
     "existing_memory_files": [
       "MEMORY.md",
@@ -11,12 +11,12 @@
     ],
     "archive_files": 0,
     "total_memory_files": 9,
-    "total_memory_size": 22275,
-    "project_count": 6,
-    "projects_with_memory": 6,
+    "total_memory_size": 22325,
+    "project_count": 7,
+    "projects_with_memory": 7,
     "global_projects_entries": 0,
     "has_semantic_db": true,
-    "free_space_gb": 20.881999969482422
+    "free_space_gb": 18.293529510498047
   },
   "issues": [],
   "warnings": [],
@@ -24,6 +24,6 @@
     "Total memory files: 9",
     "Total memory size: 21.8 KB",
     "Contains 0 project entries",
-    "Free space: 20.9 GB"
+    "Free space: 18.3 GB"
   ]
 }
