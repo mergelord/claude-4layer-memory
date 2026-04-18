@@ -389,8 +389,8 @@ A: Yes, run it as many times as you want.
 
 If the audit finds issues you can't resolve:
 
-- **Issues:** https://github.com/yourusername/claude-4layer-memory/issues
-- **Discussions:** https://github.com/yourusername/claude-4layer-memory/discussions
+- **Issues:** https://github.com/mergelord/claude-4layer-memory/issues
+- **Discussions:** https://github.com/mergelord/claude-4layer-memory/discussions
 
 ---
 

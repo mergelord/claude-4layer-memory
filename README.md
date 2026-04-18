@@ -4,7 +4,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.7+](https://img.shields.io/badge/python-3.7+-blue.svg)](https://www.python.org/downloads/)
-[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)](https://github.com/yourusername/claude-4layer-memory)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)](https://github.com/mergelord/claude-4layer-memory)
 
 ---
 
@@ -39,7 +39,7 @@
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/claude-4layer-memory.git
+git clone https://github.com/mergelord/claude-4layer-memory.git
 cd claude-4layer-memory
 
 # IMPORTANT: Run pre-installation audit first
@@ -283,7 +283,7 @@ Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for gu
 
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/claude-4layer-memory.git
+git clone https://github.com/mergelord/claude-4layer-memory.git
 cd claude-4layer-memory
 
 # Install dev dependencies
@@ -327,9 +327,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🔗 Links
 
-- **Documentation:** [https://yourusername.github.io/claude-4layer-memory](https://yourusername.github.io/claude-4layer-memory)
-- **Issues:** [https://github.com/yourusername/claude-4layer-memory/issues](https://github.com/yourusername/claude-4layer-memory/issues)
-- **Discussions:** [https://github.com/yourusername/claude-4layer-memory/discussions](https://github.com/yourusername/claude-4layer-memory/discussions)
+- **Documentation:** [https://github.com/mergelord/claude-4layer-memory](https://github.com/mergelord/claude-4layer-memory)
+- **Issues:** [https://github.com/mergelord/claude-4layer-memory/issues](https://github.com/mergelord/claude-4layer-memory/issues)
+- **Discussions:** [https://github.com/mergelord/claude-4layer-memory/discussions](https://github.com/mergelord/claude-4layer-memory/discussions)
 
 ---
 
@@ -340,5 +340,3 @@ If you find this project useful, please consider giving it a star!
 ---
 
 **Made with ❤️ for the Claude Code community**
-#   c l a u d e - 4 l a y e r - m e m o r y  
- 

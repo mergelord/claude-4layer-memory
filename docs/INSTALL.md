@@ -315,9 +315,9 @@ After successful installation:
 
 ## Support
 
-- **Issues:** https://github.com/yourusername/claude-4layer-memory/issues
-- **Discussions:** https://github.com/yourusername/claude-4layer-memory/discussions
-- **Documentation:** https://yourusername.github.io/claude-4layer-memory
+- **Issues:** https://github.com/mergelord/claude-4layer-memory/issues
+- **Discussions:** https://github.com/mergelord/claude-4layer-memory/discussions
+- **Documentation:** https://github.com/mergelord/claude-4layer-memory
 
 ---
 
