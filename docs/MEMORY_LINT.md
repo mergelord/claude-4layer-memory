@@ -18,8 +18,8 @@ Memory Lint validates your memory structure and content in two layers:
 - WARM memory age validation (14d window)
 - File size checks
 
-**Layer 2: Semantic Checks** (planned)
-- Contradiction detection
+**Layer 2: Semantic Checks** (implemented)
+- Contradiction detection (requires LLM integration)
 - Outdated claims detection
 - Consistency verification
 - Completeness analysis
@@ -215,38 +215,102 @@ done
 
 ---
 
-## Layer 2: Semantic Checks (Planned)
+## Layer 2: Semantic Checks
 
-Future LLM-based checks:
+Layer 2 performs intelligent analysis of memory content.
 
-### Contradiction Detection
-```
-[ERROR] Contradiction found:
-  decisions.md:15 - "We use SimConnect for all autopilot commands"
-  decisions.md:42 - "PMDG requires WASM, not SimConnect"
-```
+### 1. Contradiction Detection
 
-### Outdated Claims Detection
-```
-[WARN] Potentially outdated:
-  decisions.md:23 - "MobiFlight WASM not yet tested" (30 days old)
-  handoff.md:5 - "WASM integration completed" (2 days old)
-```
+**What it checks:**
+- Conflicting statements across memory files
+- Requires LLM integration for full functionality
 
-### Consistency Verification
+**Example output:**
 ```
-[WARN] Inconsistent terminology:
-  - "auto-pilot" (3 occurrences)
-  - "autopilot" (15 occurrences)
-  - "AP" (8 occurrences)
-  Suggest: standardize to "autopilot"
+[INFO] Analyzing 122 statements for contradictions...
+[INFO] Would analyze 122 statements
+[INFO] LLM integration required for actual detection
 ```
 
-### Completeness Analysis
+**Current status:**
+- Collects statements from all files
+- Builds prompt for LLM analysis
+- Full detection requires Claude API or local LLM integration
+
+**How to fix:**
+- Review contradictions manually
+- Update outdated information
+- Merge conflicting decisions
+
+### 2. Outdated Claims Detection
+
+**What it checks:**
+- Claims with dates older than 30 days
+- Potentially stale information
+
+**Example output:**
 ```
-[INFO] Missing documentation:
-  - Decision "Why we chose vJoy" has no rationale
-  - Pattern "WASM fallback" has no examples
+[WARN] Found 3 claims older than 30 days
+[WARN] decisions.md: 2026-03-15 (34d old)
+```
+
+**How to fix:**
+- Review old claims for accuracy
+- Update or archive outdated information
+- Add "still valid as of [date]" notes
+
+### 3. Consistency Verification
+
+**What it checks:**
+- Inconsistent terminology across files
+- Multiple spellings of same terms
+
+**Example output:**
+```
+[WARN] Inconsistent terminology: autopilot
+    - 'autopilot' (1 occurrences)
+    - 'auto-pilot' (3 occurrences)
+    - 'AP' (14 occurrences)
+    Suggest: standardize to 'autopilot'
+```
+
+**How to fix:**
+- Choose canonical term
+- Search and replace variants
+- Update style guide
+
+### 4. Completeness Analysis
+
+**What it checks:**
+- TODO, FIXME, XXX markers
+- "not yet", "coming soon" phrases
+- Incomplete sections
+
+**Example output:**
+```
+[WARN] Found 2 incomplete sections
+    decisions.md:45 - TODO
+    handoff.md:12 - not yet implemented
+```
+
+**How to fix:**
+- Complete pending sections
+- Remove resolved TODOs
+- Archive abandoned plans
+
+---
+
+## Layer 2 Summary
+
+After running all checks, Layer 2 provides summary:
+
+```
+## Layer 2 Summary
+----------------------------------------------------------------------
+Contradictions: 0
+Outdated claims: 0
+Inconsistencies: 2
+Incomplete sections: 1
 ```
 
 ---

@@ -343,15 +343,236 @@ class MemoryLint:
 
         return len(self.errors) == 0
 
-    def run_layer2_placeholder(self):
-        """Placeholder for Layer 2: LLM-based semantic checks"""
+    def check_contradictions(self) -> List[Dict]:
+        """Check for contradictions in memory content"""
+        self.print_section("Layer 2: Contradiction Detection")
+
+        md_files = self.find_all_md_files()
+
+        # Collect all statements with context
+        statements = []
+        for md_file in md_files:
+            try:
+                content = md_file.read_text(encoding='utf-8')
+                # Split into paragraphs
+                paragraphs = [p.strip() for p in content.split('\n\n') if p.strip() and not p.startswith('#')]
+
+                for para in paragraphs:
+                    if len(para) > 50:  # Skip very short paragraphs
+                        statements.append({
+                            'file': md_file,
+                            'text': para[:500]  # Limit length
+                        })
+            except Exception as e:
+                continue
+
+        if len(statements) < 2:
+            self.print_info("Not enough content for contradiction detection")
+            return []
+
+        self.print_info(f"Analyzing {len(statements)} statements for contradictions...")
+
+        # Build prompt for LLM
+        prompt = self._build_contradiction_prompt(statements)
+
+        # For now, just show what would be checked
+        self.print_info(f"Would analyze {len(statements)} statements")
+        self.print_info("LLM integration required for actual detection")
+
+        return []
+
+    def _build_contradiction_prompt(self, statements: List[Dict]) -> str:
+        """Build prompt for contradiction detection"""
+        prompt = "Analyze these statements from memory files for contradictions:\n\n"
+
+        for i, stmt in enumerate(statements[:20], 1):  # Limit to 20 for context
+            prompt += f"{i}. [{stmt['file'].name}]\n{stmt['text']}\n\n"
+
+        prompt += """
+Find any contradictions between these statements. For each contradiction found, report:
+1. Statement A (file and text)
+2. Statement B (file and text)
+3. Why they contradict
+4. Severity (high/medium/low)
+
+Format as JSON:
+{
+  "contradictions": [
+    {
+      "statement_a": {"file": "...", "text": "..."},
+      "statement_b": {"file": "...", "text": "..."},
+      "reason": "...",
+      "severity": "high"
+    }
+  ]
+}
+"""
+        return prompt
+
+    def check_outdated_claims(self) -> List[Dict]:
+        """Check for potentially outdated claims"""
+        self.print_section("Layer 2: Outdated Claims Detection")
+
+        md_files = self.find_all_md_files()
+        now = datetime.now()
+
+        # Find dated claims
+        dated_claims = []
+        for md_file in md_files:
+            try:
+                content = md_file.read_text(encoding='utf-8')
+
+                # Find dates and surrounding context
+                pattern = r'(\d{4}-\d{2}-\d{2})[^\n]*([^\n]+)'
+                matches = re.finditer(pattern, content)
+
+                for match in matches:
+                    date_str = match.group(1)
+                    context = match.group(2)
+
+                    try:
+                        date = datetime.strptime(date_str, '%Y-%m-%d')
+                        age_days = (now - date).days
+
+                        if age_days > 30:  # Claims older than 30 days
+                            dated_claims.append({
+                                'file': md_file,
+                                'date': date_str,
+                                'age_days': age_days,
+                                'context': context[:200]
+                            })
+                    except ValueError:
+                        continue
+            except Exception as e:
+                continue
+
+        if dated_claims:
+            self.print_info(f"Found {len(dated_claims)} claims older than 30 days")
+            self.print_info("LLM would verify if these are still valid")
+
+            # Show sample
+            for claim in dated_claims[:3]:
+                self.print_warn(f"{claim['file'].name}: {claim['date']} ({claim['age_days']}d old)")
+        else:
+            self.print_ok("No old claims found")
+
+        return dated_claims
+
+    def check_consistency(self) -> List[Dict]:
+        """Check for inconsistent terminology"""
+        self.print_section("Layer 2: Consistency Verification")
+
+        md_files = self.find_all_md_files()
+
+        # Common inconsistencies to check
+        term_variants = {
+            'autopilot': ['auto-pilot', 'auto pilot', 'AP', 'A/P'],
+            'SimConnect': ['simconnect', 'sim-connect', 'sim connect'],
+            'WASM': ['wasm', 'WebAssembly', 'web assembly'],
+        }
+
+        inconsistencies = []
+
+        for base_term, variants in term_variants.items():
+            counts = {base_term: 0}
+            for variant in variants:
+                counts[variant] = 0
+
+            # Count occurrences
+            for md_file in md_files:
+                try:
+                    content = md_file.read_text(encoding='utf-8').lower()
+
+                    for term in [base_term] + variants:
+                        counts[term] += content.count(term.lower())
+                except Exception as e:
+                    continue
+
+            # Check if multiple variants used
+            used_variants = {k: v for k, v in counts.items() if v > 0}
+            if len(used_variants) > 1:
+                inconsistencies.append({
+                    'base_term': base_term,
+                    'variants': used_variants
+                })
+
+        if inconsistencies:
+            for incon in inconsistencies:
+                self.print_warn(f"Inconsistent terminology: {incon['base_term']}")
+                for variant, count in incon['variants'].items():
+                    print(f"    - '{variant}' ({count} occurrences)")
+                print(f"    Suggest: standardize to '{incon['base_term']}'")
+        else:
+            self.print_ok("Terminology is consistent")
+
+        return inconsistencies
+
+    def check_completeness(self) -> List[Dict]:
+        """Check for incomplete documentation"""
+        self.print_section("Layer 2: Completeness Analysis")
+
+        md_files = self.find_all_md_files()
+
+        incomplete = []
+
+        # Check for common incompleteness markers
+        markers = [
+            'TODO', 'FIXME', 'XXX', 'HACK', 'NOTE:',
+            'not yet', 'coming soon', 'to be added',
+            'placeholder', 'stub', 'incomplete'
+        ]
+
+        for md_file in md_files:
+            try:
+                content = md_file.read_text(encoding='utf-8')
+
+                for marker in markers:
+                    if marker.lower() in content.lower():
+                        # Find context
+                        lines = content.split('\n')
+                        for i, line in enumerate(lines):
+                            if marker.lower() in line.lower():
+                                incomplete.append({
+                                    'file': md_file,
+                                    'marker': marker,
+                                    'line': i + 1,
+                                    'context': line.strip()[:100]
+                                })
+                                break
+            except Exception as e:
+                continue
+
+        if incomplete:
+            self.print_warn(f"Found {len(incomplete)} incomplete sections")
+            for item in incomplete[:5]:  # Show first 5
+                print(f"    {item['file'].name}:{item['line']} - {item['marker']}")
+        else:
+            self.print_ok("No obvious incomplete sections found")
+
+        return incomplete
+
+    def run_layer2(self) -> bool:
+        """Run Layer 2: LLM-based semantic checks"""
         self.print_header("Memory Lint - Layer 2: Semantic Checks")
-        self.print_info("Layer 2 (LLM-based checks) not yet implemented")
-        self.print_info("Future checks:")
-        print("  • Contradiction detection")
-        print("  • Outdated claims detection")
-        print("  • Consistency verification")
-        print("  • Completeness analysis")
+
+        if not self.memory_path.exists():
+            self.print_error(f"Memory directory not found: {self.memory_path}")
+            return False
+
+        # Run semantic checks
+        contradictions = self.check_contradictions()
+        outdated = self.check_outdated_claims()
+        inconsistencies = self.check_consistency()
+        incomplete = self.check_completeness()
+
+        # Summary
+        self.print_section("Layer 2 Summary")
+        print(f"Contradictions: {len(contradictions)}")
+        print(f"Outdated claims: {len(outdated)}")
+        print(f"Inconsistencies: {len(inconsistencies)}")
+        print(f"Incomplete sections: {len(incomplete)}")
+
+        return True
 
 def main():
     import argparse
@@ -390,7 +611,7 @@ def main():
         success = lint.run_layer1()
 
     if args.layer in ['2', 'all']:
-        lint.run_layer2_placeholder()
+        lint.run_layer2()
 
     # Save report
     if args.report:

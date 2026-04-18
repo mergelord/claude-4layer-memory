@@ -13,6 +13,7 @@
 - **4-Layer Memory Architecture** - HOT (24h) → WARM (14d) → COLD (permanent) → SEMANTIC (indexed)
 - **Dual-Level System** - Global memory (cross-project) + Project memory (project-specific)
 - **Semantic Search** - Find information by meaning, not keywords (multilingual support)
+- **Memory Lint** - Two-layer validation (deterministic + semantic checks)
 - **Auto-Discovery** - Automatically detects and indexes projects
 - **Smart Filtering** - Protects against indexing system directories
 - **Health Monitoring** - Automatic rotation, corruption detection
