@@ -1,0 +1,27 @@
+# HOT Memory - Handoff
+
+Recent events and context (24 hour window).
+
+**Last Updated:** [DATE]
+
+---
+
+## Events
+
+(Events are added automatically by session hooks)
+
+### [TIMESTAMP] - Event Title
+
+**What happened:**
+- Description of event
+
+**Context:**
+- Relevant context
+
+**Next steps:**
+- What to do next
+
+---
+
+**Note:** This file is automatically rotated every 24 hours.
+Entries older than 24h are moved to archive/.

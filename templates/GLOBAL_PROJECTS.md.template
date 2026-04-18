@@ -1,0 +1,63 @@
+# Global Projects Registry
+
+**Last Updated:** [DATE]
+
+---
+
+## Active Projects
+
+### 1. Example Project
+**Path:** `/path/to/your/project`
+**Memory:** `~/.claude/projects/path-to-your-project/memory/`
+**Status:** ✅ Active
+
+**Description:**
+Brief description of your project.
+
+**Key Components:**
+- Component 1
+- Component 2
+
+**Last Changes:**
+- Recent change 1
+- Recent change 2
+
+---
+
+### 2. Another Project
+**Path:** `/another/project/path`
+**Memory:** `~/.claude/projects/another-project-path/memory/`
+**Status:** 🔄 In Development
+
+**Description:**
+Another project description.
+
+---
+
+## Instructions
+
+1. Add your projects to this file
+2. Use the format above for each project
+3. The **Memory:** field is used by L4 SEMANTIC for auto-discovery
+4. Run `l4_index_all` after adding new projects
+
+## Memory Path Format
+
+The memory path should follow this pattern:
+```
+~/.claude/projects/<encoded-project-path>/memory/
+```
+
+Where `<encoded-project-path>` is your project path with:
+- Forward slashes `/` replaced with dashes `-`
+- Colons `:` replaced with double dashes `--`
+- Spaces replaced with dashes `-`
+
+**Examples:**
+- `/home/user/projects/my-app` → `home-user-projects-my-app`
+- `C:\Projects\MyApp` → `C--Projects-MyApp`
+- `/Users/name/my project` → `Users-name-my-project`
+
+---
+
+**For more information, see:** docs/guides/CONFIGURATION.md

@@ -1,0 +1,28 @@
+# WARM Memory - Decisions
+
+Important decisions and architectural choices (14 day window).
+
+**Last Updated:** [DATE]
+**Rotation:** 14 days → archive/
+
+---
+
+## Decisions
+
+### Decision Title
+**Decision:** What was decided
+**Reason:** Why this decision was made
+**Date:** [DATE]
+
+**Why:**
+- Detailed reasoning
+- Trade-offs considered
+
+**How to apply:**
+- When to use this decision
+- Implementation guidelines
+
+---
+
+**Note:** This file is automatically rotated every 14 days.
+Entries older than 14 days are moved to archive/.
