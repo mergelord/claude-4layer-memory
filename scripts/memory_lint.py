@@ -303,6 +303,53 @@ class MemoryLint:
 
         return large_files
 
+    def check_project_publication_status(self) -> Dict[str, bool]:
+        """Check if project publication status is documented in memory"""
+        self.print_section("Layer 1: Project Publication Status Check")
+
+        status = {
+            'has_project_status': False,
+            'has_git_info': False,
+            'has_publication_info': False
+        }
+
+        md_files = self.find_all_md_files()
+
+        # Ищем файлы со статусом проекта
+        project_keywords = ['project_status', 'publication', 'github', 'git']
+        git_keywords = ['git', 'github', 'gitlab', 'remote', 'repository']
+        publication_keywords = ['публичн', 'приватн', 'public', 'private', 'опубликован']
+
+        for md_file in md_files:
+            try:
+                content = md_file.read_text(encoding='utf-8').lower()
+
+                # Проверяем наличие информации о статусе проекта
+                if any(kw in md_file.name.lower() for kw in project_keywords):
+                    status['has_project_status'] = True
+
+                # Проверяем наличие git информации
+                if any(kw in content for kw in git_keywords):
+                    status['has_git_info'] = True
+
+                # Проверяем наличие информации о публикации
+                if any(kw in content for kw in publication_keywords):
+                    status['has_publication_info'] = True
+
+            except Exception as e:
+                continue
+
+        # Оценка результатов
+        if status['has_project_status'] and status['has_publication_info']:
+            self.print_ok("Project publication status documented")
+        elif status['has_git_info']:
+            self.print_warn("Git info found, but publication status unclear")
+            self.print_info("Consider creating project_publication_status.md")
+        else:
+            self.print_info("No git/publication info found (may be intentional)")
+
+        return status
+
     def generate_report(self) -> Dict:
         """Generate lint report"""
         return {
@@ -340,6 +387,7 @@ class MemoryLint:
             self.check_hot_memory_age()
             self.check_warm_memory_age()
             self.check_file_sizes()
+            self.check_project_publication_status()
 
         # Summary
         if self.quick_mode:

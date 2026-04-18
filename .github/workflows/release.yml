@@ -1,0 +1,60 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Generate changelog
+      id: changelog
+      run: |
+        # Get previous tag
+        PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+
+        # Generate changelog
+        if [ -z "$PREV_TAG" ]; then
+          CHANGELOG=$(git log --pretty=format:"- %s (%h)" --no-merges)
+        else
+          CHANGELOG=$(git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --no-merges)
+        fi
+
+        # Save to file
+        echo "$CHANGELOG" > RELEASE_NOTES.md
+
+        # Set output
+        echo "changelog<<EOF" >> $GITHUB_OUTPUT
+        echo "$CHANGELOG" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        body_path: RELEASE_NOTES.md
+        draft: false
+        prerelease: false
+        generate_release_notes: true
+        files: |
+          scripts/**
+          templates/**
+          install.sh
+          install.bat
+          audit.py
+          audit.sh
+          audit.bat
+          requirements.txt
+          requirements-dev.txt
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
