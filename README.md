@@ -172,6 +172,10 @@ l4_stats.bat
 # Cleanup junk collections
 python l4_semantic_global.py cleanup --dry-run
 python l4_semantic_global.py cleanup
+
+# Validate memory health
+memory_lint.bat  # Windows
+memory_lint.sh   # Linux/Mac
 ```
 
 ### Adding New Project
@@ -269,6 +273,7 @@ See [examples/](examples/) directory for more.
 - **[Architecture Overview](docs/architecture/ARCHITECTURE.md)** - System design and components
 - **[Usage Guide](docs/guides/USAGE.md)** - Commands and workflows
 - **[Configuration Guide](docs/guides/CONFIGURATION.md)** - Customization options
+- **[Memory Lint](docs/MEMORY_LINT.md)** - Memory validation and health checks
 - **[API Reference](docs/api/API.md)** - Python API documentation
 - **[FAQ](docs/FAQ.md)** - Frequently asked questions
 - **[Troubleshooting](docs/TROUBLESHOOTING.md)** - Common issues and solutions
