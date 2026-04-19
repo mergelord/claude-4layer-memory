@@ -10,33 +10,9 @@ from pathlib import Path
 from datetime import datetime
 import json
 
-class Colors:
-    """ANSI color codes"""
-    HEADER = '\033[95m'
-    BLUE = '\033[94m'
-    CYAN = '\033[96m'
-    GREEN = '\033[92m'
-    YELLOW = '\033[93m'
-    RED = '\033[91m'
-    BOLD = '\033[1m'
-    UNDERLINE = '\033[4m'
-    END = '\033[0m'
-
-    @staticmethod
-    def disable():
-        """Disable colors for Windows or when piping"""
-        Colors.HEADER = ''
-        Colors.BLUE = ''
-        Colors.CYAN = ''
-        Colors.GREEN = ''
-        Colors.YELLOW = ''
-        Colors.RED = ''
-        Colors.BOLD = ''
-        Colors.UNDERLINE = ''
-        Colors.END = ''
-
-if sys.platform == 'win32':
-    Colors.disable()
+# Add current directory to path for utils import
+sys.path.insert(0, str(Path(__file__).parent))
+from utils.colors import Colors  # pylint: disable=wrong-import-position
 
 class PreInstallAudit:
     def __init__(self):

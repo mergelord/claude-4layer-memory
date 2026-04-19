@@ -14,26 +14,9 @@ import re
 from datetime import datetime
 from typing import List, Dict, Set, Tuple
 
-class Colors:
-    """ANSI color codes"""
-    GREEN = '\033[92m'
-    YELLOW = '\033[93m'
-    RED = '\033[91m'
-    CYAN = '\033[96m'
-    BOLD = '\033[1m'
-    END = '\033[0m'
-
-    @staticmethod
-    def disable():
-        Colors.GREEN = ''
-        Colors.YELLOW = ''
-        Colors.RED = ''
-        Colors.CYAN = ''
-        Colors.BOLD = ''
-        Colors.END = ''
-
-if sys.platform == 'win32':
-    Colors.disable()
+# Add parent directory to path for utils import
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from utils.colors import Colors  # pylint: disable=wrong-import-position
 
 class MemoryLint:
     def __init__(self, memory_path: Path, quick_mode: bool = False):
