@@ -6,7 +6,6 @@ Analyzes current Claude Code setup and provides recommendations
 """
 
 import sys
-import os
 from pathlib import Path
 from datetime import datetime
 import json
@@ -447,7 +446,7 @@ What this tool does NOT do:
 """
     )
 
-    args = parser.parse_args()
+    parser.parse_args()
 
     print(f"""
 {Colors.BOLD}Claude 4-Layer Memory System - Pre-Installation Audit{Colors.END}
