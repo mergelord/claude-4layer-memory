@@ -518,7 +518,9 @@ def main():
 
         print(f"\n[SEARCH GLOBAL] '{query}'\n")
         for i, result in enumerate(results, 1):
-            print(f"[{i}] {result['metadata']['file']} (distance: {result['distance']:.3f})")
+            distance = result['distance']
+            distance_str = f"{distance:.3f}" if distance is not None else "N/A"
+            print(f"[{i}] {result['metadata']['file']} (distance: {distance_str})")
             print(f"    {result['text'][:200]}...")
             print()
 
@@ -532,7 +534,9 @@ def main():
 
         print(f"\n[SEARCH PROJECT: {project_name}] '{query}'\n")
         for i, result in enumerate(results, 1):
-            print(f"[{i}] {result['metadata']['file']} (distance: {result['distance']:.3f})")
+            distance = result['distance']
+            distance_str = f"{distance:.3f}" if distance is not None else "N/A"
+            print(f"[{i}] {result['metadata']['file']} (distance: {distance_str})")
             print(f"    {result['text'][:200]}...")
             print()
 
@@ -547,8 +551,9 @@ def main():
         for i, result in enumerate(results, 1):
             source = result['source']
             distance = result['distance']
+            distance_str = f"{distance:.3f}" if distance is not None else "N/A"
             print(f"[{i}] [{source}] {result['metadata']['file']} "
-                  f"(distance: {distance:.3f})")
+                  f"(distance: {distance_str})")
             print(f"    {result['text'][:200]}...")
             print()
 
