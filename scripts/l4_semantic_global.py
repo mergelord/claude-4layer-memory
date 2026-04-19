@@ -436,9 +436,16 @@ class GlobalSemanticMemory:
             for i in range(len(chunks))
         ]
 
-        # Удаляем старые записи для этого файла по метаданным
+        # Удаляем старые записи для этого файла
+        # Используем двухэтапный подход для надёжности:
+        # 1. Получаем все ID старых чанков по метаданным
+        # 2. Удаляем их явно по ID
         try:
-            collection.delete(where={"file": file_path.name, "source": source})
+            existing = collection.get(where={"file": file_path.name, "source": source})
+            stale_ids = existing.get("ids", [])
+            if stale_ids:
+                collection.delete(ids=stale_ids)
+                logging.info("Deleted %d stale embeddings for %s", len(stale_ids), file_path.name)
         except Exception as e:
             logging.warning("Could not delete existing embeddings for %s: %s", file_path.name, e)
 
