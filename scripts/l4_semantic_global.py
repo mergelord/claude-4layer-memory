@@ -448,7 +448,13 @@ class GlobalSemanticMemory:
         # 1. Получаем все ID старых чанков по метаданным
         # 2. Удаляем их явно по ID
         try:
-            existing = collection.get(where={"file": file_path.name, "source": source})
+            # ChromaDB 1.5+ требует явные операторы в where clause
+            existing = collection.get(where={
+                "$and": [
+                    {"file": {"$eq": file_path.name}},
+                    {"source": {"$eq": source}}
+                ]
+            })
             stale_ids = existing.get("ids", [])
             if stale_ids:
                 collection.delete(ids=stale_ids)
