@@ -46,6 +46,7 @@ L4 SEMANTIC Memory Layer - Cross-Project Search
 import sys
 import os
 import re
+import logging
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Any
@@ -406,12 +407,11 @@ class GlobalSemanticMemory:
             for i in range(len(chunks))
         ]
 
-        # Удаляем старые записи для этого файла
-        existing_ids = [f"{source}_{file_path.stem}_{i}" for i in range(100)]
+        # Удаляем старые записи для этого файла по метаданным
         try:
-            collection.delete(ids=existing_ids)
-        except Exception:  # pylint: disable=broad-except
-            pass
+            collection.delete(where={"file": file_path.name, "source": source})
+        except Exception as e:
+            logging.warning("Could not delete existing embeddings for %s: %s", file_path.name, e)
 
         collection.add(
             ids=ids,
