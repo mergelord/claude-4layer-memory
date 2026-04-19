@@ -12,52 +12,16 @@ import json
 
 # Add current directory to path for utils import
 sys.path.insert(0, str(Path(__file__).parent))
+from utils.base_reporter import BaseReporter  # pylint: disable=wrong-import-position
 from utils.colors import Colors  # pylint: disable=wrong-import-position
 
-class PreInstallAudit:
+class PreInstallAudit(BaseReporter):
     def __init__(self):
+        super().__init__()
         self.home = Path.home()
         self.claude_dir = self.home / ".claude"
-        self.issues = []
-        self.warnings = []
-        self.info = []
+        self.issues = self.errors  # Alias for compatibility
         self.stats = {}
-
-    def print_header(self, text):
-        print(f"\n{Colors.BOLD}{Colors.BLUE}{'='*70}{Colors.END}")
-        print(f"{Colors.BOLD}{Colors.BLUE}{text:^70}{Colors.END}")
-        print(f"{Colors.BOLD}{Colors.BLUE}{'='*70}{Colors.END}\n")
-
-    def print_section(self, text):
-        print(f"\n{Colors.BOLD}{Colors.CYAN}## {text}{Colors.END}")
-        print(f"{Colors.CYAN}{'-'*70}{Colors.END}")
-
-    def print_ok(self, text):
-        try:
-            print(f"{Colors.GREEN}✓{Colors.END} {text}")
-        except UnicodeEncodeError:
-            print(f"{Colors.GREEN}[OK]{Colors.END} {text}")
-
-    def print_warn(self, text):
-        try:
-            print(f"{Colors.YELLOW}⚠{Colors.END} {text}")
-        except UnicodeEncodeError:
-            print(f"{Colors.YELLOW}[WARN]{Colors.END} {text}")
-        self.warnings.append(text)
-
-    def print_error(self, text):
-        try:
-            print(f"{Colors.RED}✗{Colors.END} {text}")
-        except UnicodeEncodeError:
-            print(f"{Colors.RED}[ERROR]{Colors.END} {text}")
-        self.issues.append(text)
-
-    def print_info(self, text):
-        try:
-            print(f"{Colors.CYAN}ℹ{Colors.END} {text}")
-        except UnicodeEncodeError:
-            print(f"{Colors.CYAN}[INFO]{Colors.END} {text}")
-        self.info.append(text)
 
     def check_claude_installation(self):
         """Check if Claude Code is installed"""

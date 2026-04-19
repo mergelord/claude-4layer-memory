@@ -16,51 +16,13 @@ from typing import List, Dict, Set, Tuple
 
 # Add parent directory to path for utils import
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from utils.colors import Colors  # pylint: disable=wrong-import-position
+from utils.base_reporter import BaseReporter  # pylint: disable=wrong-import-position
 
-class MemoryLint:
+class MemoryLint(BaseReporter):
     def __init__(self, memory_path: Path, quick_mode: bool = False):
+        super().__init__()
         self.memory_path = memory_path
         self.quick_mode = quick_mode
-        self.errors: List[str] = []
-        self.warnings: List[str] = []
-        self.info: List[str] = []
-
-    def print_header(self, text: str):
-        print(f"\n{Colors.BOLD}{Colors.CYAN}{'='*70}{Colors.END}")
-        print(f"{Colors.BOLD}{Colors.CYAN}{text:^70}{Colors.END}")
-        print(f"{Colors.BOLD}{Colors.CYAN}{'='*70}{Colors.END}\n")
-
-    def print_section(self, text: str):
-        print(f"\n{Colors.BOLD}{Colors.CYAN}## {text}{Colors.END}")
-        print(f"{Colors.CYAN}{'-'*70}{Colors.END}")
-
-    def print_ok(self, text: str):
-        try:
-            print(f"{Colors.GREEN}✓{Colors.END} {text}")
-        except UnicodeEncodeError:
-            print(f"{Colors.GREEN}[OK]{Colors.END} {text}")
-
-    def print_warn(self, text: str):
-        try:
-            print(f"{Colors.YELLOW}⚠{Colors.END} {text}")
-        except UnicodeEncodeError:
-            print(f"{Colors.YELLOW}[WARN]{Colors.END} {text}")
-        self.warnings.append(text)
-
-    def print_error(self, text: str):
-        try:
-            print(f"{Colors.RED}✗{Colors.END} {text}")
-        except UnicodeEncodeError:
-            print(f"{Colors.RED}[ERROR]{Colors.END} {text}")
-        self.errors.append(text)
-
-    def print_info(self, text: str):
-        try:
-            print(f"{Colors.CYAN}ℹ{Colors.END} {text}")
-        except UnicodeEncodeError:
-            print(f"{Colors.CYAN}[INFO]{Colors.END} {text}")
-        self.info.append(text)
 
     def find_all_md_files(self) -> List[Path]:
         """Find all markdown files in memory directory"""
