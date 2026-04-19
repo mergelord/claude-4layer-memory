@@ -43,12 +43,12 @@ L4 SEMANTIC Memory Layer - Cross-Project Search
     python l4_semantic_global.py cleanup
 """
 
-import sys
+import logging
 import os
 import re
-import logging
-from pathlib import Path
+import sys
 from datetime import datetime
+from pathlib import Path
 from typing import List, Dict, Any
 
 # Настройка UTF-8 для Windows консоли
