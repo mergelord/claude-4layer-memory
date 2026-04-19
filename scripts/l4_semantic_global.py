@@ -128,7 +128,7 @@ class GlobalSemanticMemory:
 
         # Модель для эмбеддингов (мультиязычная)
         model_name = os.getenv('L4_MODEL', 'paraphrase-multilingual-MiniLM-L12-v2')
-        print(f"[INFO] Loading embedding model: {model_name}")
+        logging.info("Loading embedding model: %s", model_name)
         self.model = SentenceTransformer(model_name)
 
     def _discover_projects(self) -> list:
@@ -210,7 +210,7 @@ class GlobalSemanticMemory:
 
     def index_global_memory(self) -> bool:
         """Индексирует глобальную память"""
-        print(f"[INFO] Indexing global memory: {self.global_memory}")
+        logging.info("Indexing global memory: %s", self.global_memory)
 
         if not self.global_memory.exists():
             print(f"[ERROR] Global memory not found: {self.global_memory}")
@@ -250,7 +250,7 @@ class GlobalSemanticMemory:
             f"Project memory: {project_name}"
         )
 
-        print(f"[INFO] Indexing project: {project_name}")
+        logging.info("Indexing project: %s", project_name)
 
         indexed_count = 0
         for md_file in memory_path.rglob("*.md"):
@@ -548,6 +548,12 @@ def format_distance(distance) -> str:
 
 
 def main():
+    # Настройка логирования
+    logging.basicConfig(
+        level=logging.INFO,
+        format='[%(levelname)s] %(message)s'
+    )
+
     if len(sys.argv) < 2:
         print(__doc__)
         sys.exit(1)
