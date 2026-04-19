@@ -527,6 +527,19 @@ class GlobalSemanticMemory:
         return [c for c in chunks if c]
 
 
+def format_distance(distance) -> str:
+    """
+    Форматирование distance для отображения.
+
+    Args:
+        distance: Значение distance (float, int или None)
+
+    Returns:
+        Отформатированная строка ("0.123" или "N/A")
+    """
+    return f"{distance:.3f}" if isinstance(distance, (int, float)) else "N/A"
+
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__)
@@ -558,7 +571,7 @@ def main():
         print(f"\n[SEARCH GLOBAL] '{query}'\n")
         for i, result in enumerate(results, 1):
             distance = result.get('distance')
-            distance_str = f"{distance:.3f}" if isinstance(distance, (int, float)) else "N/A"
+            distance_str = format_distance(distance)
             print(f"[{i}] {result['metadata']['file']} (distance: {distance_str})")
             print(f"    {result['text'][:200]}...")
             print()
@@ -574,7 +587,7 @@ def main():
         print(f"\n[SEARCH PROJECT: {project_name}] '{query}'\n")
         for i, result in enumerate(results, 1):
             distance = result.get('distance')
-            distance_str = f"{distance:.3f}" if isinstance(distance, (int, float)) else "N/A"
+            distance_str = format_distance(distance)
             print(f"[{i}] {result['metadata']['file']} (distance: {distance_str})")
             print(f"    {result['text'][:200]}...")
             print()
@@ -590,7 +603,7 @@ def main():
         for i, result in enumerate(results, 1):
             source = result['source']
             distance = result.get('distance')
-            distance_str = f"{distance:.3f}" if isinstance(distance, (int, float)) else "N/A"
+            distance_str = format_distance(distance)
             print(f"[{i}] [{source}] {result['metadata']['file']} "
                   f"(distance: {distance_str})")
             print(f"    {result['text'][:200]}...")
