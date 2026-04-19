@@ -52,10 +52,12 @@ ruff check scripts/*.py audit.py
 
 **Run locally:**
 ```bash
-bandit -r scripts/ audit.py -ll
+bandit -r scripts/ audit.py -l
 ```
 
 **Target:** 0 security issues
+
+**Severity levels:** LOW, MEDIUM, HIGH (all reported with `-l` flag)
 
 **Common checks:**
 - Hardcoded passwords
@@ -110,7 +112,7 @@ pip install pylint mypy ruff bandit radon
 python -m pylint scripts/*.py audit.py --disable=C0114,C0115,C0116,R0913,R0914,R0915,R0903,R0904,W0718,R1702,C0415,R0902,R0912 --max-line-length=110 --good-names=i,j,k,e,f,_,rc
 mypy scripts/*.py audit.py --ignore-missing-imports --no-strict-optional --allow-untyped-defs --allow-incomplete-defs
 ruff check scripts/*.py audit.py
-bandit -r scripts/ audit.py -ll
+bandit -r scripts/ audit.py -l
 radon cc scripts/*.py audit.py -a -nb
 radon mi scripts/*.py audit.py -nb
 ```
@@ -129,7 +131,7 @@ echo "Running code quality checks..."
 
 # Quick checks only (fast)
 ruff check scripts/*.py audit.py
-bandit -r scripts/ audit.py -ll
+bandit -r scripts/ audit.py -l
 
 echo "✅ All checks passed!"
 ```

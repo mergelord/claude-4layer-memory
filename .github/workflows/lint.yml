@@ -79,9 +79,20 @@ jobs:
       run: |
         ruff check scripts/*.py audit.py
 
-  bandit:
-    name: Bandit Security Check
+  security-and-complexity:
+    name: ${{ matrix.tool.name }}
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        tool:
+          - name: Bandit Security Check
+            package: bandit
+            command: bandit -r scripts/ audit.py -l
+          - name: Radon Complexity Check
+            package: radon
+            command: |
+              radon cc scripts/*.py audit.py -a -nb
+              radon mi scripts/*.py audit.py -nb
 
     steps:
     - uses: actions/checkout@v4
@@ -91,33 +102,10 @@ jobs:
       with:
         python-version: '3.11'
 
-    - name: Install Bandit
+    - name: Install ${{ matrix.tool.package }}
       run: |
         python -m pip install --upgrade pip
-        pip install bandit
+        pip install ${{ matrix.tool.package }}
 
-    - name: Security check with Bandit
-      run: |
-        bandit -r scripts/ audit.py -ll
-
-  radon:
-    name: Radon Complexity Check
-    runs-on: ubuntu-latest
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
-
-    - name: Install Radon
-      run: |
-        python -m pip install --upgrade pip
-        pip install radon
-
-    - name: Complexity check with Radon
-      run: |
-        radon cc scripts/*.py audit.py -a -nb
-        radon mi scripts/*.py audit.py -nb
+    - name: Run ${{ matrix.tool.name }}
+      run: ${{ matrix.tool.command }}
