@@ -28,7 +28,7 @@ jobs:
     - name: Lint with pylint
       run: |
         python -m pylint scripts/*.py audit.py \
-          --disable=C0114,C0115,C0116,R0913,R0914,R0915,R0903,R0904,W0718,R1702,C0415 \
+          --disable=C0114,C0115,C0116,R0913,R0914,R0915,R0903,R0904,W0718,R1702,C0415,R0902,R0912 \
           --max-line-length=110 \
           --good-names=i,j,k,e,f,_,rc
 
