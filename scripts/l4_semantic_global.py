@@ -77,6 +77,28 @@ except ImportError:
 class GlobalSemanticMemory:
     """L4 SEMANTIC с поддержкой глобальной памяти и кросс-проектного поиска"""
 
+    @staticmethod
+    def normalize_project_name(name: str) -> str:
+        """
+        Нормализация имён проектов для использования в качестве имён коллекций.
+
+        Заменяет дефисы, пробелы и другие спецсимволы на подчёркивания.
+        ChromaDB требует имена коллекций без спецсимволов.
+
+        Args:
+            name: Исходное имя проекта
+
+        Returns:
+            Нормализованное имя (только буквы, цифры, подчёркивания)
+
+        Example:
+            >>> normalize_project_name("my-project-name")
+            'my_project_name'
+            >>> normalize_project_name("project with spaces")
+            'project_with_spaces'
+        """
+        return re.sub(r'[^a-zA-Z0-9_]', '_', name)
+
     def __init__(self):
         """Инициализация с автоопределением путей"""
         self.home = Path.home()
@@ -215,7 +237,7 @@ class GlobalSemanticMemory:
             print(f"[ERROR] Project memory not found: {memory_path}")
             return False
 
-        project_name = project_path.name.replace("-", "_")
+        project_name = self.normalize_project_name(project_path.name)
         collection = self.get_or_create_collection(
             f"memory_{project_name}",
             f"Project memory: {project_name}"
@@ -274,7 +296,7 @@ class GlobalSemanticMemory:
 
     def search_project(self, project_name: str, query: str, n_results: int = 5) -> List[Dict[str, Any]]:
         """Поиск в конкретном проекте"""
-        collection_name = f"memory_{project_name.replace('-', '_')}"
+        collection_name = f"memory_{self.normalize_project_name(project_name)}"
         try:
             collection = self.client.get_collection(collection_name)
             return self._search_in_collection(collection, query, n_results, project_name)
@@ -341,7 +363,7 @@ class GlobalSemanticMemory:
         # Валидные коллекции
         valid_collections = {"memory_global"}
         for project in self.project_whitelist:
-            valid_collections.add(f"memory_{project.replace('-', '_')}")
+            valid_collections.add(f"memory_{self.normalize_project_name(project)}")
 
         to_delete = []
         to_keep = []
