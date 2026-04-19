@@ -41,6 +41,10 @@ L4 SEMANTIC Memory Layer - Cross-Project Search
 
     # Очистка мусорных коллекций (реальное удаление)
     python l4_semantic_global.py cleanup
+
+Переменные окружения:
+    L4_MODEL - модель для эмбеддингов (по умолчанию: paraphrase-multilingual-MiniLM-L12-v2)
+    Пример: export L4_MODEL=all-MiniLM-L6-v2
 """
 
 import logging
