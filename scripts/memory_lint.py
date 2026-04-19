@@ -17,6 +17,7 @@ from typing import List, Dict, Set, Tuple
 # Add parent directory to path for utils import
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from utils.base_reporter import BaseReporter  # pylint: disable=wrong-import-position
+from utils.colors import Colors  # pylint: disable=wrong-import-position
 
 class MemoryLint(BaseReporter):
     def __init__(self, memory_path: Path, quick_mode: bool = False):
