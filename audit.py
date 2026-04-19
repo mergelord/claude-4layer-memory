@@ -271,7 +271,8 @@ class PreInstallAudit:
 
         try:
             import shutil
-            total, used, free = shutil.disk_usage(self.claude_dir)
+            disk_usage = shutil.disk_usage(self.claude_dir)
+            free = disk_usage.free
 
             free_gb = free / (1024**3)
             self.print_info(f"Free space: {free_gb:.1f} GB")
@@ -355,17 +356,17 @@ class PreInstallAudit:
                 print(f"  {Colors.GREEN}[+]{Colors.END} No existing data to preserve")
 
         print(f"\n{Colors.BOLD}What will be installed:{Colors.END}")
-        print(f"  • L4 SEMANTIC search engine")
-        print(f"  • Auto-discovery system")
-        print(f"  • Cleanup utilities")
-        print(f"  • Cross-platform scripts")
-        print(f"  • Configuration templates")
+        print("  - L4 SEMANTIC search engine")
+        print("  - Auto-discovery system")
+        print("  - Cleanup utilities")
+        print("  - Cross-platform scripts")
+        print("  - Configuration templates")
 
         print(f"\n{Colors.BOLD}What will NOT be changed:{Colors.END}")
-        print(f"  • Existing memory files")
-        print(f"  • Project directories")
-        print(f"  • GLOBAL_PROJECTS.md (if exists)")
-        print(f"  • Archive data")
+        print("  - Existing memory files")
+        print("  - Project directories")
+        print("  - GLOBAL_PROJECTS.md (if exists)")
+        print("  - Archive data")
 
     def save_report(self):
         """Save audit report to file"""
@@ -391,11 +392,12 @@ class PreInstallAudit:
         """Run complete audit"""
         self.print_header("Claude 4-Layer Memory System")
         print(f"{Colors.BOLD}Pre-Installation Audit{Colors.END}")
-        print(f"Analyzing your current Claude Code setup...\n")
+        print("Analyzing your current Claude Code setup...\n")
 
         # Run all checks
         if not self.check_claude_installation():
-            print(f"\n{Colors.RED}{Colors.BOLD}Cannot proceed: Claude Code not installed{Colors.END}")
+            msg = f"\n{Colors.RED}{Colors.BOLD}Cannot proceed: Claude Code not installed{Colors.END}"
+            print(msg)
             return False
 
         self.analyze_memory_structure()
@@ -414,12 +416,12 @@ class PreInstallAudit:
         print(f"\n{Colors.BOLD}{'='*70}{Colors.END}")
         if self.issues:
             print(f"{Colors.RED}{Colors.BOLD}Installation NOT recommended{Colors.END}")
-            print(f"Please resolve critical issues first.")
+            print("Please resolve critical issues first.")
             return False
-        else:
-            print(f"{Colors.GREEN}{Colors.BOLD}Installation READY{Colors.END}")
-            print(f"You can proceed with installation.")
-            return True
+
+        print(f"{Colors.GREEN}{Colors.BOLD}Installation READY{Colors.END}")
+        print("You can proceed with installation.")
+        return True
 
 def main():
     import argparse
@@ -476,19 +478,19 @@ recommendations before installing the 4-Layer Memory System.
 
     print(f"\n{Colors.BOLD}Next Steps:{Colors.END}")
     if success:
-        print(f"  1. Review the audit report above")
-        print(f"  2. Run installation script:")
+        print("  1. Review the audit report above")
+        print("  2. Run installation script:")
         print(f"     {Colors.CYAN}Windows:{Colors.END} install.bat")
         print(f"     {Colors.CYAN}Linux/Mac:{Colors.END} ./install.sh")
     else:
-        print(f"  1. Resolve critical issues listed above")
-        print(f"  2. Run this audit again")
-        print(f"  3. Proceed with installation when ready")
+        print("  1. Resolve critical issues listed above")
+        print("  2. Run this audit again")
+        print("  3. Proceed with installation when ready")
 
     print(f"\n{Colors.BOLD}Documentation:{Colors.END}")
-    print(f"  • Installation Guide: docs/INSTALL.md")
-    print(f"  • Usage Guide: docs/guides/USAGE.md")
-    print(f"  • Configuration: docs/guides/CONFIGURATION.md")
+    print("  - Installation Guide: docs/INSTALL.md")
+    print("  - Usage Guide: docs/guides/USAGE.md")
+    print("  - Configuration: docs/guides/CONFIGURATION.md")
 
     print(f"\n{Colors.CYAN}{'='*70}{Colors.END}")
     print(f"{Colors.BOLD}Audit complete!{Colors.END}\n")

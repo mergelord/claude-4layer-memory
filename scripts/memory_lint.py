@@ -13,7 +13,6 @@ from pathlib import Path
 import re
 from datetime import datetime
 from typing import List, Dict, Set, Tuple
-import json
 
 class Colors:
     """ANSI color codes"""
@@ -40,9 +39,9 @@ class MemoryLint:
     def __init__(self, memory_path: Path, quick_mode: bool = False):
         self.memory_path = memory_path
         self.quick_mode = quick_mode
-        self.errors = []
-        self.warnings = []
-        self.info = []
+        self.errors: List[str] = []
+        self.warnings: List[str] = []
+        self.info: List[str] = []
 
     def print_header(self, text: str):
         print(f"\n{Colors.BOLD}{Colors.CYAN}{'='*70}{Colors.END}")
@@ -100,7 +99,7 @@ class MemoryLint:
         """Check for links to non-existent files"""
         self.print_section("Layer 1: Ghost Links Detection")
 
-        ghost_links = {}
+        ghost_links: Dict[Path, List[str]] = {}
         md_files = self.find_all_md_files()
 
         for md_file in md_files:
@@ -116,8 +115,8 @@ class MemoryLint:
                         if md_file not in ghost_links:
                             ghost_links[md_file] = []
                         ghost_links[md_file].append(link)
-            except Exception as e:
-                self.print_warn(f"Could not read {md_file.name}: {e}")
+            except Exception as exc:
+                self.print_warn(f"Could not read {md_file.name}: {exc}")
 
         if ghost_links:
             for file, links in ghost_links.items():
@@ -147,8 +146,8 @@ class MemoryLint:
                 for link in links:
                     target = (md_file.parent / link).resolve()
                     all_links.add(target)
-            except Exception as e:
-                continue
+            except Exception as exc:
+                self.print_warn(f"Error reading {md_file.name}: {exc}")
 
         # Find orphans (exclude index files)
         orphans = []
@@ -172,7 +171,7 @@ class MemoryLint:
         self.print_section("Layer 1: Duplicate Detection")
 
         md_files = self.find_all_md_files()
-        titles = {}
+        titles: Dict[str, List[Path]] = {}
 
         for md_file in md_files:
             try:
@@ -184,8 +183,8 @@ class MemoryLint:
                     if title not in titles:
                         titles[title] = []
                     titles[title].append(md_file)
-            except Exception as e:
-                continue
+            except Exception as exc:
+                self.print_warn(f"Error reading {md_file.name}: {exc}")
 
         duplicates = {title: files for title, files in titles.items() if len(files) > 1}
 
@@ -335,8 +334,8 @@ class MemoryLint:
                 if any(kw in content for kw in publication_keywords):
                     status['has_publication_info'] = True
 
-            except Exception as e:
-                continue
+            except Exception as exc:
+                self.print_warn(f"Error reading {md_file.name}: {exc}")
 
         # Оценка результатов
         if status['has_project_status'] and status['has_publication_info']:
@@ -423,8 +422,8 @@ class MemoryLint:
                             'file': md_file,
                             'text': para[:500]  # Limit length
                         })
-            except Exception as e:
-                continue
+            except Exception as exc:
+                self.print_warn(f"Error reading {md_file.name}: {exc}")
 
         if len(statements) < 2:
             self.print_info("Not enough content for contradiction detection")
@@ -433,7 +432,7 @@ class MemoryLint:
         self.print_info(f"Analyzing {len(statements)} statements for contradictions...")
 
         # Build prompt for LLM
-        prompt = self._build_contradiction_prompt(statements)
+        self._build_contradiction_prompt(statements)
 
         # For now, just show what would be checked
         self.print_info(f"Would analyze {len(statements)} statements")
@@ -443,6 +442,7 @@ class MemoryLint:
 
     def _build_contradiction_prompt(self, statements: List[Dict]) -> str:
         """Build prompt for contradiction detection"""
+        _ = statements  # Used in prompt building
         prompt = "Analyze these statements from memory files for contradictions:\n\n"
 
         for i, stmt in enumerate(statements[:20], 1):  # Limit to 20 for context
@@ -503,8 +503,8 @@ Format as JSON:
                             })
                     except ValueError:
                         continue
-            except Exception as e:
-                continue
+            except Exception as exc:
+                self.print_warn(f"Error reading {md_file.name}: {exc}")
 
         if dated_claims:
             self.print_info(f"Found {len(dated_claims)} claims older than 30 days")
@@ -545,8 +545,8 @@ Format as JSON:
 
                     for term in [base_term] + variants:
                         counts[term] += content.count(term.lower())
-                except Exception as e:
-                    continue
+                except Exception as exc:
+                    self.print_warn(f"Error reading {md_file.name}: {exc}")
 
             # Check if multiple variants used
             used_variants = {k: v for k, v in counts.items() if v > 0}
@@ -599,8 +599,8 @@ Format as JSON:
                                     'context': line.strip()[:100]
                                 })
                                 break
-            except Exception as e:
-                continue
+            except Exception as exc:
+                self.print_warn(f"Error reading {md_file.name}: {exc}")
 
         if incomplete:
             self.print_warn(f"Found {len(incomplete)} incomplete sections")
@@ -673,13 +673,14 @@ def main():
     lint = MemoryLint(memory_path, quick_mode=args.quick)
 
     if args.layer in ['1', 'all']:
-        success = lint.run_layer1()
+        lint.run_layer1()
 
     if args.layer in ['2', 'all'] and not args.quick:
         lint.run_layer2()
 
     # Save report
     if args.report:
+        import json  # pylint: disable=import-outside-toplevel
         report = lint.generate_report()
         with open(args.report, 'w', encoding='utf-8') as f:
             json.dump(report, f, indent=2)

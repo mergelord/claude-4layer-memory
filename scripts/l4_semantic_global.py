@@ -45,10 +45,10 @@ L4 SEMANTIC Memory Layer - Cross-Project Search
 
 import sys
 import os
+import re
 from pathlib import Path
 from datetime import datetime
-from typing import List, Dict, Any, Tuple
-import json
+from typing import List, Dict, Any
 
 # Настройка UTF-8 для Windows консоли
 if sys.platform == 'win32':
@@ -111,8 +111,8 @@ class GlobalSemanticMemory:
             try:
                 content = self.global_projects_file.read_text(encoding='utf-8')
                 # Ищем строки с "**Память:** `~/.claude/projects/XXX/memory/`"
-                import re
-                pattern = r'\*\*Память:\*\*\s+`~/.claude/projects/([^/]+)/memory/`'
+                pattern = (r'\*\*Память:\*\*\s+'
+                          r'`~/.claude/projects/([^/]+)/memory/`')
                 matches = re.findall(pattern, content)
                 for match in matches:
                     projects.add(match)
@@ -153,7 +153,9 @@ class GlobalSemanticMemory:
                     # Требуем минимум 3 .md файла (handoff, decisions, MEMORY)
                     if len(md_files) >= 3:
                         projects.add(project_dir.name)
-                        print(f"[AUTO] Found project by memory/ presence: {project_dir.name} ({len(md_files)} files)")
+                        msg = (f"[AUTO] Found project by memory/ presence: "
+                               f"{project_dir.name} ({len(md_files)} files)")
+                        print(msg)
                     else:
                         print(f"[AUTO] Skipping {project_dir.name}: only {len(md_files)} .md files")
 
@@ -298,7 +300,7 @@ class GlobalSemanticMemory:
         """Статистика всех коллекций"""
         collections = self.client.list_collections()
 
-        stats = {
+        stats: Dict[str, Any] = {
             'db_path': str(self.db_path),
             'total_collections': len(collections),
             'collections': {}
@@ -306,10 +308,11 @@ class GlobalSemanticMemory:
 
         for collection_info in collections:
             collection = self.client.get_collection(collection_info.name)
-            stats['collections'][collection_info.name] = {
+            collection_stats: Dict[str, Any] = {
                 'chunks': collection.count(),
-                'description': collection_info.metadata.get('description', '')
+                'description': collection_info.metadata.get('description', '') if collection_info.metadata else ''
             }
+            stats['collections'][collection_info.name] = collection_stats
 
         return stats
 
@@ -334,14 +337,16 @@ class GlobalSemanticMemory:
 
         for collection_info in collections:
             if collection_info.name in valid_collections:
+                collection = self.client.get_collection(collection_info.name)
                 to_keep.append({
                     'name': collection_info.name,
-                    'chunks': self.client.get_collection(collection_info.name).count()
+                    'chunks': collection.count()
                 })
             else:
+                collection = self.client.get_collection(collection_info.name)
                 to_delete.append({
                     'name': collection_info.name,
-                    'chunks': self.client.get_collection(collection_info.name).count(),
+                    'chunks': collection.count(),
                     'reason': 'not in whitelist'
                 })
 
@@ -353,13 +358,15 @@ class GlobalSemanticMemory:
         }
 
         if not dry_run:
+            deleted_list: List[str] = []
             for item in to_delete:
                 try:
                     self.client.delete_collection(item['name'])
-                    result['deleted'].append(item['name'])
+                    deleted_list.append(item['name'])
                     print(f"[DELETED] {item['name']} ({item['chunks']} chunks)")
                 except Exception as e:
                     print(f"[ERROR] Failed to delete {item['name']}: {e}")
+            result['deleted'] = deleted_list
         else:
             print("[DRY RUN] Collections that would be deleted:")
             for item in to_delete:
@@ -397,10 +404,10 @@ class GlobalSemanticMemory:
         ]
 
         # Удаляем старые записи для этого файла
+        existing_ids = [f"{source}_{file_path.stem}_{i}" for i in range(100)]
         try:
-            existing_ids = [f"{source}_{file_path.stem}_{i}" for i in range(100)]
             collection.delete(ids=existing_ids)
-        except:
+        except Exception:  # pylint: disable=broad-except
             pass
 
         collection.add(
@@ -410,7 +417,9 @@ class GlobalSemanticMemory:
             metadatas=metadatas
         )
 
-    def _search_in_collection(self, collection, query: str, n_results: int, source: str) -> List[Dict[str, Any]]:
+    def _search_in_collection(
+        self, collection, query: str, n_results: int, source: str
+    ) -> List[Dict[str, Any]]:
         """Поиск в конкретной коллекции"""
         query_embedding = self.model.encode([query]).tolist()
 
@@ -451,7 +460,7 @@ class GlobalSemanticMemory:
             content = parts[2] if len(parts) >= 3 else content
 
         sections = []
-        current_section = []
+        current_section: List[str] = []
 
         for line in content.split('\n'):
             if line.startswith('##') and current_section:
@@ -534,16 +543,18 @@ def main():
         print(f"\n[SEARCH ALL] '{query}'\n")
         for i, result in enumerate(results, 1):
             source = result['source']
-            print(f"[{i}] [{source}] {result['metadata']['file']} (distance: {result['distance']:.3f})")
+            distance = result['distance']
+            print(f"[{i}] [{source}] {result['metadata']['file']} "
+                  f"(distance: {distance:.3f})")
             print(f"    {result['text'][:200]}...")
             print()
 
     elif command == 'stats':
         stats = memory.stats()
-        print(f"\n[STATS] L4 SEMANTIC Global Statistics:")
+        print("\n[STATS] L4 SEMANTIC Global Statistics:")
         print(f"   DB path: {stats['db_path']}")
         print(f"   Total collections: {stats['total_collections']}")
-        print(f"\n   Collections:")
+        print("\n   Collections:")
         for name, info in stats['collections'].items():
             print(f"      {name}: {info['chunks']} chunks")
             print(f"         {info['description']}")
@@ -552,7 +563,7 @@ def main():
         dry_run = '--dry-run' in sys.argv or '-n' in sys.argv
         result = memory.cleanup_collections(dry_run=dry_run)
 
-        print(f"\n[CLEANUP] L4 SEMANTIC Collections")
+        print("\n[CLEANUP] L4 SEMANTIC Collections")
         print(f"   Mode: {'DRY RUN' if dry_run else 'LIVE'}")
         print(f"\n   Keep ({len(result['to_keep'])}):")
         for item in result['to_keep']:
@@ -561,10 +572,11 @@ def main():
         print(f"\n   Delete ({len(result['to_delete'])}):")
         for item in result['to_delete']:
             status = '✗' if dry_run else '🗑'
-            print(f"      {status} {item['name']} ({item['chunks']} chunks) - {item['reason']}")
+            reason = item['reason']
+            print(f"      {status} {item['name']} ({item['chunks']} chunks) - {reason}")
 
         if dry_run:
-            print(f"\n   Run without --dry-run to actually delete")
+            print("\n   Run without --dry-run to actually delete")
         else:
             print(f"\n   Deleted: {len(result['deleted'])} collections")
 
