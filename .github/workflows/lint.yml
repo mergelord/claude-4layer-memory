@@ -78,3 +78,46 @@ jobs:
     - name: Lint with Ruff
       run: |
         ruff check scripts/*.py audit.py
+
+  bandit:
+    name: Bandit Security Check
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install Bandit
+      run: |
+        python -m pip install --upgrade pip
+        pip install bandit
+
+    - name: Security check with Bandit
+      run: |
+        bandit -r scripts/ audit.py -ll
+
+  radon:
+    name: Radon Complexity Check
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install Radon
+      run: |
+        python -m pip install --upgrade pip
+        pip install radon
+
+    - name: Complexity check with Radon
+      run: |
+        radon cc scripts/*.py audit.py -a -nb
+        radon mi scripts/*.py audit.py -nb

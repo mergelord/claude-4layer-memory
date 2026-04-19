@@ -18,7 +18,7 @@
 - **Smart Filtering** - Protects against indexing system directories
 - **Health Monitoring** - Automatic rotation, corruption detection
 - **Cross-Platform** - Windows, Linux, macOS support
-- **Code Quality** - Automated CI/CD with Pylint, MyPy, Ruff, Bandit, and Radon
+- **Code Quality** - Automated CI/CD with Pylint, MyPy, Ruff, Bandit, and Radon ([See Code Quality Guide](docs/CODE_QUALITY.md))
 
 ---
 
