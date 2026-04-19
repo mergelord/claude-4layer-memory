@@ -83,6 +83,7 @@ class GlobalSemanticMemory:
         Нормализация имён проектов для использования в качестве имён коллекций.
 
         Заменяет дефисы, пробелы и другие спецсимволы на подчёркивания.
+        Схлопывает множественные подчёркивания в одно.
         ChromaDB требует имена коллекций без спецсимволов.
 
         Args:
@@ -96,8 +97,14 @@ class GlobalSemanticMemory:
             'my_project_name'
             >>> normalize_project_name("project with spaces")
             'project_with_spaces'
+            >>> normalize_project_name("my--weird__project")
+            'my_weird_project'
         """
-        return re.sub(r'[^a-zA-Z0-9_]', '_', name)
+        # Заменяем спецсимволы на подчёркивания
+        normalized = re.sub(r'[^a-zA-Z0-9_]', '_', name)
+        # Схлопываем множественные подчёркивания в одно
+        normalized = re.sub(r'_+', '_', normalized)
+        return normalized
 
     def __init__(self):
         """Инициализация с автоопределением путей"""
