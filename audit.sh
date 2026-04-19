@@ -5,9 +5,7 @@ echo ""
 echo "Running pre-installation audit..."
 echo ""
 
-python3 audit.py
-
-if [ $? -ne 0 ]; then
+if ! python3 audit.py; then
     echo ""
     echo "[ERROR] Audit found critical issues"
     echo "Please resolve them before installing"
