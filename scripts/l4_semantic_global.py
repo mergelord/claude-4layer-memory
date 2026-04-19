@@ -54,6 +54,7 @@ from typing import List, Dict, Any
 # Настройка UTF-8 для Windows консоли
 # NOTE: Необходимо для корректного отображения русского текста в Windows cmd/PowerShell
 # Python 3.7+ поддерживает UTF-8, но Windows консоль требует явной настройки
+# Альтернатива: установить environment variable PYTHONIOENCODING=utf-8
 if sys.platform == 'win32':
     import codecs
     sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
