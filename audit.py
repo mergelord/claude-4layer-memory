@@ -423,6 +423,32 @@ class PreInstallAudit:
             return True
 
 def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description='Claude 4-Layer Memory System - Pre-Installation Audit',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+This tool analyzes your current Claude Code setup and provides
+recommendations before installing the 4-Layer Memory System.
+
+What this tool checks:
+  • Claude Code installation
+  • Existing memory structure
+  • Project directories
+  • Semantic database
+  • Python dependencies
+  • Disk space
+
+What this tool does NOT do:
+  • Modify any files
+  • Install anything
+  • Delete data
+"""
+    )
+
+    args = parser.parse_args()
+
     print(f"""
 {Colors.BOLD}Claude 4-Layer Memory System - Pre-Installation Audit{Colors.END}
 {Colors.CYAN}{'='*70}{Colors.END}
