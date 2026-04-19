@@ -308,9 +308,12 @@ class GlobalSemanticMemory:
 
         for collection_info in collections:
             collection = self.client.get_collection(collection_info.name)
+            desc = ''
+            if collection_info.metadata:
+                desc = collection_info.metadata.get('description', '')
             collection_stats: Dict[str, Any] = {
                 'chunks': collection.count(),
-                'description': collection_info.metadata.get('description', '') if collection_info.metadata else ''
+                'description': desc
             }
             stats['collections'][collection_info.name] = collection_stats
 

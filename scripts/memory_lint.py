@@ -119,9 +119,9 @@ class MemoryLint:
                 self.print_warn(f"Could not read {md_file.name}: {exc}")
 
         if ghost_links:
-            for file, links in ghost_links.items():
-                self.print_error(f"{file.name}: {len(links)} ghost link(s)")
-                for link in links:
+            for file, links_list in ghost_links.items():
+                self.print_error(f"{file.name}: {len(links_list)} ghost link(s)")
+                for link in links_list:
                     try:
                         print(f"    → {link}")
                     except UnicodeEncodeError:
@@ -512,7 +512,12 @@ Format as JSON:
 
             # Show sample
             for claim in dated_claims[:3]:
-                self.print_warn(f"{claim['file'].name}: {claim['date']} ({claim['age_days']}d old)")
+                claim_file = claim['file']
+                if isinstance(claim_file, Path):
+                    file_name = claim_file.name
+                else:
+                    file_name = str(claim_file)
+                self.print_warn(f"{file_name}: {claim['date']} ({claim['age_days']}d old)")
         else:
             self.print_ok("No old claims found")
 
@@ -559,8 +564,10 @@ Format as JSON:
         if inconsistencies:
             for incon in inconsistencies:
                 self.print_warn(f"Inconsistent terminology: {incon['base_term']}")
-                for variant, count in incon['variants'].items():
-                    print(f"    - '{variant}' ({count} occurrences)")
+                variants_dict = incon['variants']
+                if isinstance(variants_dict, dict):
+                    for variant, count in variants_dict.items():
+                        print(f"    - '{variant}' ({count} occurrences)")
                 print(f"    Suggest: standardize to '{incon['base_term']}'")
         else:
             self.print_ok("Terminology is consistent")
@@ -605,7 +612,12 @@ Format as JSON:
         if incomplete:
             self.print_warn(f"Found {len(incomplete)} incomplete sections")
             for item in incomplete[:5]:  # Show first 5
-                print(f"    {item['file'].name}:{item['line']} - {item['marker']}")
+                item_file = item['file']
+                if isinstance(item_file, Path):
+                    file_name = item_file.name
+                else:
+                    file_name = str(item_file)
+                print(f"    {file_name}:{item['line']} - {item['marker']}")
         else:
             self.print_ok("No obvious incomplete sections found")
 
