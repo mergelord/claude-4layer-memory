@@ -10,12 +10,11 @@ Usage:
     python cleanup_system_artifacts.py [--dry-run]
 """
 
-import sys
+import argparse
 import shutil
+import sys
 from pathlib import Path
 from typing import List, Set
-import argparse
-
 
 # Blacklist системных папок (encoded paths)
 SYSTEM_PATH_PATTERNS: Set[str] = {
@@ -47,7 +46,7 @@ def is_system_artifact(project_name: str) -> bool:
 
 def find_system_artifacts(projects_dir: Path) -> List[Path]:
     """Находит все артефакты системных папок."""
-    artifacts = []
+    artifacts: List[Path] = []
 
     if not projects_dir.exists():
         return artifacts

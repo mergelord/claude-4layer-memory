@@ -5,15 +5,17 @@ Claude 4-Layer Memory System - Pre-Installation Audit
 Analyzes current Claude Code setup and provides recommendations
 """
 
-import sys
-from pathlib import Path
-from datetime import datetime
 import json
+import sys
+from datetime import datetime
+from pathlib import Path
 
 # Add current directory to path for utils import
 sys.path.insert(0, str(Path(__file__).parent))
-from utils.base_reporter import BaseReporter  # pylint: disable=wrong-import-position
+from utils.base_reporter import \
+    BaseReporter  # pylint: disable=wrong-import-position
 from utils.colors import Colors  # pylint: disable=wrong-import-position
+
 
 class PreInstallAudit(BaseReporter):
     def __init__(self):
