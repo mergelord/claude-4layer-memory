@@ -46,7 +46,7 @@ def is_system_artifact(project_name: str) -> bool:
 
 def find_system_artifacts(projects_dir: Path) -> List[Path]:
     """Находит все артефакты системных папок."""
-    artifacts = []
+    artifacts: List[Path] = []
 
     if not projects_dir.exists():
         return artifacts
