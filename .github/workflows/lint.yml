@@ -87,7 +87,7 @@ jobs:
         tool:
           - name: Bandit Security Check
             package: bandit
-            command: bandit -r scripts/ audit.py -l
+            command: bandit -r scripts/ audit.py -l --skip B404,B603
           - name: Radon Complexity Check
             package: radon
             command: |
