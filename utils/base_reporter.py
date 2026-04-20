@@ -1,5 +1,6 @@
 """Base class for reporting with colored output"""
 from typing import List
+
 from .colors import Colors
 
 

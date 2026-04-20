@@ -8,16 +8,18 @@ Layer 1: Deterministic checks (ghost links, orphans, duplicates)
 Layer 2: LLM-based semantic checks (contradictions, outdated claims)
 """
 
-import sys
-from pathlib import Path
 import re
+import sys
 from datetime import datetime
-from typing import List, Dict, Set, Tuple
+from pathlib import Path
+from typing import Dict, List, Set, Tuple
 
 # Add parent directory to path for utils import
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from utils.base_reporter import BaseReporter  # pylint: disable=wrong-import-position
+from utils.base_reporter import \
+    BaseReporter  # pylint: disable=wrong-import-position
 from utils.colors import Colors  # pylint: disable=wrong-import-position
+
 
 class MemoryLint(BaseReporter):
     def __init__(self, memory_path: Path, quick_mode: bool = False):

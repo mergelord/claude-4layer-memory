@@ -79,7 +79,7 @@ class L4FTS5Search:
             logging.info("FTS5 table initialized")
             return True
         except Exception as e:
-            logging.error(f"FTS5 initialization failed: {e}")
+            logging.error("FTS5 initialization failed: %s", e)
             return False
         finally:
             conn.close()
@@ -114,7 +114,7 @@ class L4FTS5Search:
                         )
                         indexed_count += 1
                     except Exception as e:
-                        logging.warning(f"Failed to index {md_file.name}: {e}")
+                        logging.warning("Failed to index %s: %s", md_file.name, e)
 
             # Индексация проектов
             if self.projects_base.exists():
@@ -140,14 +140,14 @@ class L4FTS5Search:
                             )
                             indexed_count += 1
                         except Exception as e:
-                            logging.warning(f"Failed to index {md_file.name}: {e}")
+                            logging.warning("Failed to index %s: %s", md_file.name, e)
 
             conn.commit()
-            logging.info(f"Reindexed {indexed_count} files")
+            logging.info("Reindexed %s files", indexed_count)
             return indexed_count
 
         except Exception as e:
-            logging.error(f"Reindex failed: {e}")
+            logging.error("Reindex failed: %s", e)
             return 0
         finally:
             conn.close()
@@ -180,11 +180,11 @@ class L4FTS5Search:
                 (rel_path, source, content)
             )
             conn.commit()
-            logging.info(f"Indexed: {rel_path} ({source})")
+            logging.info("Indexed: %s (%s)", rel_path, source)
             return True
 
         except Exception as e:
-            logging.error(f"Failed to index {file_path}: {e}")
+            logging.error("Failed to index %s: %s", file_path, e)
             return False
         finally:
             conn.close()
@@ -230,7 +230,7 @@ class L4FTS5Search:
             ]
 
         except Exception as e:
-            logging.error(f"Search failed: {e}")
+            logging.error("Search failed: %s", e)
         finally:
             conn.close()
 
@@ -258,6 +258,101 @@ class L4FTS5Search:
             conn.close()
 
 
+
+def cmd_init(fts: L4FTS5Search):
+    """Обработчик команды init"""
+    if fts.init_fts():
+        print("[OK] FTS5 table initialized")
+    else:
+        print("[ERROR] Initialization failed")
+        sys.exit(1)
+
+
+def cmd_reindex(fts: L4FTS5Search):
+    """Обработчик команды reindex"""
+    count = fts.reindex_all()
+    print(f"[OK] Reindexed {count} files")
+
+
+def cmd_search(fts: L4FTS5Search, query: str):
+    """Обработчик команды search"""
+    results = fts.search(query)
+    print(f"\n[SEARCH] FTS5 Search: '{query}'")
+    print(f"Found {len(results)} results\n")
+
+    for i, result in enumerate(results, 1):
+        print(f"[{i}] {result.path} (rank: {result.rank:.3f})")
+        print(f"    {result.snippet}")
+        print()
+
+
+def cmd_stats(fts: L4FTS5Search):
+    """Обработчик команды stats"""
+    stats = fts.stats()
+    print("\n[STATS] FTS5 Statistics:")
+    print(f"   Total documents: {stats['total_documents']}")
+    print(f"   DB size: {stats['db_size_kb']} KB")
+    print(f"   DB path: {stats['db_path']}")
+    print("\n   Sources:")
+    for source, count in stats['sources'].items():
+        print(f"      {source}: {count} documents")
+
+
+def cmd_hybrid(fts: L4FTS5Search, query: str):
+    """Обработчик команды hybrid"""
+    import subprocess
+
+    fts_results = fts.search(query, limit=5)
+
+    try:
+        semantic_script = Path(__file__).parent / "l4_semantic_global.py"
+
+        if semantic_script.exists():
+            result = subprocess.run(
+                [sys.executable, str(semantic_script), "search-all", query],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False
+            )
+
+            print(f"\n[HYBRID SEARCH] '{query}'")
+            print("=" * 70)
+
+            print("\n[FTS5 Results - Keyword Match]")
+            print("-" * 70)
+            if fts_results:
+                for i, res in enumerate(fts_results, 1):
+                    print(f"[{i}] {res.path} (rank: {res.rank:.3f})")
+                    print(f"    {res.snippet}")
+                    print()
+            else:
+                print("No FTS5 results found\n")
+
+            print("\n[Semantic Results - Meaning Match]")
+            print("-" * 70)
+            if result.returncode == 0:
+                print(result.stdout)
+            else:
+                print("Semantic search failed or not available\n")
+        else:
+            print("[WARN] l4_semantic_global.py not found")
+            print("       Falling back to FTS5 only")
+
+            for i, res in enumerate(fts_results, 1):
+                print(f"[{i}] {res.path} (rank: {res.rank:.3f})")
+                print(f"    {res.snippet}")
+                print()
+
+    except Exception as e:
+        logging.error("Hybrid search failed: %s", e)
+        print("[ERROR] Hybrid search failed, showing FTS5 results only:")
+        for i, res in enumerate(fts_results, 1):
+            print(f"[{i}] {res.path} (rank: {res.rank:.3f})")
+            print(f"    {res.snippet}")
+            print()
+
+
 def main():
     """CLI интерфейс"""
     if len(sys.argv) < 2:
@@ -268,100 +363,27 @@ def main():
     fts = L4FTS5Search()
 
     if command == 'init':
-        if fts.init_fts():
-            print("[OK] FTS5 table initialized")
-        else:
-            print("[ERROR] Initialization failed")
-            sys.exit(1)
+        cmd_init(fts)
 
     elif command == 'reindex':
-        count = fts.reindex_all()
-        print(f"[OK] Reindexed {count} files")
+        cmd_reindex(fts)
 
     elif command == 'search':
         if len(sys.argv) < 3:
             print("Usage: l4_fts5_search.py search <query>")
             sys.exit(1)
-
         query = ' '.join(sys.argv[2:])
-        results = fts.search(query)
-
-        print(f"\n[SEARCH] FTS5 Search: '{query}'")
-        print(f"Found {len(results)} results\n")
-
-        for i, result in enumerate(results, 1):
-            print(f"[{i}] {result.path} (rank: {result.rank:.3f})")
-            print(f"    {result.snippet}")
-            print()
+        cmd_search(fts, query)
 
     elif command == 'stats':
-        stats = fts.stats()
-        print("\n[STATS] FTS5 Statistics:")
-        print(f"   Total documents: {stats['total_documents']}")
-        print(f"   DB size: {stats['db_size_kb']} KB")
-        print(f"   DB path: {stats['db_path']}")
-        print("\n   Sources:")
-        for source, count in stats['sources'].items():
-            print(f"      {source}: {count} documents")
+        cmd_stats(fts)
 
     elif command == 'hybrid':
         if len(sys.argv) < 3:
             print("Usage: l4_fts5_search.py hybrid <query>")
             sys.exit(1)
-
         query = ' '.join(sys.argv[2:])
-
-        # FTS5 поиск
-        fts_results = fts.search(query, limit=5)
-
-        # Semantic поиск через l4_semantic_global.py
-        try:
-            import subprocess
-            semantic_script = Path(__file__).parent / "l4_semantic_global.py"
-
-            if semantic_script.exists():
-                result = subprocess.run(
-                    [sys.executable, str(semantic_script), "search-all", query],
-                    capture_output=True,
-                    text=True,
-                    timeout=30
-                )
-
-                print(f"\n[HYBRID SEARCH] '{query}'")
-                print("=" * 70)
-
-                print("\n[FTS5 Results - Keyword Match]")
-                print("-" * 70)
-                if fts_results:
-                    for i, result in enumerate(fts_results, 1):
-                        print(f"[{i}] {result.path} (rank: {result.rank:.3f})")
-                        print(f"    {result.snippet}")
-                        print()
-                else:
-                    print("No FTS5 results found\n")
-
-                print("\n[Semantic Results - Meaning Match]")
-                print("-" * 70)
-                if result.returncode == 0:
-                    print(result.stdout)
-                else:
-                    print("Semantic search failed or not available\n")
-            else:
-                print("[WARN] l4_semantic_global.py not found")
-                print("       Falling back to FTS5 only")
-
-                for i, result in enumerate(fts_results, 1):
-                    print(f"[{i}] {result.path} (rank: {result.rank:.3f})")
-                    print(f"    {result.snippet}")
-                    print()
-
-        except Exception as e:
-            logging.error(f"Hybrid search failed: {e}")
-            print("[ERROR] Hybrid search failed, showing FTS5 results only:")
-            for i, result in enumerate(fts_results, 1):
-                print(f"[{i}] {result.path} (rank: {result.rank:.3f})")
-                print(f"    {result.snippet}")
-                print()
+        cmd_hybrid(fts, query)
 
     else:
         print(f"Unknown command: {command}")

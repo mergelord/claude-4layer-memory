@@ -1,11 +1,12 @@
 """
 Tests for memory_lint.py
 """
-import pytest
-from pathlib import Path
+import shutil
 import sys
 import tempfile
-import shutil
+from pathlib import Path
+
+import pytest
 
 # Add scripts to path
 sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))

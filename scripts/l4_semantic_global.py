@@ -53,7 +53,7 @@ import re
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import Any, Dict, List
 
 # Настройка UTF-8 для Windows консоли
 # NOTE: Необходимо для корректного отображения русского текста в Windows cmd/PowerShell
