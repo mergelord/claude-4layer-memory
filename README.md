@@ -289,6 +289,7 @@ See [examples/](examples/) directory for more.
 - **[Usage Guide](docs/guides/USAGE.md)** - Commands and workflows
 - **[Configuration Guide](docs/guides/CONFIGURATION.md)** - Customization options
 - **[Memory Lint](docs/MEMORY_LINT.md)** - Memory validation and health checks
+- **[System Artifacts](docs/SYSTEM_ARTIFACTS.md)** - Understanding C--WINDOWS-system32 and cleanup
 - **[API Reference](docs/api/API.md)** - Python API documentation
 - **[FAQ](docs/FAQ.md)** - Frequently asked questions
 - **[Troubleshooting](docs/TROUBLESHOOTING.md)** - Common issues and solutions
