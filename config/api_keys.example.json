@@ -1,0 +1,18 @@
+{
+  "openai": {
+    "api_key": "sk-YOUR_OPENAI_API_KEY",
+    "organization": "org-YOUR_ORG_ID"
+  },
+  "anthropic": {
+    "api_key": "sk-ant-YOUR_ANTHROPIC_API_KEY"
+  },
+  "github": {
+    "token": "ghp_YOUR_GITHUB_TOKEN",
+    "username": "YOUR_USERNAME"
+  },
+  "chromadb_cloud": {
+    "api_key": "YOUR_CHROMADB_CLOUD_KEY",
+    "tenant": "YOUR_TENANT",
+    "database": "YOUR_DATABASE"
+  }
+}

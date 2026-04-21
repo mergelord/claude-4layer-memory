@@ -1,0 +1,22 @@
+{
+  "user": {
+    "name": "Your Name",
+    "email": "your.email@example.com",
+    "timezone": "UTC"
+  },
+  "preferences": {
+    "language": "en",
+    "memory_retention_days": 14,
+    "auto_archive": true,
+    "semantic_search_enabled": true
+  },
+  "paths": {
+    "global_memory": "~/.claude/memory",
+    "projects_root": "~/projects"
+  },
+  "integrations": {
+    "github_sync": false,
+    "notion_export": false,
+    "obsidian_vault": ""
+  }
+}

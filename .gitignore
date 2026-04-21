@@ -52,11 +52,29 @@ memory/
 
 # Logs
 *.log
+*.log.*
 logs/
+logs/**/*.log
+debug_*.txt
 
 # Environment variables
 .env
 .env.local
+
+# API Keys & Tokens (future integrations)
+config/api_keys.json
+config/*_token.txt
+config/*_credentials.json
+
+# Personal user configs
+config/personal.json
+config/*.local.json
+*_local.json
+
+# Crash dumps
+*.dmp
+crash_reports/
+core.*
 
 # OS
 Thumbs.db
