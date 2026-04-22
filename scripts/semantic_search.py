@@ -8,7 +8,6 @@ Semantic Search Hook для Claude Code
 import sys
 import os
 import subprocess
-import tempfile
 
 # Настройка UTF-8 для Windows
 if sys.platform == 'win32':
@@ -62,7 +61,7 @@ def main():
         except UnicodeDecodeError:
             try:
                 user_prompt = sys.stdin.buffer.read().decode('cp1251').strip()
-            except:
+            except (UnicodeDecodeError, AttributeError):
                 user_prompt = sys.stdin.read().strip()
     else:
         user_prompt = sys.stdin.read().strip()
@@ -80,7 +79,7 @@ def main():
             from datetime import datetime
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             f.write(f"[{timestamp}] Trigger: '{trigger_found}' | Prompt: {user_prompt[:100]}...\n")
-    except:
+    except (OSError, IOError):
         pass  # Не критично если логирование не сработало
 
     # Выполняем семантический поиск
@@ -91,7 +90,8 @@ def main():
             ["python", l4_script, "search-all", user_prompt],
             capture_output=True,
             text=True,
-            encoding='utf-8'
+            encoding='utf-8',
+            check=False
         )
 
         # Проверяем, есть ли результаты
