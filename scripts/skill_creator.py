@@ -48,9 +48,10 @@ class SkillCreator:
                 for line in f:
                     try:
                         entry = json.loads(line.strip())
+                        entry_type = entry.get('type')
 
                         # Определяем начало задачи из user message
-                        if entry.get('type') == 'message' and entry.get('role') == 'user':
+                        if entry_type == 'user':
                             if current_task and tool_sequence:
                                 # Сохраняем предыдущий паттерн
                                 patterns.append({
@@ -59,12 +60,23 @@ class SkillCreator:
                                     'success': True  # Предполагаем успех если нет ошибок
                                 })
 
-                            current_task = entry.get('content', '')[:100]
+                            # Извлекаем текст из message.content
+                            message = entry.get('message', {})
+                            content = message.get('content', '')
+
+                            # У user сообщений content это строка
+                            if isinstance(content, str):
+                                current_task = content[:100] if content else 'unknown'
+                            else:
+                                current_task = 'unknown'
+
                             tool_sequence = []
 
                         # Собираем последовательность tool calls
-                        elif entry.get('type') == 'message' and entry.get('role') == 'assistant':
-                            content = entry.get('content', [])
+                        elif entry_type == 'assistant':
+                            message = entry.get('message', {})
+                            content = message.get('content', [])
+
                             if isinstance(content, list):
                                 for block in content:
                                     if isinstance(block, dict) and block.get('type') == 'tool_use':
@@ -73,13 +85,16 @@ class SkillCreator:
                                             tool_sequence.append(tool_name)
 
                         # Проверяем на ошибки в tool results
-                        elif entry.get('type') == 'tool_result':
-                            is_error = entry.get('is_error', False)
+                        elif entry_type == 'tool-result':
+                            message = entry.get('message', {})
+                            is_error = message.get('is_error', False)
                             if is_error and patterns:
                                 # Помечаем последний паттерн как неуспешный
                                 patterns[-1]['success'] = False
 
                     except json.JSONDecodeError:
+                        continue
+                    except Exception:
                         continue
 
                 # Сохраняем последний паттерн
