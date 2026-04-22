@@ -728,42 +728,28 @@ Format as JSON:
 
         return frontmatter
 
-    def pre_delivery_checklist(self) -> Dict[str, bool]:
-        """
-        Pre-Delivery Checklist - Quick validation before commit
-        Inspired by UI/UX Pro Max pre-delivery checklist pattern
-        """
-        self.print_header("Pre-Delivery Checklist")
-
-        checklist = {
-            'no_duplicate_memories': True,
-            'all_links_valid': True,
-            'frontmatter_complete': True,
-            'hot_memory_fresh': True,
-            'warm_memory_fresh': True,
-            'file_sizes_ok': True,
-            'why_how_present': True
-        }
-
-        # Check 1: No duplicate memories
+    def _check_duplicate_memories(self) -> bool:
+        """Check 1: No duplicate memories"""
         self.print_section("[ ] No duplicate memories")
         duplicates = self.check_duplicates()
         if duplicates:
-            checklist['no_duplicate_memories'] = False
             self.print_error(f"[X] Found {len(duplicates)} duplicate(s)")
-        else:
-            self.print_ok("[OK] No duplicates")
+            return False
+        self.print_ok("[OK] No duplicates")
+        return True
 
-        # Check 2: All links valid
+    def _check_all_links_valid(self) -> bool:
+        """Check 2: All links valid"""
         self.print_section("[ ] All links valid (no ghost links)")
         ghost_links = self.check_ghost_links()
         if ghost_links:
-            checklist['all_links_valid'] = False
             self.print_error(f"[X] Found {len(ghost_links)} ghost link(s)")
-        else:
-            self.print_ok("[OK] All links valid")
+            return False
+        self.print_ok("[OK] All links valid")
+        return True
 
-        # Check 3: Frontmatter complete
+    def _check_frontmatter_complete(self) -> bool:
+        """Check 3: Frontmatter complete"""
         self.print_section("[ ] Frontmatter complete (name, description, type)")
         md_files = self.find_all_md_files()
         incomplete_frontmatter = []
@@ -775,7 +761,6 @@ Format as JSON:
             try:
                 content = md_file.read_text(encoding='utf-8')
                 frontmatter = self._extract_frontmatter(content)
-
                 required_fields = ['name', 'description', 'type']
                 missing = [f for f in required_fields if f not in frontmatter or not frontmatter[f]]
 
@@ -785,42 +770,47 @@ Format as JSON:
                 self.print_warn(f"Error checking {md_file.name}: {exc}")
 
         if incomplete_frontmatter:
-            checklist['frontmatter_complete'] = False
             self.print_error(f"[X] {len(incomplete_frontmatter)} file(s) with incomplete frontmatter")
             for file, missing in incomplete_frontmatter[:3]:
                 print(f"    {file.name}: missing {', '.join(missing)}")
-        else:
-            self.print_ok("[OK] All frontmatter complete")
+            return False
+        self.print_ok("[OK] All frontmatter complete")
+        return True
 
-        # Check 4: HOT memory within 24h window
+    def _check_hot_memory_fresh(self) -> bool:
+        """Check 4: HOT memory within 24h window"""
         self.print_section("[ ] HOT memory within 24h window")
         old_hot = self.check_hot_memory_age()
         if old_hot:
-            checklist['hot_memory_fresh'] = False
             self.print_error(f"[X] {len(old_hot)} old HOT entries")
-        else:
-            self.print_ok("[OK] HOT memory fresh")
+            return False
+        self.print_ok("[OK] HOT memory fresh")
+        return True
 
-        # Check 5: WARM memory within 14d window
+    def _check_warm_memory_fresh(self) -> bool:
+        """Check 5: WARM memory within 14d window"""
         self.print_section("[ ] WARM memory within 14d window")
         old_warm = self.check_warm_memory_age()
         if old_warm:
-            checklist['warm_memory_fresh'] = False
             self.print_error(f"[X] {len(old_warm)} old WARM entries")
-        else:
-            self.print_ok("[OK] WARM memory fresh")
+            return False
+        self.print_ok("[OK] WARM memory fresh")
+        return True
 
-        # Check 6: File sizes < 100KB
+    def _check_file_sizes_ok(self) -> bool:
+        """Check 6: File sizes < 100KB"""
         self.print_section("[ ] File size < 100KB")
         large_files = self.check_file_sizes()
         if large_files:
-            checklist['file_sizes_ok'] = False
             self.print_error(f"[X] {len(large_files)} large file(s)")
-        else:
-            self.print_ok("[OK] All files within size limit")
+            return False
+        self.print_ok("[OK] All files within size limit")
+        return True
 
-        # Check 7: Why:/How to apply: sections present
+    def _check_why_how_present(self) -> bool:
+        """Check 7: Why:/How to apply: sections present"""
         self.print_section("[ ] Why:/How to apply: sections present (feedback/project)")
+        md_files = self.find_all_md_files()
         missing_why_how = []
 
         for md_file in md_files:
@@ -836,12 +826,29 @@ Format as JSON:
                 self.print_warn(f"Error checking {md_file.name}: {exc}")
 
         if missing_why_how:
-            checklist['why_how_present'] = False
             self.print_error(f"[X] {len(missing_why_how)} file(s) missing Why:/How to apply:")
             for file in missing_why_how[:3]:
                 print(f"    {file.name}")
-        else:
-            self.print_ok("[OK] All feedback/project files have Why:/How to apply:")
+            return False
+        self.print_ok("[OK] All feedback/project files have Why:/How to apply:")
+        return True
+
+    def pre_delivery_checklist(self) -> Dict[str, bool]:
+        """
+        Pre-Delivery Checklist - Quick validation before commit
+        Inspired by UI/UX Pro Max pre-delivery checklist pattern
+        """
+        self.print_header("Pre-Delivery Checklist")
+
+        checklist = {
+            'no_duplicate_memories': self._check_duplicate_memories(),
+            'all_links_valid': self._check_all_links_valid(),
+            'frontmatter_complete': self._check_frontmatter_complete(),
+            'hot_memory_fresh': self._check_hot_memory_fresh(),
+            'warm_memory_fresh': self._check_warm_memory_fresh(),
+            'file_sizes_ok': self._check_file_sizes_ok(),
+            'why_how_present': self._check_why_how_present()
+        }
 
         # Final summary
         self.print_section("Pre-Delivery Summary")
