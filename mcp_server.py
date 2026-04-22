@@ -12,7 +12,7 @@ MCP Server для Claude 4-Layer Memory System
 
 import sys
 import logging
-from typing import Any, Optional
+from typing import Any
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
@@ -26,8 +26,8 @@ logging.basicConfig(
 
 # Импорт наших модулей
 sys.path.insert(0, str(Path(__file__).parent))
-from l4_fts5_search import L4FTS5Search
-from cost_tracker import CostTracker
+from l4_fts5_search import L4FTS5Search  # pylint: disable=wrong-import-position
+from cost_tracker import CostTracker  # pylint: disable=wrong-import-position
 
 # Инициализация MCP сервера
 mcp = FastMCP("claude-4layer-memory")
@@ -67,7 +67,7 @@ def search_memory(query: str, limit: int = 10) -> dict[str, Any]:
             ]
         }
     except Exception as e:
-        logging.error(f"Search failed: {e}")
+        logging.error("Search failed: %s", e)
         return {
             "success": False,
             "error": str(e)
@@ -89,7 +89,7 @@ def get_memory_stats() -> dict[str, Any]:
             "stats": stats
         }
     except Exception as e:
-        logging.error(f"Stats failed: {e}")
+        logging.error("Stats failed: %s", e)
         return {
             "success": False,
             "error": str(e)
@@ -114,7 +114,7 @@ def get_cost_stats(days: int = 7) -> dict[str, Any]:
             "stats": stats
         }
     except Exception as e:
-        logging.error(f"Cost stats failed: {e}")
+        logging.error("Cost stats failed: %s", e)
         return {
             "success": False,
             "error": str(e)
@@ -137,7 +137,7 @@ def reindex_memory() -> dict[str, Any]:
             "sources": result.get("sources", [])
         }
     except Exception as e:
-        logging.error(f"Reindex failed: {e}")
+        logging.error("Reindex failed: %s", e)
         return {
             "success": False,
             "error": str(e)
@@ -154,7 +154,7 @@ def get_global_handoff() -> str:
             return handoff_path.read_text(encoding='utf-8')
         return "# No handoff data"
     except Exception as e:
-        logging.error(f"Failed to read handoff: {e}")
+        logging.error("Failed to read handoff: %s", e)
         return f"# Error: {e}"
 
 
@@ -167,7 +167,7 @@ def get_global_decisions() -> str:
             return decisions_path.read_text(encoding='utf-8')
         return "# No decisions data"
     except Exception as e:
-        logging.error(f"Failed to read decisions: {e}")
+        logging.error("Failed to read decisions: %s", e)
         return f"# Error: {e}"
 
 
