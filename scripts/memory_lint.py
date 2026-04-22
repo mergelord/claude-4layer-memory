@@ -10,10 +10,11 @@ Layer 2: LLM-based semantic checks (contradictions, outdated claims)
 
 import re
 import sys
-import yaml
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Set, Tuple
+
+import yaml
 
 # Add parent directory to path for utils import
 sys.path.insert(0, str(Path(__file__).parent.parent))
