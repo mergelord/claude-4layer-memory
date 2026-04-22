@@ -571,6 +571,133 @@ Format as JSON:
 
         return incomplete
 
+    def check_antipatterns(self) -> List[Dict]:
+        """Check for memory anti-patterns (inspired by UI/UX Pro Max)"""
+        self.print_section("Layer 2: Anti-patterns Detection")
+
+        md_files = self.find_all_md_files()
+        antipatterns = []
+
+        for md_file in md_files:
+            try:
+                content = md_file.read_text(encoding='utf-8')
+
+                # Extract frontmatter
+                frontmatter = self._extract_frontmatter(content)
+                memory_type = frontmatter.get('type', '')
+
+                # Anti-pattern 1: Missing Why:/How to apply: in feedback/project types
+                if memory_type in ['feedback', 'project']:
+                    if '**Why:**' not in content and '**How to apply:**' not in content:
+                        antipatterns.append({
+                            'file': md_file,
+                            'type': 'missing_why_how',
+                            'severity': 'high',
+                            'message': f'{memory_type} memory missing Why:/How to apply: sections'
+                        })
+
+                # Anti-pattern 2: Code snippets in memory (should be in codebase)
+                code_blocks = re.findall(r'```[\s\S]*?```', content)
+                if len(code_blocks) > 3:
+                    antipatterns.append({
+                        'file': md_file,
+                        'type': 'excessive_code',
+                        'severity': 'medium',
+                        'message': f'{len(code_blocks)} code blocks - consider storing in codebase'
+                    })
+
+                # Anti-pattern 3: Vague descriptions (too generic)
+                description = frontmatter.get('description', '')
+                vague_words = ['stuff', 'things', 'various', 'some', 'etc', 'and so on']
+                if any(word in description.lower() for word in vague_words):
+                    antipatterns.append({
+                        'file': md_file,
+                        'type': 'vague_description',
+                        'severity': 'low',
+                        'message': 'Description contains vague words - be more specific'
+                    })
+
+                # Anti-pattern 4: Temporary data in WARM/COLD layers
+                temp_markers = ['temp', 'temporary', 'draft', 'wip', 'work in progress']
+                if md_file.name not in ['handoff.md'] and any(marker in content.lower() for marker in temp_markers):
+                    antipatterns.append({
+                        'file': md_file,
+                        'type': 'temporary_in_permanent',
+                        'severity': 'medium',
+                        'message': 'Temporary data in permanent layer - should be in HOT'
+                    })
+
+                # Anti-pattern 5: Outdated claims without dates
+                claim_words = ['currently', 'now', 'today', 'recently', 'latest']
+                has_claims = any(word in content.lower() for word in claim_words)
+                has_dates = bool(re.search(r'\d{4}-\d{2}-\d{2}', content))
+
+                if has_claims and not has_dates:
+                    antipatterns.append({
+                        'file': md_file,
+                        'type': 'undated_claims',
+                        'severity': 'medium',
+                        'message': 'Time-sensitive claims without dates - add timestamps'
+                    })
+
+                # Anti-pattern 6: Duplicate information from git history
+                git_markers = ['commit', 'merged', 'pull request', 'pr #', 'issue #']
+                if sum(1 for marker in git_markers if marker in content.lower()) > 3:
+                    antipatterns.append({
+                        'file': md_file,
+                        'type': 'git_duplication',
+                        'severity': 'low',
+                        'message': 'Duplicates git history - use git log instead'
+                    })
+
+            except Exception as exc:
+                self.print_warn(f"Error checking {md_file.name}: {exc}")
+
+        # Report findings
+        if antipatterns:
+            severity_counts = {'high': 0, 'medium': 0, 'low': 0}
+            for ap in antipatterns:
+                severity_counts[ap['severity']] += 1
+
+            self.print_warn(f"Found {len(antipatterns)} anti-pattern(s)")
+            print(f"    High: {severity_counts['high']}, Medium: {severity_counts['medium']}, Low: {severity_counts['low']}")
+
+            # Show high severity first
+            for ap in sorted(antipatterns, key=lambda x: {'high': 0, 'medium': 1, 'low': 2}[x['severity']]):
+                ap_file = ap['file']
+                if isinstance(ap_file, Path):
+                    file_name = ap_file.name
+                else:
+                    file_name = str(ap_file)
+
+                severity_color = {
+                    'high': Colors.RED,
+                    'medium': Colors.YELLOW,
+                    'low': Colors.CYAN
+                }[ap['severity']]
+
+                print(f"    {severity_color}[{ap['severity'].upper()}]{Colors.END} {file_name}: {ap['message']}")
+        else:
+            self.print_ok("No anti-patterns detected")
+
+        return antipatterns
+
+    def _extract_frontmatter(self, content: str) -> Dict[str, str]:
+        """Extract YAML frontmatter from markdown content"""
+        frontmatter = {}
+
+        # Match frontmatter between --- markers
+        match = re.match(r'^---\s*\n(.*?)\n---\s*\n', content, re.DOTALL)
+        if match:
+            yaml_content = match.group(1)
+            # Simple YAML parsing (key: value)
+            for line in yaml_content.split('\n'):
+                if ':' in line:
+                    key, value = line.split(':', 1)
+                    frontmatter[key.strip()] = value.strip()
+
+        return frontmatter
+
     def run_layer2(self) -> bool:
         """Run Layer 2: LLM-based semantic checks"""
         self.print_header("Memory Lint - Layer 2: Semantic Checks")
@@ -584,6 +711,7 @@ Format as JSON:
         outdated = self.check_outdated_claims()
         inconsistencies = self.check_consistency()
         incomplete = self.check_completeness()
+        antipatterns = self.check_antipatterns()
 
         # Summary
         self.print_section("Layer 2 Summary")
@@ -591,6 +719,7 @@ Format as JSON:
         print(f"Outdated claims: {len(outdated)}")
         print(f"Inconsistencies: {len(inconsistencies)}")
         print(f"Incomplete sections: {len(incomplete)}")
+        print(f"Anti-patterns: {len(antipatterns)}")
 
         return True
 
