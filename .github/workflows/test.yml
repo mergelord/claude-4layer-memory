@@ -2,11 +2,7 @@ name: Python Tests
 
 on:
   push:
-    branches:
-      - main
-      - 'fix/**'
-      - 'feature/**'
-      - 'refactor/**'
+    branches: [ main ]
   pull_request:
     branches: [ main ]
 
