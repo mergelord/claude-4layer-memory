@@ -1,0 +1,50 @@
+# Memory Lint Configuration
+# Пороговые значения для валидации памяти
+
+# Размеры файлов (в байтах)
+file_sizes:
+  max_size: 102400  # 100 KB
+  warn_size: 51200  # 50 KB (предупреждение)
+
+# Возраст записей
+age_thresholds:
+  hot_max_hours: 24      # HOT записи старше 24 часов
+  warm_max_days: 14      # WARM записи старше 14 дней
+  cold_max_days: 30      # COLD записи старше 30 дней
+  archive_max_days: 90   # Архивные записи старше 90 дней
+
+# Лимиты количества записей
+entry_limits:
+  hot_max_entries: 10    # Максимум записей в HOT
+  warm_max_entries: 30   # Максимум записей в WARM
+  cold_max_entries: 100  # Максимум записей в COLD
+
+# Валидация frontmatter
+frontmatter:
+  required_fields:
+    - name
+    - description
+    - type
+  valid_types:
+    - user
+    - feedback
+    - project
+    - reference
+
+# Проверка ссылок
+links:
+  check_external: true   # Проверять внешние ссылки
+  check_internal: true   # Проверять внутренние ссылки
+  timeout: 5             # Таймаут для внешних ссылок (секунды)
+
+# Severity levels
+severity:
+  error: ERROR
+  warning: WARNING
+  info: INFO
+
+# Quick mode settings
+quick_mode:
+  skip_external_links: true
+  skip_deep_validation: true
+  max_files_check: 50

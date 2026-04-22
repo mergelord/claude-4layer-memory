@@ -10,6 +10,7 @@ Layer 2: LLM-based semantic checks (contradictions, outdated claims)
 
 import re
 import sys
+import yaml
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Set, Tuple
@@ -26,6 +27,25 @@ class MemoryLint(BaseReporter):
         super().__init__()
         self.memory_path = memory_path
         self.quick_mode = quick_mode
+        self.config = self._load_config()
+
+    def _load_config(self) -> dict:
+        """Load configuration from config/memory_lint_config.yml"""
+        config_path = Path(__file__).parent.parent / 'config' / 'memory_lint_config.yml'
+
+        if not config_path.exists():
+            # Fallback to default values
+            return {
+                'file_sizes': {'max_size': 102400},
+                'age_thresholds': {
+                    'hot_max_hours': 24,
+                    'warm_max_days': 14,
+                    'cold_max_days': 30
+                }
+            }
+
+        with open(config_path, 'r', encoding='utf-8') as f:
+            return yaml.safe_load(f)
 
     def find_all_md_files(self) -> List[Path]:
         """Find all markdown files in memory directory"""
@@ -171,7 +191,8 @@ class MemoryLint(BaseReporter):
                 try:
                     ts = datetime.strptime(ts_str, '%Y-%m-%d %H:%M')
                     age_hours = (now - ts).total_seconds() / 3600
-                    if age_hours > 24:
+                    max_hours = self.config['age_thresholds']['hot_max_hours']
+                    if age_hours > max_hours:
                         old_entries.append((ts_str, int(age_hours)))
                 except ValueError:
                     continue
@@ -210,7 +231,8 @@ class MemoryLint(BaseReporter):
                 try:
                     date = datetime.strptime(date_str, '%Y-%m-%d')
                     age_days = (now - date).days
-                    if age_days > 14:
+                    max_days = self.config['age_thresholds']['warm_max_days']
+                    if age_days > max_days:
                         old_entries.append((date_str, age_days))
                 except ValueError:
                     continue
@@ -233,7 +255,7 @@ class MemoryLint(BaseReporter):
 
         md_files = self.find_all_md_files()
         large_files = {}
-        threshold = 100 * 1024  # 100KB
+        threshold = self.config['file_sizes']['max_size']
 
         for md_file in md_files:
             size = md_file.stat().st_size
@@ -441,8 +463,9 @@ Format as JSON:
                     try:
                         date = datetime.strptime(date_str, '%Y-%m-%d')
                         age_days = (now - date).days
+                        max_days = self.config['age_thresholds']['cold_max_days']
 
-                        if age_days > 30:  # Claims older than 30 days
+                        if age_days > max_days:  # Claims older than configured threshold
                             dated_claims.append({
                                 'file': md_file,
                                 'date': date_str,
