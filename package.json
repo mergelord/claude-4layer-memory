@@ -1,0 +1,43 @@
+{
+  "name": "claude-memory-cli",
+  "version": "1.0.0",
+  "description": "CLI tool for Claude 4-Layer Memory System - intelligent memory management with semantic search",
+  "main": "cli/index.js",
+  "bin": {
+    "claude-memory-cli": "./cli/index.js",
+    "cm": "./cli/index.js"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "claude",
+    "memory",
+    "ai",
+    "semantic-search",
+    "cli",
+    "claude-code",
+    "cursor",
+    "windsurf"
+  ],
+  "author": "mergelord",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mergelord/claude-4layer-memory.git"
+  },
+  "homepage": "https://github.com/mergelord/claude-4layer-memory#readme",
+  "bugs": {
+    "url": "https://github.com/mergelord/claude-4layer-memory/issues"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "dependencies": {
+    "commander": "^11.1.0",
+    "chalk": "^4.1.2",
+    "ora": "^5.4.1",
+    "inquirer": "^8.2.6"
+  },
+  "devDependencies": {}
+}
