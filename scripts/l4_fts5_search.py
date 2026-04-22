@@ -20,6 +20,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
 
+# Настройка UTF-8 для Windows
+if sys.platform == 'win32':
+    import codecs
+    sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
+    sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'strict')
+
 # Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
