@@ -259,7 +259,7 @@ class L4FTS5Search:
                         metadata=f"results: {len(results)}"
                     )
                 except Exception as e:  # nosec B110
-                    logging.debug(f"Cost tracking failed: {e}")
+                    logging.debug("Cost tracking failed: %s", e)
 
         except Exception as e:
             logging.error("Search failed: %s", e)

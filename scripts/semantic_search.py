@@ -7,6 +7,7 @@ Semantic Search Hook для Claude Code
 
 import sys
 import os
+import logging
 import subprocess
 from pathlib import Path
 
@@ -118,7 +119,7 @@ def main():
                     metadata=f"trigger: {trigger_found}"
                 )
             except Exception as e:  # nosec B110
-                logging.debug(f"Cost tracking failed: {e}")
+                logging.debug("Cost tracking failed: %s", e)
 
         # Проверяем, есть ли результаты
         if "[SEARCH ALL]" in result.stdout:
