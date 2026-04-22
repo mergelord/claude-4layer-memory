@@ -91,6 +91,10 @@ tmp/
 GLOBAL_PROJECTS.md
 settings.json
 
+# Node.js
+node_modules/
+package-lock.json
+
 # Build artifacts
 *.exe
 *.msi

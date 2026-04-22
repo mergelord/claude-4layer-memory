@@ -1,0 +1,61 @@
+# Development files
+.git
+.gitignore
+.github
+.vscode
+.idea
+
+# Documentation (keep only package README)
+docs/
+ARCHITECTURE_ANALYSIS.md
+CREDITS.md
+INSTALL.md
+USAGE.md
+
+# Tests
+tests/
+*.test.js
+*.spec.js
+
+# Python files (backend only)
+scripts/
+hooks/
+*.py
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+
+# Batch files
+*.bat
+*.sh
+
+# Memory data (user-specific)
+.claude/
+memory/
+chroma_db/
+*.db
+*.sqlite
+
+# Build artifacts
+dist/
+build/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor files
+*.swp
+*.swo
+*~
+.project
+.settings/
