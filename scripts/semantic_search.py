@@ -87,7 +87,7 @@ def main():
 
     try:
         result = subprocess.run(
-            ["python", l4_script, "search-all", user_prompt],
+            [sys.executable, l4_script, "search-all", user_prompt],
             capture_output=True,
             text=True,
             encoding='utf-8',

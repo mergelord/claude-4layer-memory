@@ -94,7 +94,9 @@ class SkillCreator:
 
                     except json.JSONDecodeError:
                         continue
-                    except Exception:
+                    except Exception as e:
+                        # Log unexpected errors during pattern extraction
+                        print(f"Warning: Failed to process line: {e}", file=sys.stderr)
                         continue
 
                 # Сохраняем последний паттерн
