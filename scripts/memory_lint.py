@@ -619,7 +619,8 @@ Format as JSON:
 
                 # Anti-pattern 4: Temporary data in WARM/COLD layers
                 temp_markers = ['temp', 'temporary', 'draft', 'wip', 'work in progress']
-                if md_file.name not in ['handoff.md'] and any(marker in content.lower() for marker in temp_markers):
+                if (md_file.name not in ['handoff.md'] and
+                        any(marker in content.lower() for marker in temp_markers)):
                     antipatterns.append({
                         'file': md_file,
                         'type': 'temporary_in_permanent',
@@ -655,28 +656,33 @@ Format as JSON:
 
         # Report findings
         if antipatterns:
-            severity_counts = {'high': 0, 'medium': 0, 'low': 0}
+            severity_counts: Dict[str, int] = {'high': 0, 'medium': 0, 'low': 0}
             for ap in antipatterns:
-                severity_counts[ap['severity']] += 1
+                severity = str(ap['severity'])  # Ensure string type
+                severity_counts[severity] += 1
 
             self.print_warn(f"Found {len(antipatterns)} anti-pattern(s)")
-            print(f"    High: {severity_counts['high']}, Medium: {severity_counts['medium']}, Low: {severity_counts['low']}")
+            print(f"    High: {severity_counts['high']}, "
+                  f"Medium: {severity_counts['medium']}, Low: {severity_counts['low']}")
 
             # Show high severity first
-            for ap in sorted(antipatterns, key=lambda x: {'high': 0, 'medium': 1, 'low': 2}[x['severity']]):
+            for ap in sorted(antipatterns,
+                           key=lambda x: {'high': 0, 'medium': 1, 'low': 2}[str(x['severity'])]):
                 ap_file = ap['file']
                 if isinstance(ap_file, Path):
                     file_name = ap_file.name
                 else:
                     file_name = str(ap_file)
 
+                severity = str(ap['severity'])  # Ensure string type for dict access
                 severity_color = {
                     'high': Colors.RED,
                     'medium': Colors.YELLOW,
                     'low': Colors.CYAN
-                }[ap['severity']]
+                }[severity]
 
-                print(f"    {severity_color}[{ap['severity'].upper()}]{Colors.END} {file_name}: {ap['message']}")
+                print(f"    {severity_color}[{severity.upper()}]{Colors.END} "
+                      f"{file_name}: {ap['message']}")
         else:
             self.print_ok("No anti-patterns detected")
 
