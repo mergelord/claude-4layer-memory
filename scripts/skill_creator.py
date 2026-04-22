@@ -11,7 +11,7 @@ import json
 import sys
 from pathlib import Path
 from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from collections import Counter
 
 # Настройка UTF-8 для Windows
@@ -39,8 +39,8 @@ class SkillCreator:
         if not session_file.exists():
             return []
 
-        patterns = []
-        tool_sequence = []
+        patterns: List[Dict[str, Any]] = []
+        tool_sequence: List[str] = []
         current_task = None
 
         try:
@@ -162,7 +162,7 @@ class SkillCreator:
         db = self.load_patterns_db()
         candidates = []
 
-        for key, pattern in db['patterns'].items():
+        for pattern in db['patterns'].values():
             count = pattern['count']
             success_count = pattern['success_count']
 
@@ -272,7 +272,7 @@ This pattern was successfully used for:
         candidates = self.find_skill_candidates()
 
         suggestions = []
-        for i, candidate in enumerate(candidates[:5], 1):  # Топ-5
+        for candidate in candidates[:5]:  # Топ-5
             # Генерируем имя на основе инструментов
             tool_names = [t.replace('_', ' ').title() for t in candidate['tools'][:2]]
             skill_name = f"Auto {' + '.join(tool_names)}"
@@ -308,7 +308,7 @@ def cmd_suggest(creator: SkillCreator):
         print(f"[{i}] {suggestion['name']}")
         print(f"    Tools: {' → '.join(candidate['tools'])}")
         print(f"    Used: {candidate['count']} times ({candidate['success_rate']:.0%} success)")
-        print(f"    Examples:")
+        print("    Examples:")
         for task in candidate['example_tasks'][:2]:
             print(f"      - {task}")
         print()
@@ -350,7 +350,7 @@ def cmd_stats(creator: SkillCreator):
     total_uses = sum(p['count'] for p in patterns.values())
 
     # Топ-5 инструментов
-    tool_counter = Counter()
+    tool_counter: Counter = Counter()
     for pattern in patterns.values():
         tool_counter.update(pattern['tools'])
 
