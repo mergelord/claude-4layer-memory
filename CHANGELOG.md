@@ -5,6 +5,24 @@ All notable changes to claude-4layer-memory will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-04-22
+
+### Added
+
+#### Linguistic Triggers for Semantic Search
+- **30+ new trigger patterns** inspired by Claude Opus 4.7 system prompt
+  - Possessive pronouns: "my project", "our code", "my system"
+  - Definite articles: "the script", "the bug", "the solution"
+  - Past tense references: "you recommended", "we discussed", "you helped"
+  - Russian equivalents: "ты рекомендовал", "мы обсуждали", "моего проекта"
+- **Automatic context retrieval** on natural linguistic signals
+- **Trigger logging** to `~/.claude/hooks/semantic_search.log` for debugging
+- Bilingual support (English + Russian)
+
+### Changed
+- `semantic_search.py` now detects contextual references automatically
+- Improved natural language understanding for memory retrieval
+
 ## [1.1.0] - 2026-04-19
 
 ### Added

@@ -13,6 +13,11 @@
 - **4-Layer Memory Architecture** - HOT (24h) → WARM (14d) → COLD (permanent) → SEMANTIC (indexed)
 - **Dual-Level System** - Global memory (cross-project) + Project memory (project-specific)
 - **Semantic Search** - Find information by meaning, not keywords (multilingual support)
+- **Linguistic Triggers** - Automatic context retrieval on natural language signals (inspired by Claude Opus 4.7)
+  - Possessive pronouns: "my project", "our code"
+  - Definite articles: "the script", "the bug"
+  - Past tense: "you recommended", "we discussed"
+  - Bilingual: English + Russian support
 - **Memory Lint** - Two-layer validation with quick mode for SessionStart hooks
 - **Auto-Discovery** - Automatically detects and indexes projects
 - **Smart Filtering** - Protects against indexing system directories
