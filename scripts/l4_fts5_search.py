@@ -258,8 +258,8 @@ class L4FTS5Search:
                         model='embedding',
                         metadata=f"results: {len(results)}"
                     )
-                except Exception:
-                    pass  # Не критично если tracking не сработал
+                except Exception as e:  # nosec B110
+                    logging.debug(f"Cost tracking failed: {e}")
 
         except Exception as e:
             logging.error("Search failed: %s", e)

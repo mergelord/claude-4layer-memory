@@ -83,6 +83,7 @@ class CostTracker:
     def track_operation(
         self,
         operation_type: str,
+        *,
         input_tokens: int = 0,
         output_tokens: int = 0,
         model: str = 'claude-sonnet-4',

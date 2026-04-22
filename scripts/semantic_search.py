@@ -117,8 +117,8 @@ def main():
                     model='embedding',
                     metadata=f"trigger: {trigger_found}"
                 )
-            except Exception:
-                pass  # Не критично если tracking не сработал
+            except Exception as e:  # nosec B110
+                logging.debug(f"Cost tracking failed: {e}")
 
         # Проверяем, есть ли результаты
         if "[SEARCH ALL]" in result.stdout:
