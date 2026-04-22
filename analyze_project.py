@@ -28,13 +28,13 @@ def analyze_structure():
     sh_files = list(root.rglob("*.sh"))
     md_files = list(root.rglob("*.md"))
 
-    print(f"\n📊 Статистика файлов:")
+    print("\n📊 Статистика файлов:")
     print(f"  Python:    {len(py_files)} файлов")
     print(f"  Shell:     {len(sh_files)} файлов")
     print(f"  Markdown:  {len(md_files)} файлов")
 
     # Анализ директорий
-    print(f"\n📁 Структура директорий:")
+    print("\n📁 Структура директорий:")
     dirs = defaultdict(int)
     for f in py_files:
         parent = f.parent.name if f.parent != Path(".") else "root"
@@ -57,13 +57,13 @@ def analyze_structure():
         except Exception:
             pass
 
-    print(f"\n📏 Метрики кода:")
+    print("\n📏 Метрики кода:")
     print(f"  Всего строк:     {total_lines:,}")
     print(f"  Строк кода:      {code_lines:,}")
     print(f"  Комментариев:    {total_lines - code_lines:,}")
 
     # Анализ зависимостей
-    print(f"\n📦 Зависимости:")
+    print("\n📦 Зависимости:")
     imports = set()
     for py_file in py_files:
         try:
@@ -84,7 +84,7 @@ def analyze_structure():
         print(f"    - {pkg}")
 
     # Ключевые компоненты
-    print(f"\n🔑 Ключевые компоненты:")
+    print("\n🔑 Ключевые компоненты:")
     components = {
         'Cost Tracking': 'scripts/cost_tracker.py',
         'MCP Server': 'mcp_server.py',
@@ -101,6 +101,7 @@ def analyze_structure():
     print("\n" + "="*70)
     print("✅ Анализ завершён")
     print("="*70 + "\n")
+
 
 if __name__ == '__main__':
     analyze_structure()

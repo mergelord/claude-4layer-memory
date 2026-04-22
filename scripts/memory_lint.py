@@ -956,5 +956,6 @@ def main():
     # Exit code
     sys.exit(0 if len(lint.errors) == 0 else 1)
 
+
 if __name__ == '__main__':
     main()
