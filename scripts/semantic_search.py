@@ -8,6 +8,15 @@ Semantic Search Hook для Claude Code
 import sys
 import os
 import subprocess
+from pathlib import Path
+
+# Импорт cost tracker
+sys.path.insert(0, str(Path(__file__).parent))
+try:
+    from cost_tracker import CostTracker
+    COST_TRACKING_ENABLED = True
+except ImportError:
+    COST_TRACKING_ENABLED = False
 
 # Настройка UTF-8 для Windows
 if sys.platform == 'win32':
@@ -93,6 +102,23 @@ def main():
             encoding='utf-8',
             check=False
         )
+
+        # Отслеживаем стоимость операции
+        if COST_TRACKING_ENABLED:
+            try:
+                tracker = CostTracker()
+                # Примерная оценка: prompt ~100 tokens, результат ~500 tokens
+                input_tokens = len(user_prompt.split()) * 1.3  # ~1.3 tokens per word
+                output_tokens = len(result.stdout.split()) * 1.3 if result.stdout else 0
+                tracker.track_operation(
+                    operation_type='semantic_search',
+                    input_tokens=int(input_tokens),
+                    output_tokens=int(output_tokens),
+                    model='embedding',
+                    metadata=f"trigger: {trigger_found}"
+                )
+            except Exception:
+                pass  # Не критично если tracking не сработал
 
         # Проверяем, есть ли результаты
         if "[SEARCH ALL]" in result.stdout:

@@ -20,11 +20,20 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
 
+# Импорт cost tracker
+sys.path.insert(0, str(Path(__file__).parent))
+try:
+    from cost_tracker import CostTracker
+    COST_TRACKING_ENABLED = True
+except ImportError:
+    COST_TRACKING_ENABLED = False
+
 # Настройка UTF-8 для Windows
 if sys.platform == 'win32':
     import codecs
-    sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
-    sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'strict')
+    if hasattr(sys.stdout, 'buffer'):
+        sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
+        sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'strict')
 
 # Настройка логирования
 logging.basicConfig(
@@ -234,6 +243,23 @@ class L4FTS5Search:
                 )
                 for row in rows
             ]
+
+            # Отслеживаем стоимость операции
+            if COST_TRACKING_ENABLED:
+                try:
+                    tracker = CostTracker()
+                    # FTS5 - локальный поиск, минимальная стоимость
+                    input_tokens = len(query.split()) * 1.3
+                    output_tokens = sum(len(r.snippet.split()) for r in results) * 1.3
+                    tracker.track_operation(
+                        operation_type='fts5_search',
+                        input_tokens=int(input_tokens),
+                        output_tokens=int(output_tokens),
+                        model='embedding',
+                        metadata=f"results: {len(results)}"
+                    )
+                except Exception:
+                    pass  # Не критично если tracking не сработал
 
         except Exception as e:
             logging.error("Search failed: %s", e)
