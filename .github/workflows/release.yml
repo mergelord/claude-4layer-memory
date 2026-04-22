@@ -40,15 +40,19 @@ jobs:
         echo "EOF" >> $GITHUB_OUTPUT
 
     - name: Create Release
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
       with:
         body_path: RELEASE_NOTES.md
         draft: false
         prerelease: false
         generate_release_notes: true
         files: |
-          scripts/**
-          templates/**
+          scripts/*.py
+          scripts/*.sh
+          scripts/*.bat
+          templates/*.md
+          templates/*.bat
+          templates/*.sh
           install.sh
           install.bat
           audit.py
