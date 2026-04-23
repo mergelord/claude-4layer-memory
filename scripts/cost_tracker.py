@@ -7,6 +7,8 @@ Cost Tracker для Memory Operations
 
 import sys
 import sqlite3
+import json
+import os
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any
@@ -22,8 +24,8 @@ if sys.platform == 'win32':
 class CostTracker:
     """Отслеживание стоимости операций с памятью"""
 
-    # Примерные цены за 1M токенов (USD)
-    PRICES = {
+    # Примерные цены за 1M токенов (USD) - fallback если prices.json не найден
+    DEFAULT_PRICES = {
         'claude-opus-4': {'input': 15.0, 'output': 75.0},
         'claude-sonnet-4': {'input': 3.0, 'output': 15.0},
         'claude-haiku-4': {'input': 0.25, 'output': 1.25},
@@ -35,8 +37,35 @@ class CostTracker:
             claude_dir = Path.home() / ".claude"
             db_path = claude_dir / "memory_costs.db"
 
-        self.db_path = db_path
+        self.db_path = self._safe_db_path(db_path)
+        self.PRICES = self._load_prices()
         self._init_db()
+
+    def _safe_db_path(self, path: Path) -> Path:
+        """Validate database path is within allowed directories"""
+        try:
+            resolved = path.resolve()
+            home = Path.home().resolve()
+            # Check if path is within home directory
+            if not str(resolved).startswith(str(home)):
+                raise ValueError(f"Database path must be within home directory: {path}")
+            return resolved
+        except Exception as exc:
+            raise ValueError(f"Invalid database path: {path}") from exc
+
+    def _load_prices(self) -> Dict[str, Dict[str, float]]:
+        """Load prices from config file or use defaults"""
+        prices_file = Path(__file__).parent.parent / "config" / "prices.json"
+
+        if prices_file.exists() and os.access(prices_file, os.R_OK):
+            try:
+                with open(prices_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception as e:
+                print(f"[WARN] Failed to load prices.json: {e}", file=sys.stderr)
+                print("[WARN] Using default prices", file=sys.stderr)
+
+        return self.DEFAULT_PRICES
 
     def _init_db(self):
         """Инициализация БД"""
@@ -168,7 +197,7 @@ class CostTracker:
                 'operations_by_type': operations_by_type
             }
 
-    def print_stats(self, days: int = 7):
+    def print_stats(self, days: int = 7, verbose: bool = False):
         """Выводит статистику в консоль"""
         stats = self.get_stats(days)
 
@@ -184,6 +213,11 @@ class CostTracker:
             print("\nBy operation type:")
             for op_type, data in stats['operations_by_type'].items():
                 print(f"  {op_type:30s} {data['count']:4d} ops  ${data['cost']:.4f}")
+
+        if verbose:
+            print("\n[VERBOSE] Price configuration:")
+            for model, prices in self.PRICES.items():
+                print(f"  {model:20s} Input: ${prices['input']:.2f}/M  Output: ${prices['output']:.2f}/M")
 
 
 def main():
@@ -203,12 +237,14 @@ def main():
                         help='Output tokens')
     parser.add_argument('--model', type=str, default='claude-sonnet-4',
                         help='Model name')
+    parser.add_argument('--verbose', action='store_true',
+                        help='Show detailed output')
 
     args = parser.parse_args()
     tracker = CostTracker()
 
     if args.command == 'stats':
-        tracker.print_stats(args.days)
+        tracker.print_stats(args.days, verbose=args.verbose)
 
     elif args.command == 'track':
         if not args.operation:
@@ -225,6 +261,11 @@ def main():
         print(f"[TRACKED] {result['operation_type']}")
         print(f"  Tokens: {result['input_tokens']} in, {result['output_tokens']} out")
         print(f"  Cost: ${result['total_cost']:.6f}")
+
+        if args.verbose:
+            print(f"  Model: {result['model']}")
+            print(f"  Timestamp: {result['timestamp']}")
+            print(f"  ID: {result['id']}")
 
 
 if __name__ == '__main__':

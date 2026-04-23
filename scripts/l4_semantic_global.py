@@ -51,7 +51,10 @@ import logging
 import os
 import re
 import sys
+import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -76,6 +79,16 @@ except ImportError:
 
 class GlobalSemanticMemory:
     """L4 SEMANTIC с поддержкой глобальной памяти и кросс-проектного поиска"""
+
+    DEFAULT_CONFIG = {
+        'embedding_model': 'paraphrase-multilingual-MiniLM-L12-v2',
+        'batch_size': 10,
+        'max_workers': 4,
+        'max_chunk_size': 500,
+        'search_results': {'default': 10, 'global': 5, 'project': 5},
+        'cache_size': 128,
+        'collection_names': {'global': 'memory_global', 'project_prefix': 'memory_'}
+    }
 
     @staticmethod
     def normalize_project_name(name: str) -> str:
@@ -113,6 +126,12 @@ class GlobalSemanticMemory:
         self.projects_base = self.home / ".claude" / "projects"
         self.global_projects_file = self.home / ".claude" / "GLOBAL_PROJECTS.md"
 
+        # Загрузка конфигурации
+        self.config = self._load_config()
+
+        # Валидация путей
+        self._validate_paths()
+
         # Автоопределение проектов
         self.project_whitelist = self._discover_projects()
 
@@ -127,9 +146,36 @@ class GlobalSemanticMemory:
         )
 
         # Модель для эмбеддингов (мультиязычная)
-        model_name = os.getenv('L4_MODEL', 'paraphrase-multilingual-MiniLM-L12-v2')
+        model_name = os.getenv('L4_MODEL', self.config['embedding_model'])
         logging.info("Loading embedding model: %s", model_name)
         self.model = SentenceTransformer(model_name)
+
+    def _load_config(self) -> Dict[str, Any]:
+        """Загрузка конфигурации из JSON или использование defaults"""
+        config_file = Path(__file__).parent.parent / "config" / "semantic_config.json"
+
+        if config_file.exists() and os.access(config_file, os.R_OK):
+            try:
+                with open(config_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception as e:
+                logging.warning("Failed to load semantic_config.json: %s", e)
+                logging.warning("Using default configuration")
+
+        return self.DEFAULT_CONFIG
+
+    def _validate_paths(self):
+        """Валидация критических путей"""
+        try:
+            home_resolved = self.home.resolve()
+
+            # Проверяем что все пути внутри home
+            for path in [self.global_memory, self.projects_base, self.global_projects_file]:
+                resolved = path.resolve()
+                if not str(resolved).startswith(str(home_resolved)):
+                    raise ValueError(f"Path outside home directory: {path}")
+        except Exception as exc:
+            raise ValueError(f"Path validation failed: {exc}") from exc
 
     def _discover_projects(self) -> list:
         """Автоматическое определение проектов
@@ -209,59 +255,61 @@ class GlobalSemanticMemory:
         )
 
     def index_global_memory(self) -> bool:
-        """Индексирует глобальную память"""
+        """Индексирует глобальную память с batch обработкой"""
         logging.info("Indexing global memory: %s", self.global_memory)
 
         if not self.global_memory.exists():
             print(f"[ERROR] Global memory not found: {self.global_memory}")
             return False
 
+        # Проверка прав доступа к директории
+        if not os.access(self.global_memory, os.R_OK):
+            print(f"[ERROR] No read access to: {self.global_memory}")
+            return False
+
         collection = self.get_or_create_collection(
-            "memory_global",
+            self.config['collection_names']['global'],
             "Global memory - knowledge applicable to all projects"
         )
 
-        # Индексируем все .md файлы
-        indexed_count = 0
-        for md_file in self.global_memory.rglob("*.md"):
-            if md_file.name.startswith('.'):
-                continue
+        # Собираем все файлы
+        md_files = [f for f in self.global_memory.rglob("*.md")
+                    if not f.name.startswith('.')]
 
-            try:
-                self._index_file(md_file, collection, "global")
-                indexed_count += 1
-            except Exception as e:
-                print(f"[ERROR] Failed to index {md_file.name}: {e}")
+        # Batch индексация с параллелизмом
+        indexed_count = self._index_files_batch(md_files, collection, "global")
 
         print(f"[OK] Indexed {indexed_count} files from global memory")
         return True
 
     def index_project(self, project_path: Path) -> bool:
-        """Индексирует память конкретного проекта"""
+        """Индексирует память конкретного проекта с batch обработкой"""
         memory_path = project_path / "memory"
 
         if not memory_path.exists():
             print(f"[ERROR] Project memory not found: {memory_path}")
             return False
 
+        # Проверка прав доступа
+        if not os.access(memory_path, os.R_OK):
+            print(f"[ERROR] No read access to: {memory_path}")
+            return False
+
         project_name = self.normalize_project_name(project_path.name)
+        prefix = self.config['collection_names']['project_prefix']
         collection = self.get_or_create_collection(
-            f"memory_{project_name}",
+            f"{prefix}{project_name}",
             f"Project memory: {project_name}"
         )
 
         logging.info("Indexing project: %s", project_name)
 
-        indexed_count = 0
-        for md_file in memory_path.rglob("*.md"):
-            if md_file.name.startswith('.'):
-                continue
+        # Собираем все файлы
+        md_files = [f for f in memory_path.rglob("*.md")
+                    if not f.name.startswith('.')]
 
-            try:
-                self._index_file(md_file, collection, project_name)
-                indexed_count += 1
-            except Exception as e:
-                print(f"[ERROR] Failed to index {md_file.name}: {e}")
+        # Batch индексация
+        indexed_count = self._index_files_batch(md_files, collection, project_name)
 
         print(f"[OK] Indexed {indexed_count} files from {project_name}")
         return True
@@ -414,8 +462,48 @@ class GlobalSemanticMemory:
 
         return result
 
-    def _index_file(self, file_path: Path, collection, source: str):
-        """Индексирует файл в коллекцию"""
+    def _index_files_batch(self, files: List[Path], collection, source: str) -> int:
+        """Batch индексация файлов с параллелизмом"""
+        batch_size = self.config['batch_size']
+        max_workers = self.config['max_workers']
+        indexed_count = 0
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(self._prepare_file_data, f, source): f
+                for f in files
+            }
+
+            batch_data = []
+            for future in as_completed(futures):
+                try:
+                    data = future.result()
+                    if data:
+                        batch_data.append(data)
+
+                        # Когда накопили batch_size файлов - добавляем в БД
+                        if len(batch_data) >= batch_size:
+                            self._add_batch_to_collection(batch_data, collection)
+                            indexed_count += len(batch_data)
+                            batch_data = []
+                except Exception as e:
+                    file_path = futures[future]
+                    print(f"[ERROR] Failed to prepare {file_path.name}: {e}")
+
+            # Добавляем остаток
+            if batch_data:
+                self._add_batch_to_collection(batch_data, collection)
+                indexed_count += len(batch_data)
+
+        return indexed_count
+
+    def _prepare_file_data(self, file_path: Path, source: str) -> Dict[str, Any]:
+        """Подготовка данных файла для индексации"""
+        # Проверка прав доступа
+        if not os.access(file_path, os.R_OK):
+            logging.warning("No read access to %s", file_path)
+            return {}
+
         content = file_path.read_text(encoding='utf-8')
 
         # Парсинг метаданных
@@ -425,12 +513,12 @@ class GlobalSemanticMemory:
         chunks = self._split_into_chunks(content)
 
         if not chunks:
-            return
+            return {}
 
         # Генерируем эмбеддинги
         embeddings = self.model.encode(chunks).tolist()
 
-        # Добавляем в БД
+        # Формируем данные
         ids = [f"{source}_{file_path.stem}_{i}" for i in range(len(chunks))]
         metadatas = [
             {
@@ -443,31 +531,39 @@ class GlobalSemanticMemory:
             for i in range(len(chunks))
         ]
 
-        # Удаляем старые записи для этого файла
-        # Используем двухэтапный подход для надёжности:
-        # 1. Получаем все ID старых чанков по метаданным
-        # 2. Удаляем их явно по ID
-        try:
-            # ChromaDB 1.5+ требует явные операторы в where clause
-            existing = collection.get(where={
-                "$and": [
-                    {"file": {"$eq": file_path.name}},
-                    {"source": {"$eq": source}}
-                ]
-            })
-            stale_ids = existing.get("ids", [])
-            if stale_ids:
-                collection.delete(ids=stale_ids)
-                logging.info("Deleted %d stale embeddings for %s", len(stale_ids), file_path.name)
-        except Exception as e:
-            logging.warning("Could not delete existing embeddings for %s: %s", file_path.name, e)
+        return {
+            'file_path': file_path,
+            'source': source,
+            'ids': ids,
+            'embeddings': embeddings,
+            'documents': chunks,
+            'metadatas': metadatas
+        }
 
-        collection.add(
-            ids=ids,
-            embeddings=embeddings,
-            documents=chunks,
-            metadatas=metadatas
-        )
+    def _add_batch_to_collection(self, batch_data: List[Dict[str, Any]], collection):
+        """Добавление batch данных в коллекцию"""
+        for data in batch_data:
+            try:
+                # Удаляем старые записи для этого файла
+                existing = collection.get(where={
+                    "$and": [
+                        {"file": {"$eq": data['file_path'].name}},
+                        {"source": {"$eq": data['source']}}
+                    ]
+                })
+                stale_ids = existing.get("ids", [])
+                if stale_ids:
+                    collection.delete(ids=stale_ids)
+
+                # Добавляем новые
+                collection.add(
+                    ids=data['ids'],
+                    embeddings=data['embeddings'],
+                    documents=data['documents'],
+                    metadatas=data['metadatas']
+                )
+            except Exception as e:
+                logging.warning("Failed to add %s to collection: %s", data['file_path'].name, e)
 
     def _search_in_collection(
         self, collection, query: str, n_results: int, source: str
@@ -495,8 +591,9 @@ class GlobalSemanticMemory:
 
         return formatted
 
+    @lru_cache(maxsize=128)
     def _parse_frontmatter(self, content: str) -> Dict[str, str]:
-        """Извлекает метаданные из frontmatter"""
+        """Извлекает метаданные из frontmatter (с кешированием)"""
         metadata = {}
         if content.startswith('---'):
             parts = content.split('---', 2)
@@ -508,8 +605,10 @@ class GlobalSemanticMemory:
                         metadata[key.strip()] = value.strip()
         return metadata
 
-    def _split_into_chunks(self, content: str, max_chunk_size: int = 500) -> List[str]:
+    def _split_into_chunks(self, content: str) -> List[str]:
         """Разбивает контент на чанки"""
+        max_chunk_size = self.config['max_chunk_size']
+
         if content.startswith('---'):
             parts = content.split('---', 2)
             content = parts[2] if len(parts) >= 3 else content

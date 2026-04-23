@@ -8,9 +8,12 @@ Layer 1: Deterministic checks (ghost links, orphans, duplicates)
 Layer 2: LLM-based semantic checks (contradictions, outdated claims)
 """
 
+import os
 import re
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
 from typing import Dict, List, Set, Tuple
 
@@ -30,6 +33,31 @@ class MemoryLint(BaseReporter):
         self.quick_mode = quick_mode
         self.config = self._load_config()
 
+    def clear_cache(self):
+        """Clear all caches (call after file modifications)"""
+        self.extract_links.cache_clear()
+        self._extract_frontmatter.cache_clear()
+
+    def _read_file_safe(self, file_path: Path) -> str:
+        """Safely read file content with error handling"""
+        try:
+            return file_path.read_text(encoding='utf-8')
+        except Exception as exc:
+            self.print_warn(f"Could not read {file_path.name}: {exc}")
+            return ""
+
+    def _read_files_parallel(self, files: List[Path], max_workers: int = 4) -> Dict[Path, str]:
+        """Read multiple files in parallel"""
+        results = {}
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_file = {executor.submit(self._read_file_safe, f): f for f in files}
+            for future in as_completed(future_to_file):
+                file_path = future_to_file[future]
+                content = future.result()
+                if content:
+                    results[file_path] = content
+        return results
+
     def _load_config(self) -> dict:
         """Load configuration from config/memory_lint_config.yml"""
         config_path = Path(__file__).parent.parent / 'config' / 'memory_lint_config.yml'
@@ -45,15 +73,36 @@ class MemoryLint(BaseReporter):
                 }
             }
 
-        with open(config_path, 'r', encoding='utf-8') as f:
-            return yaml.safe_load(f)
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                return yaml.safe_load(f)
+        except Exception as exc:
+            self.print_warn(f"Could not load config: {exc}")
+            return {
+                'file_sizes': {'max_size': 102400},
+                'age_thresholds': {
+                    'hot_max_hours': 24,
+                    'warm_max_days': 14,
+                    'cold_max_days': 30
+                }
+            }
 
     def find_all_md_files(self) -> List[Path]:
-        """Find all markdown files in memory directory"""
-        return list(self.memory_path.rglob("*.md"))
+        """Find all markdown files in memory directory with read access"""
+        all_files = list(self.memory_path.rglob("*.md"))
+        # Filter files with read access
+        readable_files = [f for f in all_files if os.access(f, os.R_OK)]
 
+        # Warn about inaccessible files
+        inaccessible = len(all_files) - len(readable_files)
+        if inaccessible > 0:
+            self.print_warn(f"Skipped {inaccessible} file(s) without read access")
+
+        return readable_files
+
+    @lru_cache(maxsize=256)
     def extract_links(self, content: str) -> Set[str]:
-        """Extract all markdown links from content"""
+        """Extract all markdown links from content (cached)"""
         # Match [text](link) and [text](link.md)
         pattern = r'\[([^\]]+)\]\(([^\)]+)\)'
         links = set()
@@ -65,27 +114,26 @@ class MemoryLint(BaseReporter):
         return links
 
     def check_ghost_links(self) -> Dict[Path, List[str]]:
-        """Check for links to non-existent files"""
+        """Check for links to non-existent files (parallel)"""
         self.print_section("Layer 1: Ghost Links Detection")
 
         ghost_links: Dict[Path, List[str]] = {}
         md_files = self.find_all_md_files()
 
-        for md_file in md_files:
-            try:
-                content = md_file.read_text(encoding='utf-8')
-                links = self.extract_links(content)
+        # Read all files in parallel
+        file_contents = self._read_files_parallel(md_files)
 
-                for link in links:
-                    # Resolve relative path
-                    target = (md_file.parent / link).resolve()
+        for md_file, content in file_contents.items():
+            links = self.extract_links(content)
 
-                    if not target.exists():
-                        if md_file not in ghost_links:
-                            ghost_links[md_file] = []
-                        ghost_links[md_file].append(link)
-            except Exception as exc:
-                self.print_warn(f"Could not read {md_file.name}: {exc}")
+            for link in links:
+                # Resolve relative path
+                target = (md_file.parent / link).resolve()
+
+                if not target.exists():
+                    if md_file not in ghost_links:
+                        ghost_links[md_file] = []
+                    ghost_links[md_file].append(link)
 
         if ghost_links:
             for file, links_list in ghost_links.items():
@@ -101,22 +149,21 @@ class MemoryLint(BaseReporter):
         return ghost_links
 
     def check_orphan_files(self) -> List[Path]:
-        """Check for files not linked from anywhere"""
+        """Check for files not linked from anywhere (parallel)"""
         self.print_section("Layer 1: Orphan Files Detection")
 
         md_files = self.find_all_md_files()
         all_links = set()
 
+        # Read all files in parallel
+        file_contents = self._read_files_parallel(md_files)
+
         # Collect all links
-        for md_file in md_files:
-            try:
-                content = md_file.read_text(encoding='utf-8')
-                links = self.extract_links(content)
-                for link in links:
-                    target = (md_file.parent / link).resolve()
-                    all_links.add(target)
-            except Exception as exc:
-                self.print_warn(f"Error reading {md_file.name}: {exc}")
+        for md_file, content in file_contents.items():
+            links = self.extract_links(content)
+            for link in links:
+                target = (md_file.parent / link).resolve()
+                all_links.add(target)
 
         # Find orphans (exclude index files)
         orphans = []
@@ -136,24 +183,23 @@ class MemoryLint(BaseReporter):
         return orphans
 
     def check_duplicates(self) -> Dict[str, List[Path]]:
-        """Check for duplicate content (same title or very similar content)"""
+        """Check for duplicate content (parallel)"""
         self.print_section("Layer 1: Duplicate Detection")
 
         md_files = self.find_all_md_files()
         titles: Dict[str, List[Path]] = {}
 
-        for md_file in md_files:
-            try:
-                content = md_file.read_text(encoding='utf-8')
-                # Extract first heading
-                match = re.search(r'^#\s+(.+)$', content, re.MULTILINE)
-                if match:
-                    title = match.group(1).strip().lower()
-                    if title not in titles:
-                        titles[title] = []
-                    titles[title].append(md_file)
-            except Exception as exc:
-                self.print_warn(f"Error reading {md_file.name}: {exc}")
+        # Read all files in parallel
+        file_contents = self._read_files_parallel(md_files)
+
+        for md_file, content in file_contents.items():
+            # Extract first heading
+            match = re.search(r'^#\s+(.+)$', content, re.MULTILINE)
+            if match:
+                title = match.group(1).strip().lower()
+                if title not in titles:
+                    titles[title] = []
+                titles[title].append(md_file)
 
         duplicates = {title: files for title, files in titles.items() if len(files) > 1}
 
@@ -712,8 +758,9 @@ Format as JSON:
 
         return antipatterns
 
+    @lru_cache(maxsize=256)
     def _extract_frontmatter(self, content: str) -> Dict[str, str]:
-        """Extract YAML frontmatter from markdown content"""
+        """Extract YAML frontmatter from markdown content (cached)"""
         frontmatter = {}
 
         # Match frontmatter between --- markers

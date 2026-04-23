@@ -8,11 +8,14 @@ Skill Creation Pipeline
 """
 
 import json
+import os
 import sys
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Any
 from collections import Counter
+from functools import lru_cache
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Настройка UTF-8 для Windows
 if sys.platform == 'win32':
@@ -34,9 +37,25 @@ class SkillCreator:
         self.min_pattern_count = 3  # Паттерн должен повториться минимум 3 раза
         self.min_success_rate = 0.8  # 80% успешных выполнений
 
+    def safe_file_path(self, path: Path) -> Path:
+        """Validate that path is within allowed directories"""
+        try:
+            resolved = path.resolve()
+            # Check if path is within claude_dir
+            if not str(resolved).startswith(str(self.claude_dir.resolve())):
+                raise ValueError(f"Path outside allowed directory: {path}")
+            return resolved
+        except Exception as exc:
+            raise ValueError(f"Invalid path: {path}") from exc
+
     def analyze_session(self, session_file: Path) -> List[Dict[str, Any]]:
         """Анализирует сессию и извлекает паттерны"""
         if not session_file.exists():
+            return []
+
+        # Check read access
+        if not os.access(session_file, os.R_OK):
+            print(f"[WARN] No read access: {session_file}", file=sys.stderr)
             return []
 
         patterns: List[Dict[str, Any]] = []
@@ -112,9 +131,15 @@ class SkillCreator:
 
         return patterns
 
+    @lru_cache(maxsize=1)
     def load_patterns_db(self) -> Dict[str, Any]:
-        """Загружает базу паттернов"""
+        """Загружает базу паттернов (cached)"""
         if not self.patterns_db.exists():
+            return {'patterns': {}, 'last_update': None}
+
+        # Check read access
+        if not os.access(self.patterns_db, os.R_OK):
+            print(f"[WARN] No read access: {self.patterns_db}", file=sys.stderr)
             return {'patterns': {}, 'last_update': None}
 
         try:
@@ -126,6 +151,8 @@ class SkillCreator:
     def save_patterns_db(self, db: Dict[str, Any]):
         """Сохраняет базу паттернов"""
         db['last_update'] = datetime.now().isoformat()
+        # Clear cache after save
+        self.load_patterns_db.cache_clear()
         try:
             with open(self.patterns_db, 'w', encoding='utf-8') as f:
                 json.dump(db, f, indent=2, ensure_ascii=False)
@@ -234,9 +261,21 @@ This pattern was successfully used for:
 
     def create_skill_file(self, skill_name: str, content: str) -> bool:
         """Создаёт файл skill"""
-        skill_dir = self.skills_dir / skill_name.lower().replace(' ', '-')
-        skill_dir.mkdir(parents=True, exist_ok=True)
+        # Sanitize skill name
+        safe_name = skill_name.lower().replace(' ', '-')
+        # Remove potentially dangerous characters
+        safe_name = ''.join(c for c in safe_name if c.isalnum() or c in '-_')
 
+        skill_dir = self.skills_dir / safe_name
+
+        # Validate path
+        try:
+            self.safe_file_path(skill_dir)
+        except ValueError as e:
+            print(f"[ERROR] Invalid skill path: {e}", file=sys.stderr)
+            return False
+
+        skill_dir.mkdir(parents=True, exist_ok=True)
         skill_file = skill_dir / "SKILL.md"
 
         try:
@@ -248,26 +287,39 @@ This pattern was successfully used for:
             print(f"[ERROR] Failed to create skill: {e}", file=sys.stderr)
             return False
 
-    def analyze_all_sessions(self) -> int:
-        """Анализирует все сессии и обновляет паттерны"""
-        analyzed = 0
-
+    def analyze_all_sessions(self, max_workers: int = 4) -> int:
+        """Анализирует все сессии и обновляет паттерны (parallel)"""
         if not self.projects_dir.exists():
             return 0
 
-        # Ищем JSONL файлы в директориях проектов
+        # Collect all session files
+        session_files = []
         for project_dir in self.projects_dir.iterdir():
             if not project_dir.is_dir():
                 continue
+            session_files.extend(project_dir.glob("*.jsonl"))
 
-            # JSONL файлы лежат прямо в директории проекта
-            for session_file in project_dir.glob("*.jsonl"):
-                patterns = self.analyze_session(session_file)
-                if patterns:
-                    self.update_patterns(patterns)
-                    analyzed += 1
+        if not session_files:
+            return 0
 
-        return analyzed
+        # Analyze in parallel
+        all_patterns = []
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_file = {executor.submit(self.analyze_session, f): f for f in session_files}
+            for future in as_completed(future_to_file):
+                try:
+                    patterns = future.result()
+                    if patterns:
+                        all_patterns.extend(patterns)
+                except Exception as exc:
+                    file = future_to_file[future]
+                    print(f"[WARN] Failed to analyze {file}: {exc}", file=sys.stderr)
+
+        # Update patterns in batch
+        if all_patterns:
+            self.update_patterns(all_patterns)
+
+        return len(session_files)
 
     def suggest_skills(self) -> List[Dict[str, Any]]:
         """Предлагает skills на основе паттернов"""

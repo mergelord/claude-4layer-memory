@@ -11,10 +11,11 @@ Usage:
 """
 
 import argparse
+import os
 import shutil
 import sys
 from pathlib import Path
-from typing import List, Set
+from typing import List, Set, Tuple
 
 # Blacklist системных папок (encoded paths)
 SYSTEM_PATH_PATTERNS: Set[str] = {
@@ -39,9 +40,15 @@ SYSTEM_PATH_PATTERNS: Set[str] = {
 }
 
 
+def normalize_path(path_str: str) -> str:
+    """Normalize path for comparison (remove special chars)."""
+    return path_str.replace('\\', '-').replace('/', '-').replace(':', '-')
+
+
 def is_system_artifact(project_name: str) -> bool:
     """Проверяет является ли папка артефактом системной директории."""
-    return project_name in SYSTEM_PATH_PATTERNS
+    normalized = normalize_path(project_name)
+    return normalized in SYSTEM_PATH_PATTERNS or project_name in SYSTEM_PATH_PATTERNS
 
 
 def find_system_artifacts(projects_dir: Path) -> List[Path]:
@@ -49,6 +56,11 @@ def find_system_artifacts(projects_dir: Path) -> List[Path]:
     artifacts: List[Path] = []
 
     if not projects_dir.exists():
+        return artifacts
+
+    # Check read access
+    if not os.access(projects_dir, os.R_OK):
+        print(f"[WARN] No read access: {projects_dir}", file=sys.stderr)
         return artifacts
 
     for project_path in projects_dir.iterdir():
@@ -61,11 +73,12 @@ def find_system_artifacts(projects_dir: Path) -> List[Path]:
     return artifacts
 
 
-def cleanup_artifacts(artifacts: List[Path], dry_run: bool = False) -> None:
-    """Удаляет артефакты."""
+def cleanup_artifacts(artifacts: List[Path], dry_run: bool = False,
+                     verbose: bool = False, projects_dir: Path = None) -> Tuple[int, int]:
+    """Удаляет артефакты. Returns (deleted_count, failed_count)."""
     if not artifacts:
         print("[OK] No system artifacts found")
-        return
+        return (0, 0)
 
     print(f"[INFO] Found {len(artifacts)} system artifact(s):")
     for artifact in artifacts:
@@ -73,17 +86,55 @@ def cleanup_artifacts(artifacts: List[Path], dry_run: bool = False) -> None:
 
     if dry_run:
         print("\n[DRY RUN] Would delete these artifacts (use without --dry-run to delete)")
-        return
+        return (0, 0)
 
     print("\n[ACTION] Deleting artifacts...")
+    deleted_count = 0
+    failed_count = 0
+
     for artifact in artifacts:
         try:
+            # Validate path is within projects_dir
+            if projects_dir:
+                try:
+                    artifact.resolve().relative_to(projects_dir.resolve())
+                except ValueError:
+                    print(f"  [ERROR] Path outside projects dir: {artifact.name}", file=sys.stderr)
+                    failed_count += 1
+                    continue
+
+            # Check write access
+            if not os.access(artifact, os.W_OK):
+                print(f"  [ERROR] No write access: {artifact.name}", file=sys.stderr)
+                failed_count += 1
+                continue
+
             shutil.rmtree(artifact)
             print(f"  [OK] Deleted: {artifact.name}")
+            deleted_count += 1
+
+            if verbose:
+                print(f"       Size freed: {_get_dir_size(artifact)} bytes")
+
         except Exception as e:
             print(f"  [ERROR] Failed to delete {artifact.name}: {e}", file=sys.stderr)
+            failed_count += 1
 
-    print("\n[OK] Cleanup completed")
+    print(f"\n[STATS] Deleted: {deleted_count}, Failed: {failed_count}")
+    print("[OK] Cleanup completed")
+    return (deleted_count, failed_count)
+
+
+def _get_dir_size(path: Path) -> int:
+    """Calculate directory size (for verbose mode)."""
+    try:
+        total = 0
+        for entry in path.rglob('*'):
+            if entry.is_file():
+                total += entry.stat().st_size
+        return total
+    except Exception:
+        return 0
 
 
 def main() -> None:
@@ -95,6 +146,11 @@ def main() -> None:
         "--dry-run",
         action="store_true",
         help="Show what would be deleted without actually deleting"
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Show detailed output"
     )
     args = parser.parse_args()
 
@@ -110,7 +166,11 @@ def main() -> None:
     artifacts = find_system_artifacts(projects_dir)
 
     # Удаляем
-    cleanup_artifacts(artifacts, dry_run=args.dry_run)
+    deleted, failed = cleanup_artifacts(artifacts, dry_run=args.dry_run,
+                                       verbose=args.verbose, projects_dir=projects_dir)
+
+    # Exit code
+    sys.exit(0 if failed == 0 else 1)
 
 
 if __name__ == "__main__":
