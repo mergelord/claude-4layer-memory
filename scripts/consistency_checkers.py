@@ -60,12 +60,12 @@ class TerminologyChecker:
         for md_file in md_files:
             try:
                 content = md_file.read_text(encoding='utf-8').lower()
-
-                for term in [base_term] + variants:
-                    counts[term] += content.count(term.lower())
-            except Exception:
-                # Skip files that can't be read
+            except (OSError, UnicodeDecodeError):
+                # Skip files that can't be read or decoded
                 continue
+
+            for term in [base_term] + variants:
+                counts[term] += content.count(term.lower())
 
         return counts
 
