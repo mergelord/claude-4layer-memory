@@ -39,6 +39,18 @@ env/
 .coverage
 htmlcov/
 .tox/
+.mypy_cache/
+.ruff_cache/
+
+# Generated lint/security/complexity reports
+bandit_report.json
+ruff_report.json
+prospector_scripts.json
+prospector_report.json
+radon_cc.json
+radon_mi.json
+PROSPECTOR_REPORT.md
+SESSION_SUMMARY_*.md
 
 # ChromaDB
 chroma.sqlite3
