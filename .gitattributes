@@ -1,0 +1,37 @@
+# Auto-detect text files and normalize line endings to LF in the repository.
+# Working-tree line endings stay platform-native on checkout (LF on POSIX, CRLF on Windows).
+* text=auto eol=lf
+
+# Windows-only scripts must keep CRLF on disk to be runnable from cmd.exe.
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+*.ps1   text eol=crlf
+
+# POSIX shell scripts: LF only, even on Windows checkouts.
+*.sh    text eol=lf
+
+# Common text formats: explicit LF for predictability.
+*.py    text eol=lf
+*.js    text eol=lf
+*.json  text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.md    text eol=lf
+*.toml  text eol=lf
+*.cfg   text eol=lf
+*.ini   text eol=lf
+*.txt   text eol=lf
+
+# Treat as binary (do not normalize).
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.pdf   binary
+*.zip   binary
+*.tar   binary
+*.gz    binary
+*.sqlite binary
+*.sqlite3 binary
+*.db    binary
