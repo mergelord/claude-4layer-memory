@@ -8,6 +8,8 @@ const PYTHON_BIN =
   (process.platform === 'win32' ? 'python' : 'python3');
 
 module.exports = async function search(query, options) {
+  const opts = options || {};
+
   console.log(chalk.blue.bold('\n🔍 Memory Search\n'));
   console.log(chalk.gray(`Query: "${query}"\n`));
 
@@ -20,10 +22,10 @@ module.exports = async function search(query, options) {
     let pyScript;
     let pyArgs;
 
-    if (options.global) {
+    if (opts.global) {
       pyScript = path.join(scriptDir, 'l4_semantic_global.py');
       pyArgs = ['search-global', query];
-    } else if (options.project) {
+    } else if (opts.project) {
       const projectName = path.basename(process.cwd());
       pyScript = path.join(scriptDir, 'l4_semantic_global.py');
       pyArgs = ['search-project', projectName, query];
