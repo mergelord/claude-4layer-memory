@@ -10,12 +10,10 @@ Unit tests for L4 FTS5 Search
 - Edge cases (пустые файлы, битые пути)
 """
 
-import os
-import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
@@ -213,11 +211,11 @@ class TestL4FTS5SearchQuery(unittest.TestCase):
     def test_cache_invalidation(self):
         """clear_cache очищает кэш поиска"""
         # Первый поиск
-        results1 = self.fts.search("Python")
+        self.fts.search("Python")
         cache_info1 = self.fts._cached_search.cache_info()
 
         # Второй поиск (из кэша)
-        results2 = self.fts.search("Python")
+        self.fts.search("Python")
         cache_info2 = self.fts._cached_search.cache_info()
 
         self.assertEqual(cache_info2.hits, cache_info1.hits + 1)

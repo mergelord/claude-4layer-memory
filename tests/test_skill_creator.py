@@ -13,7 +13,6 @@ Unit tests for Skill Creator
 """
 
 import json
-import os
 import shutil
 import sys
 import tempfile
@@ -295,14 +294,19 @@ class TestSkillGeneration:
         assert "Test content" in skill_file.read_text(encoding='utf-8')
 
     def test_create_skill_file_sanitizes_name(self, creator):
-        """Test that skill name is sanitized"""
+        """Test that skill name is sanitized and stays inside skills_dir"""
         content = "# Test"
         result = creator.create_skill_file("Test/../../../etc/passwd", content)
 
-        # Should sanitize to safe name
+        # Should accept the call after sanitisation
         assert result is True
-        # Should not create file outside skills_dir
-        assert not Path("/etc/passwd").exists()
+        # Every SKILL.md created by create_skill_file must live under skills_dir
+        skills_dir = creator.skills_dir.resolve()
+        created = list(skills_dir.rglob("SKILL.md"))
+        assert created, "Expected create_skill_file to write a SKILL.md under skills_dir"
+        for skill_file in created:
+            # raises ValueError if the resolved path escaped skills_dir
+            skill_file.resolve().relative_to(skills_dir)
 
     def test_suggest_skills(self, creator):
         """Test skill suggestions"""

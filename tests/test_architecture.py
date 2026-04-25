@@ -9,9 +9,8 @@
 """
 
 import ast
-import sys
 from pathlib import Path
-from typing import Dict, List, Set
+from typing import List, Set
 
 import pytest
 

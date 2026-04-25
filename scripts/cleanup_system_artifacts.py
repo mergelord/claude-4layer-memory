@@ -109,12 +109,15 @@ def cleanup_artifacts(artifacts: List[Path], dry_run: bool = False,
                 failed_count += 1
                 continue
 
+            # Compute size BEFORE deletion (after rmtree the dir is gone)
+            dir_size = _get_dir_size(artifact) if verbose else 0
+
             shutil.rmtree(artifact)
             print(f"  [OK] Deleted: {artifact.name}")
             deleted_count += 1
 
             if verbose:
-                print(f"       Size freed: {_get_dir_size(artifact)} bytes")
+                print(f"       Size freed: {dir_size} bytes")
 
         except Exception as e:
             print(f"  [ERROR] Failed to delete {artifact.name}: {e}", file=sys.stderr)
@@ -166,8 +169,8 @@ def main() -> None:
     artifacts = find_system_artifacts(projects_dir)
 
     # Удаляем
-    deleted, failed = cleanup_artifacts(artifacts, dry_run=args.dry_run,
-                                       verbose=args.verbose, projects_dir=projects_dir)
+    _deleted, failed = cleanup_artifacts(artifacts, dry_run=args.dry_run,
+                                        verbose=args.verbose, projects_dir=projects_dir)
 
     # Exit code
     sys.exit(0 if failed == 0 else 1)

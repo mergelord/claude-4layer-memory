@@ -12,7 +12,6 @@ Unit tests for Cost Tracker
 """
 
 import json
-import os
 import shutil
 import sys
 import tempfile
@@ -57,22 +56,26 @@ class TestCostTrackerInit:
         assert result.is_absolute()
 
     def test_safe_db_path_invalid(self):
-        """Test safe_db_path rejects path outside home"""
+        """Test safe_db_path rejects path outside home and temp roots"""
         tracker = CostTracker()
-        invalid_path = Path("/tmp/outside.db")
-        with pytest.raises(ValueError, match="Invalid database path"):
+        # /etc is outside both Path.home() and tempfile.gettempdir()
+        invalid_path = Path("/etc/outside.db")
+        with pytest.raises(ValueError, match="Database path"):
             tracker._safe_db_path(invalid_path)
 
     def test_load_prices_default(self, temp_dir):
         """Test loading default prices when config missing"""
         db_path = temp_dir / "test.db"
         tracker = CostTracker(db_path)
-        assert 'claude-sonnet-4' in tracker.PRICES
-        assert tracker.PRICES['claude-sonnet-4']['input'] == 3.0
+        assert 'claude-sonnet-4' in tracker.prices
+        assert tracker.prices['claude-sonnet-4']['input'] == 3.0
 
-    def test_load_prices_from_file(self, temp_dir):
+    def test_load_prices_from_file(self, temp_dir, monkeypatch):
         """Test loading prices from config file"""
-        # Create config directory and prices file
+        # Create a fake "scripts/" + "config/" layout under temp_dir so that
+        # Path(__file__).parent.parent inside _load_prices points at temp_dir.
+        scripts_dir = temp_dir / "scripts"
+        scripts_dir.mkdir()
         config_dir = temp_dir / "config"
         config_dir.mkdir()
         prices_file = config_dir / "prices.json"
@@ -83,15 +86,13 @@ class TestCostTrackerInit:
         with open(prices_file, 'w', encoding='utf-8') as f:
             json.dump(custom_prices, f)
 
-        # Mock Path(__file__).parent.parent to return temp_dir
-        with patch('scripts.cost_tracker.Path') as mock_path:
-            mock_path.return_value.parent.parent = temp_dir
-            mock_path.home.return_value = Path.home()
+        fake_module_path = str(scripts_dir / "cost_tracker.py")
+        monkeypatch.setattr('scripts.cost_tracker.__file__', fake_module_path)
 
-            db_path = temp_dir / "test.db"
-            tracker = CostTracker(db_path)
-            # Should use custom prices
-            assert tracker.PRICES['claude-sonnet-4']['input'] == 5.0
+        db_path = temp_dir / "test.db"
+        tracker = CostTracker(db_path)
+        # Should use custom prices loaded from the temp config file
+        assert tracker.prices['claude-sonnet-4']['input'] == 5.0
 
 
 class TestTrackOperation:
@@ -332,7 +333,7 @@ class TestDatabaseIntegrity:
     def test_database_created(self, temp_dir):
         """Test that database is created"""
         db_path = temp_dir / "test.db"
-        tracker = CostTracker(db_path)
+        CostTracker(db_path)
 
         assert db_path.exists()
 

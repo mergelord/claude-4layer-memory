@@ -53,6 +53,7 @@ import re
 import sys
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
@@ -343,7 +344,7 @@ class GlobalSemanticMemory:
     def search_global(self, query: str, n_results: int = 5) -> List[Dict[str, Any]]:
         """Поиск только в глобальной памяти"""
         try:
-            collection = self.client.get_collection("memory_global")
+            collection = self.client.get_collection(self.config['collection_names']['global'])
             return self._search_in_collection(collection, query, n_results, "global")
         except Exception as e:
             print(f"[ERROR] Global collection not found: {e}")
@@ -351,7 +352,8 @@ class GlobalSemanticMemory:
 
     def search_project(self, project_name: str, query: str, n_results: int = 5) -> List[Dict[str, Any]]:
         """Поиск в конкретном проекте"""
-        collection_name = f"memory_{self.normalize_project_name(project_name)}"
+        prefix = self.config['collection_names']['project_prefix']
+        collection_name = f"{prefix}{self.normalize_project_name(project_name)}"
         try:
             collection = self.client.get_collection(collection_name)
             return self._search_in_collection(collection, query, n_results, project_name)
@@ -368,11 +370,13 @@ class GlobalSemanticMemory:
         all_results.extend(global_results)
 
         # Поиск во всех проектах
+        prefix = self.config['collection_names']['project_prefix']
+        global_name = self.config['collection_names']['global']
         collections = self.client.list_collections()
         for collection_info in collections:
-            if collection_info.name.startswith("memory_") and collection_info.name != "memory_global":
+            if collection_info.name.startswith(prefix) and collection_info.name != global_name:
                 collection = self.client.get_collection(collection_info.name)
-                project_name = collection_info.name.replace("memory_", "")
+                project_name = collection_info.name[len(prefix):]
                 results = self._search_in_collection(collection, query, n_results // 2, project_name)
                 all_results.extend(results)
 
@@ -416,9 +420,10 @@ class GlobalSemanticMemory:
         collections = self.client.list_collections()
 
         # Валидные коллекции
-        valid_collections = {"memory_global"}
+        prefix = self.config['collection_names']['project_prefix']
+        valid_collections = {self.config['collection_names']['global']}
         for project in self.project_whitelist:
-            valid_collections.add(f"memory_{self.normalize_project_name(project)}")
+            valid_collections.add(f"{prefix}{self.normalize_project_name(project)}")
 
         to_delete = []
         to_keep = []
@@ -652,115 +657,173 @@ def format_distance(distance) -> str:
     return f"{distance:.3f}" if isinstance(distance, (int, float)) else "N/A"
 
 
+@dataclass
+class CommandConfig:
+    """Configuration for command execution"""
+    command: str
+    args: List[str]
+    memory: 'GlobalSemanticMemory'
+
+
+def parse_command_line() -> CommandConfig:
+    """Parse command line arguments (extracted per Alisa's recommendation)"""
+    if len(sys.argv) < 2:
+        print(__doc__)
+        sys.exit(1)
+
+    command = sys.argv[1]
+    args = sys.argv[2:] if len(sys.argv) > 2 else []
+    memory = GlobalSemanticMemory()
+
+    return CommandConfig(command=command, args=args, memory=memory)
+
+
+def execute_index_global(config: CommandConfig) -> None:
+    """Execute index-global command"""
+    config.memory.index_global_memory()
+
+
+def execute_index_project(config: CommandConfig) -> None:
+    """Execute index-project command"""
+    if not config.args:
+        print("Usage: l4_semantic_global.py index-project <project-path>")
+        sys.exit(1)
+    project_path = Path(config.args[0])
+    config.memory.index_project(project_path)
+
+
+def execute_index_all(config: CommandConfig) -> None:
+    """Execute index-all command"""
+    config.memory.index_all_projects()
+
+
+def execute_search_global(config: CommandConfig) -> None:
+    """Execute search-global command"""
+    if not config.args:
+        print("Usage: l4_semantic_global.py search-global <query>")
+        sys.exit(1)
+
+    query = ' '.join(config.args)
+    results = config.memory.search_global(query)
+
+    print(f"\n[SEARCH GLOBAL] '{query}'\n")
+    for i, result in enumerate(results, 1):
+        distance = result.get('distance')
+        distance_str = format_distance(distance)
+        print(f"[{i}] {result['metadata']['file']} (distance: {distance_str})")
+        print(f"    {result['text'][:200]}...")
+        print()
+
+
+def execute_search_project(config: CommandConfig) -> None:
+    """Execute search-project command"""
+    if len(config.args) < 2:
+        print("Usage: l4_semantic_global.py search-project <project-name> <query>")
+        sys.exit(1)
+
+    project_name = config.args[0]
+    query = ' '.join(config.args[1:])
+    results = config.memory.search_project(project_name, query)
+
+    print(f"\n[SEARCH PROJECT: {project_name}] '{query}'\n")
+    for i, result in enumerate(results, 1):
+        distance = result.get('distance')
+        distance_str = format_distance(distance)
+        print(f"[{i}] {result['metadata']['file']} (distance: {distance_str})")
+        print(f"    {result['text'][:200]}...")
+        print()
+
+
+def execute_search_all(config: CommandConfig) -> None:
+    """Execute search-all command"""
+    if not config.args:
+        print("Usage: l4_semantic_global.py search-all <query>")
+        sys.exit(1)
+
+    query = ' '.join(config.args)
+    results = config.memory.search_all(query)
+
+    print(f"\n[SEARCH ALL] '{query}'\n")
+    for i, result in enumerate(results, 1):
+        source = result['source']
+        distance = result.get('distance')
+        distance_str = format_distance(distance)
+        print(f"[{i}] [{source}] {result['metadata']['file']} "
+              f"(distance: {distance_str})")
+        print(f"    {result['text'][:200]}...")
+        print()
+
+
+def execute_stats(config: CommandConfig) -> None:
+    """Execute stats command"""
+    stats = config.memory.stats()
+    print("\n[STATS] L4 SEMANTIC Global Statistics:")
+    print(f"   DB path: {stats['db_path']}")
+    print(f"   Total collections: {stats['total_collections']}")
+    print("\n   Collections:")
+    for name, info in stats['collections'].items():
+        print(f"      {name}: {info['chunks']} chunks")
+        print(f"         {info['description']}")
+
+
+def execute_cleanup(config: CommandConfig) -> None:
+    """Execute cleanup command"""
+    dry_run = '--dry-run' in sys.argv or '-n' in sys.argv
+    result = config.memory.cleanup_collections(dry_run=dry_run)
+
+    print("\n[CLEANUP] L4 SEMANTIC Collections")
+    print(f"   Mode: {'DRY RUN' if dry_run else 'LIVE'}")
+    print(f"\n   Keep ({len(result['to_keep'])}):")
+    for item in result['to_keep']:
+        print(f"      ✓ {item['name']} ({item['chunks']} chunks)")
+
+    print(f"\n   Delete ({len(result['to_delete'])}):")
+    for item in result['to_delete']:
+        status = '✗' if dry_run else '🗑'
+        reason = item['reason']
+        print(f"      {status} {item['name']} ({item['chunks']} chunks) - {reason}")
+
+    if dry_run:
+        print("\n   Run without --dry-run to actually delete")
+    else:
+        print(f"\n   Deleted: {len(result.get('deleted', []))} collections")
+
+
+def execute_command(config: CommandConfig) -> None:
+    """Execute command based on config (extracted per Alisa's recommendation)"""
+    commands = {
+        'index-global': execute_index_global,
+        'index-project': execute_index_project,
+        'index-all': execute_index_all,
+        'search-global': execute_search_global,
+        'search-project': execute_search_project,
+        'search-all': execute_search_all,
+        'stats': execute_stats,
+        'cleanup': execute_cleanup
+    }
+
+    handler = commands.get(config.command)
+    if handler:
+        handler(config)
+    else:
+        print(f"Unknown command: {config.command}")
+        print(__doc__)
+        sys.exit(1)
+
+
 def main():
+    """Main entry point (refactored per Alisa's recommendations)"""
     # Настройка логирования
     logging.basicConfig(
         level=logging.INFO,
         format='[%(levelname)s] %(message)s'
     )
 
-    if len(sys.argv) < 2:
-        print(__doc__)
-        sys.exit(1)
-
-    command = sys.argv[1]
-    memory = GlobalSemanticMemory()
-
-    if command == 'index-global':
-        memory.index_global_memory()
-
-    elif command == 'index-project':
-        if len(sys.argv) < 3:
-            print("Usage: l4_semantic_global.py index-project <project-path>")
-            sys.exit(1)
-        project_path = Path(sys.argv[2])
-        memory.index_project(project_path)
-
-    elif command == 'index-all':
-        memory.index_all_projects()
-
-    elif command == 'search-global':
-        if len(sys.argv) < 3:
-            print("Usage: l4_semantic_global.py search-global <query>")
-            sys.exit(1)
-        query = ' '.join(sys.argv[2:])
-        results = memory.search_global(query)
-
-        print(f"\n[SEARCH GLOBAL] '{query}'\n")
-        for i, result in enumerate(results, 1):
-            distance = result.get('distance')
-            distance_str = format_distance(distance)
-            print(f"[{i}] {result['metadata']['file']} (distance: {distance_str})")
-            print(f"    {result['text'][:200]}...")
-            print()
-
-    elif command == 'search-project':
-        if len(sys.argv) < 4:
-            print("Usage: l4_semantic_global.py search-project <project-name> <query>")
-            sys.exit(1)
-        project_name = sys.argv[2]
-        query = ' '.join(sys.argv[3:])
-        results = memory.search_project(project_name, query)
-
-        print(f"\n[SEARCH PROJECT: {project_name}] '{query}'\n")
-        for i, result in enumerate(results, 1):
-            distance = result.get('distance')
-            distance_str = format_distance(distance)
-            print(f"[{i}] {result['metadata']['file']} (distance: {distance_str})")
-            print(f"    {result['text'][:200]}...")
-            print()
-
-    elif command == 'search-all':
-        if len(sys.argv) < 3:
-            print("Usage: l4_semantic_global.py search-all <query>")
-            sys.exit(1)
-        query = ' '.join(sys.argv[2:])
-        results = memory.search_all(query)
-
-        print(f"\n[SEARCH ALL] '{query}'\n")
-        for i, result in enumerate(results, 1):
-            source = result['source']
-            distance = result.get('distance')
-            distance_str = format_distance(distance)
-            print(f"[{i}] [{source}] {result['metadata']['file']} "
-                  f"(distance: {distance_str})")
-            print(f"    {result['text'][:200]}...")
-            print()
-
-    elif command == 'stats':
-        stats = memory.stats()
-        print("\n[STATS] L4 SEMANTIC Global Statistics:")
-        print(f"   DB path: {stats['db_path']}")
-        print(f"   Total collections: {stats['total_collections']}")
-        print("\n   Collections:")
-        for name, info in stats['collections'].items():
-            print(f"      {name}: {info['chunks']} chunks")
-            print(f"         {info['description']}")
-
-    elif command == 'cleanup':
-        dry_run = '--dry-run' in sys.argv or '-n' in sys.argv
-        result = memory.cleanup_collections(dry_run=dry_run)
-
-        print("\n[CLEANUP] L4 SEMANTIC Collections")
-        print(f"   Mode: {'DRY RUN' if dry_run else 'LIVE'}")
-        print(f"\n   Keep ({len(result['to_keep'])}):")
-        for item in result['to_keep']:
-            print(f"      ✓ {item['name']} ({item['chunks']} chunks)")
-
-        print(f"\n   Delete ({len(result['to_delete'])}):")
-        for item in result['to_delete']:
-            status = '✗' if dry_run else '🗑'
-            reason = item['reason']
-            print(f"      {status} {item['name']} ({item['chunks']} chunks) - {reason}")
-
-        if dry_run:
-            print("\n   Run without --dry-run to actually delete")
-        else:
-            print(f"\n   Deleted: {len(result['deleted'])} collections")
-
-    else:
-        print(f"Unknown command: {command}")
-        print(__doc__)
+    try:
+        config = parse_command_line()
+        execute_command(config)
+    except Exception as e:
+        logging.error("Critical error: %s", e)
         sys.exit(1)
 
 

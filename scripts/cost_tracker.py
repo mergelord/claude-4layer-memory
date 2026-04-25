@@ -5,10 +5,12 @@ Cost Tracker для Memory Operations
 Отслеживает расход токенов на операции с памятью
 """
 
+import argparse
 import sys
 import sqlite3
 import json
 import os
+import tempfile
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any
@@ -38,18 +40,28 @@ class CostTracker:
             db_path = claude_dir / "memory_costs.db"
 
         self.db_path = self._safe_db_path(db_path)
-        self.PRICES = self._load_prices()
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.prices = self._load_prices()
         self._init_db()
 
     def _safe_db_path(self, path: Path) -> Path:
-        """Validate database path is within allowed directories"""
+        """Validate database path is within allowed directories.
+
+        Allowed roots: the user's home directory or the system temp directory
+        (so test fixtures using pytest's tmp_path work cross-platform).
+        """
         try:
             resolved = path.resolve()
-            home = Path.home().resolve()
-            # Check if path is within home directory
-            if not str(resolved).startswith(str(home)):
-                raise ValueError(f"Database path must be within home directory: {path}")
+            home = str(Path.home().resolve())
+            tmp = str(Path(tempfile.gettempdir()).resolve())
+            resolved_str = str(resolved)
+            if not (resolved_str.startswith(home) or resolved_str.startswith(tmp)):
+                raise ValueError(
+                    f"Database path must be within home or temp directory: {path}"
+                )
             return resolved
+        except ValueError:
+            raise
         except Exception as exc:
             raise ValueError(f"Invalid database path: {path}") from exc
 
@@ -121,7 +133,7 @@ class CostTracker:
         """Записывает операцию и возвращает стоимость"""
 
         # Вычисляем стоимость
-        prices = self.PRICES.get(model, self.PRICES['claude-sonnet-4'])
+        prices = self.prices.get(model, self.prices['claude-sonnet-4'])
         input_cost = (input_tokens / 1_000_000) * prices['input']
         output_cost = (output_tokens / 1_000_000) * prices['output']
         total_cost = input_cost + output_cost
@@ -216,14 +228,12 @@ class CostTracker:
 
         if verbose:
             print("\n[VERBOSE] Price configuration:")
-            for model, prices in self.PRICES.items():
+            for model, prices in self.prices.items():
                 print(f"  {model:20s} Input: ${prices['input']:.2f}/M  Output: ${prices['output']:.2f}/M")
 
 
 def main():
     """CLI интерфейс"""
-    import argparse
-
     parser = argparse.ArgumentParser(description='Memory Cost Tracker')
     parser.add_argument('command', choices=['stats', 'track'],
                         help='Command to execute')

@@ -10,9 +10,7 @@
 import os
 import sys
 import subprocess
-import tempfile
 from pathlib import Path
-from typing import List, Set
 
 # Исправление кодировки для Windows
 if sys.platform == 'win32':
@@ -70,7 +68,7 @@ class PrivacyControlsTest:
                 missing_patterns.append(pattern)
 
         if missing_patterns:
-            print(f"❌ Отсутствуют паттерны в .gitignore:")
+            print("❌ Отсутствуют паттерны в .gitignore:")
             for pattern in missing_patterns:
                 print(f"   - {pattern}")
             return False
@@ -117,7 +115,7 @@ class PrivacyControlsTest:
                 failed_files.append(file_path)
 
         if failed_files:
-            print(f"❌ Файлы НЕ игнорируются Git:")
+            print("❌ Файлы НЕ игнорируются Git:")
             for file_path in failed_files:
                 print(f"   - {file_path}")
             return False
@@ -139,7 +137,7 @@ class PrivacyControlsTest:
                 missing_examples.append(config_path)
 
         if missing_examples:
-            print(f"❌ Отсутствуют шаблоны конфигов:")
+            print("❌ Отсутствуют шаблоны конфигов:")
             for config_path in missing_examples:
                 print(f"   - {config_path}")
             return False
@@ -183,7 +181,7 @@ class PrivacyControlsTest:
                     found_secrets.append(pattern)
 
             if found_secrets:
-                print(f"⚠️  Возможно найдены секреты в истории Git:")
+                print("⚠️  Возможно найдены секреты в истории Git:")
                 for pattern in found_secrets:
                     print(f"   - {pattern}")
                 print("   Рекомендуется проверить вручную: git log --all -p | grep -i 'api_key\\|token\\|password'")

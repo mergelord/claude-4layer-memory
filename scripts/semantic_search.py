@@ -9,7 +9,9 @@ import sys
 import os
 import logging
 import subprocess
+from datetime import datetime
 from pathlib import Path
+from typing import Any, Dict, Tuple
 
 # Импорт cost tracker
 sys.path.insert(0, str(Path(__file__).parent))
@@ -24,6 +26,14 @@ if sys.platform == 'win32':
     import codecs
     sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
     sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'strict')
+
+# Конфигурация
+CONFIG: Dict[str, Any] = {
+    'log_file': os.path.expanduser("~/.claude/hooks/semantic_search.log"),
+    'l4_script': os.path.expanduser("~/.claude/hooks/l4_semantic_global.py"),
+    'encoding': 'utf-8',
+    'max_prompt_log_length': 100
+}
 
 # Триггерные фразы и паттерны
 TRIGGERS = [
@@ -50,7 +60,28 @@ TRIGGERS = [
     "ты помог", "ты исправил", "ты создал", "ты написал"
 ]
 
-def should_search(prompt: str) -> tuple[bool, str]:
+def safe_path(path: str) -> Path:
+    """Валидация пути - должен быть внутри home directory
+
+    Args:
+        path: Путь для проверки
+
+    Returns:
+        Path: Валидированный путь
+
+    Raises:
+        ValueError: Если путь выходит за пределы home directory
+    """
+    resolved = Path(path).resolve()
+    home = Path.home().resolve()
+
+    try:
+        resolved.relative_to(home)
+        return resolved
+    except ValueError as exc:
+        raise ValueError(f"Path {path} is outside home directory") from exc
+
+def should_search(prompt: str) -> Tuple[bool, str]:
     """Проверяет, нужен ли семантический поиск
 
     Returns:
@@ -62,64 +93,94 @@ def should_search(prompt: str) -> tuple[bool, str]:
             return True, trigger
     return False, ""
 
-def main():
-    # Читаем prompt из stdin с правильной кодировкой
+def read_user_prompt() -> str:
+    """Read user prompt from stdin with proper encoding.
+
+    On Windows the byte stream may be cp1251 (cmd.exe) or utf-8 (PowerShell).
+    We must read the raw bytes ONCE and try several decoders against the
+    same buffer; calling sys.stdin.buffer.read() a second time would return
+    b'' because the stream is already consumed, silently dropping the prompt.
+    """
     if sys.platform == 'win32':
-        # Windows может передавать в cp1251 или utf-8
         try:
-            user_prompt = sys.stdin.buffer.read().decode('utf-8').strip()
-        except UnicodeDecodeError:
+            raw = sys.stdin.buffer.read()
+        except AttributeError:
+            return sys.stdin.read().strip()
+
+        for encoding in ('utf-8', 'cp1251', 'latin-1'):
             try:
-                user_prompt = sys.stdin.buffer.read().decode('cp1251').strip()
-            except (UnicodeDecodeError, AttributeError):
-                user_prompt = sys.stdin.read().strip()
-    else:
-        user_prompt = sys.stdin.read().strip()
+                return raw.decode(encoding).strip()
+            except UnicodeDecodeError:
+                continue
+        # latin-1 always succeeds for any byte sequence, but keep a final
+        # safety net just in case future encodings are added/changed.
+        return raw.decode('utf-8', errors='replace').strip()
+    return sys.stdin.read().strip()
 
-    # Проверяем триггеры
-    should_run, trigger_found = should_search(user_prompt)
-    if not should_run:
-        print(user_prompt)
-        return 0
 
-    # Логируем срабатывание триггера
-    log_file = os.path.join(os.path.expanduser("~"), ".claude", "hooks", "semantic_search.log")
+def log_trigger(user_prompt: str, trigger_found: str) -> None:
+    """Log trigger activation to file"""
     try:
-        with open(log_file, 'a', encoding='utf-8') as f:
-            from datetime import datetime
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            f.write(f"[{timestamp}] Trigger: '{trigger_found}' | Prompt: {user_prompt[:100]}...\n")
-    except (OSError, IOError):
-        pass  # Не критично если логирование не сработало
+        log_file = safe_path(CONFIG['log_file'])
+        log_file.parent.mkdir(parents=True, exist_ok=True)
 
-    # Выполняем семантический поиск
-    l4_script = os.path.join(os.path.expanduser("~"), ".claude", "hooks", "l4_semantic_global.py")
+        # Проверяем права на запись
+        if log_file.exists() and not os.access(log_file, os.W_OK):
+            logging.warning("No write access to log file: %s", log_file)
+        else:
+            with open(log_file, 'a', encoding=CONFIG['encoding']) as f:
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                max_len = CONFIG['max_prompt_log_length']
+                prompt_preview = user_prompt[:max_len] + "..." if len(user_prompt) > max_len else user_prompt
+                f.write(f"[{timestamp}] Trigger: '{trigger_found}' | Prompt: {prompt_preview}\n")
+    except (OSError, IOError, ValueError) as e:
+        logging.debug("Logging failed: %s", e)
+
+
+def track_search_cost(user_prompt: str, result_stdout: str, trigger_found: str) -> None:
+    """Track cost of semantic search operation"""
+    if not COST_TRACKING_ENABLED:
+        return
 
     try:
+        tracker = CostTracker()
+        # Примерная оценка: prompt ~100 tokens, результат ~500 tokens
+        input_tokens = len(user_prompt.split()) * 1.3  # ~1.3 tokens per word
+        output_tokens = len(result_stdout.split()) * 1.3 if result_stdout else 0
+        tracker.track_operation(
+            operation_type='semantic_search',
+            input_tokens=int(input_tokens),
+            output_tokens=int(output_tokens),
+            model='embedding',
+            metadata=f"trigger: {trigger_found}"
+        )
+    except Exception as e:  # nosec B110
+        logging.debug("Cost tracking failed: %s", e)
+
+
+def execute_semantic_search(user_prompt: str, trigger_found: str) -> None:
+    """Execute semantic search and print results"""
+    try:
+        l4_script = safe_path(CONFIG['l4_script'])
+
+        # Проверяем существование и права на выполнение
+        if not l4_script.exists():
+            raise FileNotFoundError(f"L4 script not found: {l4_script}")
+        if not os.access(l4_script, os.R_OK):
+            raise PermissionError(f"No read access to L4 script: {l4_script}")
+
+        # Выполняем поиск
         result = subprocess.run(
-            [sys.executable, l4_script, "search-all", user_prompt],
+            [sys.executable, str(l4_script), "search-all", user_prompt],
             capture_output=True,
             text=True,
-            encoding='utf-8',
-            check=False
+            encoding=CONFIG['encoding'],
+            check=False,
+            timeout=30  # 30 секунд таймаут
         )
 
         # Отслеживаем стоимость операции
-        if COST_TRACKING_ENABLED:
-            try:
-                tracker = CostTracker()
-                # Примерная оценка: prompt ~100 tokens, результат ~500 tokens
-                input_tokens = len(user_prompt.split()) * 1.3  # ~1.3 tokens per word
-                output_tokens = len(result.stdout.split()) * 1.3 if result.stdout else 0
-                tracker.track_operation(
-                    operation_type='semantic_search',
-                    input_tokens=int(input_tokens),
-                    output_tokens=int(output_tokens),
-                    model='embedding',
-                    metadata=f"trigger: {trigger_found}"
-                )
-            except Exception as e:  # nosec B110
-                logging.debug("Cost tracking failed: %s", e)
+        track_search_cost(user_prompt, result.stdout, trigger_found)
 
         # Проверяем, есть ли результаты
         if "[SEARCH ALL]" in result.stdout:
@@ -136,6 +197,23 @@ def main():
         print(user_prompt, file=sys.stderr)
         print(f"[ERROR] Semantic search failed: {e}", file=sys.stderr)
         print(user_prompt)
+
+
+def main():
+    """Main entry point"""
+    user_prompt = read_user_prompt()
+
+    # Проверяем триггеры
+    should_run, trigger_found = should_search(user_prompt)
+    if not should_run:
+        print(user_prompt)
+        return 0
+
+    # Логируем срабатывание триггера
+    log_trigger(user_prompt, trigger_found)
+
+    # Выполняем семантический поиск
+    execute_semantic_search(user_prompt, trigger_found)
 
     return 0
 

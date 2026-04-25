@@ -1,7 +1,6 @@
 """
 Tests for memory_lint.py - Extended test coverage
 """
-import os
 import shutil
 import sys
 import tempfile

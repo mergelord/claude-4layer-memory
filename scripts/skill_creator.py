@@ -48,6 +48,80 @@ class SkillCreator:
         except Exception as exc:
             raise ValueError(f"Invalid path: {path}") from exc
 
+    def _extract_user_task(self, entry: Dict[str, Any]) -> str:
+        """Extract task description from user message entry"""
+        message = entry.get('message', {})
+        content = message.get('content', '')
+
+        if isinstance(content, str):
+            return content[:100] if content else 'unknown'
+        return 'unknown'
+
+    def _extract_tool_calls(self, entry: Dict[str, Any]) -> List[str]:
+        """Extract tool names from assistant message entry"""
+        tools = []
+        message = entry.get('message', {})
+        content = message.get('content', [])
+
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get('type') == 'tool_use':
+                    tool_name = block.get('name', '')
+                    if tool_name:
+                        tools.append(tool_name)
+        return tools
+
+    def _is_error_result(self, entry: Dict[str, Any]) -> bool:
+        """Check if tool result indicates an error"""
+        message = entry.get('message', {})
+        return message.get('is_error', False)
+
+    def _process_session_line(
+        self,
+        line: str,
+        current_task: str,
+        tool_sequence: List[str],
+        patterns: List[Dict[str, Any]]
+    ) -> tuple[str, List[str]]:
+        """Process a single line from session file
+
+        Returns:
+            (updated_task, updated_tool_sequence)
+        """
+        try:
+            entry = json.loads(line.strip())
+            entry_type = entry.get('type')
+
+            # Определяем начало задачи из user message
+            if entry_type == 'user':
+                if current_task and tool_sequence:
+                    # Сохраняем предыдущий паттерн
+                    patterns.append({
+                        'task': current_task,
+                        'tools': tool_sequence.copy(),
+                        'success': True
+                    })
+
+                current_task = self._extract_user_task(entry)
+                tool_sequence = []
+
+            # Собираем последовательность tool calls
+            elif entry_type == 'assistant':
+                tools = self._extract_tool_calls(entry)
+                tool_sequence.extend(tools)
+
+            # Проверяем на ошибки в tool results
+            elif entry_type == 'tool-result':
+                if self._is_error_result(entry) and patterns:
+                    patterns[-1]['success'] = False
+
+        except json.JSONDecodeError:
+            pass
+        except Exception as e:
+            print(f"Warning: Failed to process line: {e}", file=sys.stderr)
+
+        return current_task, tool_sequence
+
     def analyze_session(self, session_file: Path) -> List[Dict[str, Any]]:
         """Анализирует сессию и извлекает паттерны"""
         if not session_file.exists():
@@ -65,58 +139,9 @@ class SkillCreator:
         try:
             with open(session_file, 'r', encoding='utf-8') as f:
                 for line in f:
-                    try:
-                        entry = json.loads(line.strip())
-                        entry_type = entry.get('type')
-
-                        # Определяем начало задачи из user message
-                        if entry_type == 'user':
-                            if current_task and tool_sequence:
-                                # Сохраняем предыдущий паттерн
-                                patterns.append({
-                                    'task': current_task,
-                                    'tools': tool_sequence.copy(),
-                                    'success': True  # Предполагаем успех если нет ошибок
-                                })
-
-                            # Извлекаем текст из message.content
-                            message = entry.get('message', {})
-                            content = message.get('content', '')
-
-                            # У user сообщений content это строка
-                            if isinstance(content, str):
-                                current_task = content[:100] if content else 'unknown'
-                            else:
-                                current_task = 'unknown'
-
-                            tool_sequence = []
-
-                        # Собираем последовательность tool calls
-                        elif entry_type == 'assistant':
-                            message = entry.get('message', {})
-                            content = message.get('content', [])
-
-                            if isinstance(content, list):
-                                for block in content:
-                                    if isinstance(block, dict) and block.get('type') == 'tool_use':
-                                        tool_name = block.get('name', '')
-                                        if tool_name:
-                                            tool_sequence.append(tool_name)
-
-                        # Проверяем на ошибки в tool results
-                        elif entry_type == 'tool-result':
-                            message = entry.get('message', {})
-                            is_error = message.get('is_error', False)
-                            if is_error and patterns:
-                                # Помечаем последний паттерн как неуспешный
-                                patterns[-1]['success'] = False
-
-                    except json.JSONDecodeError:
-                        continue
-                    except Exception as e:
-                        # Log unexpected errors during pattern extraction
-                        print(f"Warning: Failed to process line: {e}", file=sys.stderr)
-                        continue
+                    current_task, tool_sequence = self._process_session_line(
+                        line, current_task, tool_sequence, patterns
+                    )
 
                 # Сохраняем последний паттерн
                 if current_task and tool_sequence:
@@ -222,6 +247,7 @@ class SkillCreator:
         tools = candidate['tools']
         examples = candidate['example_tasks'][:3]
 
+        # pylint: disable=line-too-long
         skill_content = f"""---
 name: {skill_name}
 description: Auto-generated skill from successful pattern (used {candidate['count']} times, {candidate['success_rate']:.0%} success rate)
