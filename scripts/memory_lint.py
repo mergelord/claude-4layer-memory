@@ -8,6 +8,7 @@ Layer 1: Deterministic checks (ghost links, orphans, duplicates)
 Layer 2: LLM-based semantic checks (contradictions, outdated claims)
 """
 
+import argparse
 import os
 import re
 import sys
@@ -19,11 +20,17 @@ from typing import Dict, List, Set, Tuple
 
 import yaml
 
-# Add parent directory to path for utils import
+# Add scripts/ for sibling-module imports and repo root for utils package
+sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from utils.base_reporter import \
-    BaseReporter  # pylint: disable=wrong-import-position
-from utils.colors import Colors  # pylint: disable=wrong-import-position
+
+# Import refactored checkers and utilities (after sys.path modification)
+# pylint: disable=wrong-import-position,import-error
+from antipattern_checkers import AntiPatternRegistry  # noqa: E402
+from consistency_checkers import ConsistencyRegistry  # noqa: E402
+from utils.base_reporter import BaseReporter  # noqa: E402
+from utils.colors import Colors  # noqa: E402
+# pylint: enable=wrong-import-position,import-error
 
 
 class MemoryLint(BaseReporter):
@@ -37,6 +44,7 @@ class MemoryLint(BaseReporter):
         """Clear all caches (call after file modifications)"""
         self.extract_links.cache_clear()
         self._extract_frontmatter.cache_clear()
+        self._read_file_cached.cache_clear()
 
     def _read_file_safe(self, file_path: Path) -> str:
         """Safely read file content with error handling"""
@@ -318,6 +326,32 @@ class MemoryLint(BaseReporter):
 
         return large_files
 
+    # Publication status keywords (extracted as constants per Alisa's recommendation)
+    PROJECT_KEYWORDS = ['project_status', 'publication', 'github', 'git']
+    GIT_KEYWORDS = ['git', 'github', 'gitlab', 'remote', 'repository']
+    PUBLICATION_KEYWORDS = ['публичн', 'приватн', 'public', 'private', 'опубликован']
+
+    @lru_cache(maxsize=128)
+    def _read_file_cached(self, file_path: Path) -> str:
+        """Cached file reading with error handling (per Alisa's recommendation)"""
+        try:
+            return file_path.read_text(encoding='utf-8').lower()
+        except Exception as exc:
+            self.print_warn(f"Error reading {file_path.name}: {exc}")
+            return ""
+
+    def _has_project_status_in_filename(self, md_file: Path) -> bool:
+        """Check if filename indicates project status"""
+        return any(kw in md_file.name.lower() for kw in self.PROJECT_KEYWORDS)
+
+    def _has_git_info_in_content(self, content: str) -> bool:
+        """Check if content contains git information"""
+        return any(kw in content for kw in self.GIT_KEYWORDS)
+
+    def _has_publication_info_in_content(self, content: str) -> bool:
+        """Check if content contains publication information"""
+        return any(kw in content for kw in self.PUBLICATION_KEYWORDS)
+
     def check_project_publication_status(self) -> Dict[str, bool]:
         """Check if project publication status is documented in memory"""
         self.print_section("Layer 1: Project Publication Status Check")
@@ -330,31 +364,28 @@ class MemoryLint(BaseReporter):
 
         md_files = self.find_all_md_files()
 
-        # Ищем файлы со статусом проекта
-        project_keywords = ['project_status', 'publication', 'github', 'git']
-        git_keywords = ['git', 'github', 'gitlab', 'remote', 'repository']
-        publication_keywords = ['публичн', 'приватн', 'public', 'private', 'опубликован']
-
         for md_file in md_files:
-            try:
-                content = md_file.read_text(encoding='utf-8').lower()
+            content = self._read_file_cached(md_file)
+            if not content:
+                continue
 
-                # Проверяем наличие информации о статусе проекта
-                if any(kw in md_file.name.lower() for kw in project_keywords):
-                    status['has_project_status'] = True
+            # Check for project status indicators
+            if self._has_project_status_in_filename(md_file):
+                status['has_project_status'] = True
 
-                # Проверяем наличие git информации
-                if any(kw in content for kw in git_keywords):
-                    status['has_git_info'] = True
+            if self._has_git_info_in_content(content):
+                status['has_git_info'] = True
 
-                # Проверяем наличие информации о публикации
-                if any(kw in content for kw in publication_keywords):
-                    status['has_publication_info'] = True
+            if self._has_publication_info_in_content(content):
+                status['has_publication_info'] = True
 
-            except Exception as exc:
-                self.print_warn(f"Error reading {md_file.name}: {exc}")
+        # Report results
+        self._report_publication_status(status)
 
-        # Оценка результатов
+        return status
+
+    def _report_publication_status(self, status: Dict[str, bool]) -> None:
+        """Report publication status findings"""
         if status['has_project_status'] and status['has_publication_info']:
             self.print_ok("Project publication status documented")
         elif status['has_git_info']:
@@ -362,8 +393,6 @@ class MemoryLint(BaseReporter):
             self.print_info("Consider creating project_publication_status.md")
         else:
             self.print_info("No git/publication info found (may be intentional)")
-
-        return status
 
     def generate_report(self) -> Dict:
         """Generate lint report"""
@@ -547,50 +576,30 @@ Format as JSON:
 
         md_files = self.find_all_md_files()
 
-        # Common inconsistencies to check
-        term_variants = {
-            'autopilot': ['auto-pilot', 'auto pilot', 'AP', 'A/P'],
-            'SimConnect': ['simconnect', 'sim-connect', 'sim connect'],
-            'WASM': ['wasm', 'WebAssembly', 'web assembly'],
-        }
+        # Use refactored checker registry
+        registry = ConsistencyRegistry()
+        results = registry.check_all(md_files)
 
-        inconsistencies = []
+        inconsistencies = results.get('terminology', [])
 
-        for base_term, variants in term_variants.items():
-            counts = {base_term: 0}
-            for variant in variants:
-                counts[variant] = 0
-
-            # Count occurrences
-            for md_file in md_files:
-                try:
-                    content = md_file.read_text(encoding='utf-8').lower()
-
-                    for term in [base_term] + variants:
-                        counts[term] += content.count(term.lower())
-                except Exception as exc:
-                    self.print_warn(f"Error reading {md_file.name}: {exc}")
-
-            # Check if multiple variants used
-            used_variants = {k: v for k, v in counts.items() if v > 0}
-            if len(used_variants) > 1:
-                inconsistencies.append({
-                    'base_term': base_term,
-                    'variants': used_variants
-                })
-
-        if inconsistencies:
-            for incon in inconsistencies:
-                self.print_warn(f"Inconsistent terminology: {incon['base_term']}")
-                variants_dict = incon['variants']
-                if isinstance(variants_dict, dict):
-                    for variant, count in variants_dict.items():
-                        print(f"    - '{variant}' ({count} occurrences)")
-                print(f"    Suggest: standardize to '{incon['base_term']}'")
-        else:
-            self.print_ok("Terminology is consistent")
+        # Report findings
+        self._report_inconsistencies(inconsistencies)
 
         return inconsistencies
+
+    def _report_inconsistencies(self, inconsistencies: List[Dict]) -> None:
+        """Report terminology inconsistencies"""
+        if not inconsistencies:
+            self.print_ok("Terminology is consistent")
+            return
+
+        for incon in inconsistencies:
+            self.print_warn(f"Inconsistent terminology: {incon['base_term']}")
+            variants_dict = incon['variants']
+            if isinstance(variants_dict, dict):
+                for variant, count in variants_dict.items():
+                    print(f"    - '{variant}' ({count} occurrences)")
+            print(f"    Suggest: standardize to '{incon['base_term']}'")
 
     def check_completeness(self) -> List[Dict]:
         """Check for incomplete documentation"""
@@ -648,115 +657,58 @@ Format as JSON:
         md_files = self.find_all_md_files()
         antipatterns = []
 
+        # Use refactored checker registry
+        registry = AntiPatternRegistry()
+
         for md_file in md_files:
             try:
                 content = md_file.read_text(encoding='utf-8')
-
-                # Extract frontmatter
                 frontmatter = self._extract_frontmatter(content)
-                memory_type = frontmatter.get('type', '')
 
-                # Anti-pattern 1: Missing Why:/How to apply: in feedback/project types
-                if memory_type in ['feedback', 'project']:
-                    if '**Why:**' not in content and '**How to apply:**' not in content:
-                        antipatterns.append({
-                            'file': md_file,
-                            'type': 'missing_why_how',
-                            'severity': 'high',
-                            'message': f'{memory_type} memory missing Why:/How to apply: sections'
-                        })
-
-                # Anti-pattern 2: Code snippets in memory (should be in codebase)
-                code_blocks = re.findall(r'```[\s\S]*?```', content)
-                if len(code_blocks) > 3:
-                    antipatterns.append({
-                        'file': md_file,
-                        'type': 'excessive_code',
-                        'severity': 'medium',
-                        'message': f'{len(code_blocks)} code blocks - consider storing in codebase'
-                    })
-
-                # Anti-pattern 3: Vague descriptions (too generic)
-                description = frontmatter.get('description', '')
-                vague_words = ['stuff', 'things', 'various', 'some', 'etc', 'and so on']
-                if any(word in description.lower() for word in vague_words):
-                    antipatterns.append({
-                        'file': md_file,
-                        'type': 'vague_description',
-                        'severity': 'low',
-                        'message': 'Description contains vague words - be more specific'
-                    })
-
-                # Anti-pattern 4: Temporary data in WARM/COLD layers
-                temp_markers = ['temp', 'temporary', 'draft', 'wip', 'work in progress']
-                if (md_file.name not in ['handoff.md'] and
-                        any(marker in content.lower() for marker in temp_markers)):
-                    antipatterns.append({
-                        'file': md_file,
-                        'type': 'temporary_in_permanent',
-                        'severity': 'medium',
-                        'message': 'Temporary data in permanent layer - should be in HOT'
-                    })
-
-                # Anti-pattern 5: Outdated claims without dates
-                claim_words = ['currently', 'now', 'today', 'recently', 'latest']
-                has_claims = any(word in content.lower() for word in claim_words)
-                has_dates = bool(re.search(r'\d{4}-\d{2}-\d{2}', content))
-
-                if has_claims and not has_dates:
-                    antipatterns.append({
-                        'file': md_file,
-                        'type': 'undated_claims',
-                        'severity': 'medium',
-                        'message': 'Time-sensitive claims without dates - add timestamps'
-                    })
-
-                # Anti-pattern 6: Duplicate information from git history
-                git_markers = ['commit', 'merged', 'pull request', 'pr #', 'issue #']
-                if sum(1 for marker in git_markers if marker in content.lower()) > 3:
-                    antipatterns.append({
-                        'file': md_file,
-                        'type': 'git_duplication',
-                        'severity': 'low',
-                        'message': 'Duplicates git history - use git log instead'
-                    })
+                # Run all checkers
+                results = registry.check_all(md_file, content, frontmatter)
+                antipatterns.extend(results)
 
             except Exception as exc:
                 self.print_warn(f"Error checking {md_file.name}: {exc}")
 
         # Report findings
-        if antipatterns:
-            severity_counts: Dict[str, int] = {'high': 0, 'medium': 0, 'low': 0}
-            for ap in antipatterns:
-                severity = str(ap['severity'])  # Ensure string type
-                severity_counts[severity] += 1
-
-            self.print_warn(f"Found {len(antipatterns)} anti-pattern(s)")
-            print(f"    High: {severity_counts['high']}, "
-                  f"Medium: {severity_counts['medium']}, Low: {severity_counts['low']}")
-
-            # Show high severity first
-            for ap in sorted(antipatterns,
-                           key=lambda x: {'high': 0, 'medium': 1, 'low': 2}[str(x['severity'])]):
-                ap_file = ap['file']
-                if isinstance(ap_file, Path):
-                    file_name = ap_file.name
-                else:
-                    file_name = str(ap_file)
-
-                severity = str(ap['severity'])  # Ensure string type for dict access
-                severity_color = {
-                    'high': Colors.RED,
-                    'medium': Colors.YELLOW,
-                    'low': Colors.CYAN
-                }[severity]
-
-                print(f"    {severity_color}[{severity.upper()}]{Colors.END} "
-                      f"{file_name}: {ap['message']}")
-        else:
-            self.print_ok("No anti-patterns detected")
+        self._report_antipatterns(antipatterns)
 
         return antipatterns
+
+    def _report_antipatterns(self, antipatterns: List[Dict]) -> None:
+        """Report anti-pattern findings"""
+        if not antipatterns:
+            self.print_ok("No anti-patterns detected")
+            return
+
+        severity_counts: Dict[str, int] = {'high': 0, 'medium': 0, 'low': 0}
+        for ap in antipatterns:
+            severity = str(ap['severity'])
+            severity_counts[severity] += 1
+
+        self.print_warn(f"Found {len(antipatterns)} anti-pattern(s)")
+        print(f"    High: {severity_counts['high']}, "
+              f"Medium: {severity_counts['medium']}, Low: {severity_counts['low']}")
+
+        # Show high severity first
+        for ap in sorted(antipatterns,
+                       key=lambda x: {'high': 0, 'medium': 1, 'low': 2}[str(x['severity'])]):
+            ap_file = ap['file']
+            if isinstance(ap_file, Path):
+                file_name = ap_file.name
+            else:
+                file_name = str(ap_file)
+
+            severity_color = {
+                'high': Colors.RED,
+                'medium': Colors.YELLOW,
+                'low': Colors.BLUE
+            }.get(str(ap['severity']), '')
+
+            print(f"    {severity_color}[{ap['severity'].upper()}]{Colors.RESET} "
+                  f"{file_name}: {ap['message']}")
 
     @lru_cache(maxsize=256)
     def _extract_frontmatter(self, content: str) -> Dict[str, str]:
@@ -938,8 +890,6 @@ Format as JSON:
         return True
 
 def main():
-    import argparse
-
     parser = argparse.ArgumentParser(
         description='Memory Lint System - Two-Layer Validation'
     )

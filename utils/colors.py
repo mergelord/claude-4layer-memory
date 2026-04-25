@@ -7,9 +7,11 @@ class Colors:
     GREEN = '\033[92m'
     YELLOW = '\033[93m'
     RED = '\033[91m'
+    BLUE = '\033[94m'
     CYAN = '\033[96m'
     BOLD = '\033[1m'
     END = '\033[0m'
+    RESET = '\033[0m'  # alias for END
 
     @staticmethod
     def disable():
@@ -17,9 +19,11 @@ class Colors:
         Colors.GREEN = ''
         Colors.YELLOW = ''
         Colors.RED = ''
+        Colors.BLUE = ''
         Colors.CYAN = ''
         Colors.BOLD = ''
         Colors.END = ''
+        Colors.RESET = ''
 
 
 if sys.platform == 'win32':

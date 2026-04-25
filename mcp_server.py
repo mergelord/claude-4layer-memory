@@ -26,8 +26,8 @@ logging.basicConfig(
 
 # Импорт наших модулей
 sys.path.insert(0, str(Path(__file__).parent))
-from l4_fts5_search import L4FTS5Search  # pylint: disable=wrong-import-position
-from cost_tracker import CostTracker  # pylint: disable=wrong-import-position
+from l4_fts5_search import L4FTS5Search  # noqa: E402
+from cost_tracker import CostTracker  # noqa: E402
 
 # Инициализация MCP сервера
 mcp = FastMCP("claude-4layer-memory")

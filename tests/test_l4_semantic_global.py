@@ -15,7 +15,6 @@ Unit tests for L4 Semantic Global Memory
 """
 
 import json
-import os
 import shutil
 import sys
 import tempfile

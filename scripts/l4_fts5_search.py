@@ -16,12 +16,14 @@ L4 FTS5 Search - Fast keyword search for memory system
 import logging
 import os
 import sqlite3
+import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Iterator, List, Optional, Tuple
 
 # Импорт cost tracker
 sys.path.insert(0, str(Path(__file__).parent))
@@ -79,11 +81,35 @@ class L4FTS5Search:
         """Очистить кэш поиска (вызывать после reindex/index_file)"""
         self._cached_search.cache_clear()
 
-    def _get_connection(self) -> sqlite3.Connection:
-        """Получить подключение к БД"""
-        conn = sqlite3.connect(str(self.db_path))
+    @contextmanager
+    def _get_connection(self) -> Iterator[sqlite3.Connection]:
+        """Получить подключение к БД.
+
+        Включает WAL mode и busy_timeout для устойчивости при параллельной
+        индексации (reindex_all использует ThreadPoolExecutor): WAL допускает
+        одновременные читатели без блокировки писателя, busy_timeout даёт
+        писателю шанс дождаться лока.
+
+        Важно: возвращается через @contextmanager, не напрямую Connection.
+        Стандартный sqlite3.Connection.__exit__ только коммитит/ролл-бекит,
+        но НЕ закрывает соединение; параллельный reindex_all (max_workers=4) и
+        долгоживущий MCP-процесс (вызывает search/stats постоянно) без этого
+        накапливают ликнутые коннекты. Сравни с cost_tracker._get_connection.
+        """
+        conn = sqlite3.connect(str(self.db_path), timeout=30)
         conn.row_factory = sqlite3.Row
-        return conn
+        try:
+            try:
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA busy_timeout=30000")
+                conn.execute("PRAGMA synchronous=NORMAL")
+            except sqlite3.OperationalError:
+                # Some environments (read-only mounts, exotic FSes) reject PRAGMA;
+                # fall back to defaults rather than crash hard.
+                pass
+            yield conn
+        finally:
+            conn.close()
 
     def init_fts(self) -> bool:
         """Создать FTS5 таблицу если не существует"""
@@ -383,8 +409,6 @@ def cmd_stats(fts: L4FTS5Search):
 
 def cmd_hybrid(fts: L4FTS5Search, query: str):
     """Обработчик команды hybrid"""
-    import subprocess
-
     fts_results = fts.search(query, limit=5)
 
     try:

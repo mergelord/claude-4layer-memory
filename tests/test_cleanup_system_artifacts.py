@@ -11,7 +11,6 @@ Unit tests for Cleanup System Artifacts
 - Статистика и verbose режим
 """
 
-import os
 import shutil
 import sys
 import tempfile
@@ -241,7 +240,7 @@ class TestEdgeCases:
         """Test Unicode handling"""
         artifact = temp_projects_dir / "C--WINDOWS-system32"
         artifact.mkdir()
-        (artifact / "тест.txt").write_text("содержимое")
+        (artifact / "тест.txt").write_text("содержимое", encoding="utf-8")
 
         deleted, failed = cleanup_artifacts([artifact], dry_run=False,
                                            projects_dir=temp_projects_dir)
