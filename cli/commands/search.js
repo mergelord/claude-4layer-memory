@@ -10,6 +10,16 @@ const PYTHON_BIN =
 module.exports = async function search(query, options) {
   const opts = options || {};
 
+  // Reject empty / whitespace-only queries early — Python scripts otherwise
+  // print noise instead of search results.
+  if (!query || !String(query).trim()) {
+    console.error(chalk.red('Error: query is empty.'));
+    console.error(
+      chalk.gray('Usage: claude-memory-cli search <query> [--global|--project] [--project-name <name>]')
+    );
+    process.exit(1);
+  }
+
   console.log(chalk.blue.bold('\n🔍 Memory Search\n'));
   console.log(chalk.gray(`Query: "${query}"\n`));
 
@@ -26,7 +36,10 @@ module.exports = async function search(query, options) {
       pyScript = path.join(scriptDir, 'l4_semantic_global.py');
       pyArgs = ['search-global', query];
     } else if (opts.project) {
-      const projectName = path.basename(process.cwd());
+      // Allow --project-name to override basename(cwd) so users can search
+      // a specific project's memory from any directory (or from a subdir
+      // whose basename doesn't match the project's stored memory key).
+      const projectName = opts.projectName || path.basename(process.cwd());
       pyScript = path.join(scriptDir, 'l4_semantic_global.py');
       pyArgs = ['search-project', projectName, query];
     } else {

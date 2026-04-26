@@ -335,3 +335,69 @@ class TestMemoryLintEdgeCases:
         result = lint.run_layer1()
         assert result is False
 
+    def test_find_all_md_files_handles_permission_error(self, temp_memory_dir, memory_lint):
+        """rglob() raising PermissionError must be caught with a warning, not crash."""
+        with patch.object(
+            type(temp_memory_dir),
+            "rglob",
+            side_effect=PermissionError("denied"),
+        ):
+            files = memory_lint.find_all_md_files()
+        assert files == []
+        assert any("Could not enumerate" in w for w in memory_lint.warnings)
+
+
+class TestPreDeliveryChecklist:
+    """Tests for MemoryLint.pre_delivery_checklist()."""
+
+    @pytest.fixture
+    def temp_memory_dir(self):
+        temp_dir = Path(tempfile.mkdtemp())
+        yield temp_dir
+        shutil.rmtree(temp_dir)
+
+    @pytest.fixture
+    def memory_lint(self, temp_memory_dir):
+        return MemoryLint(temp_memory_dir, quick_mode=True)
+
+    def test_returns_dict_with_seven_boolean_checks(self, temp_memory_dir, memory_lint):
+        """pre_delivery_checklist must return a dict of seven bool-valued checks."""
+        # Make a clean / valid memory tree so most checks pass.
+        (temp_memory_dir / "handoff.md").write_text(
+            "---\nname: handoff\ndescription: test\ntype: hot\n---\n# Handoff\n",
+            encoding="utf-8",
+        )
+        (temp_memory_dir / "decisions.md").write_text(
+            "---\nname: decisions\ndescription: test\ntype: warm\n---\n# Decisions\n",
+            encoding="utf-8",
+        )
+
+        result = memory_lint.pre_delivery_checklist()
+
+        assert isinstance(result, dict)
+        expected_keys = {
+            'no_duplicate_memories',
+            'all_links_valid',
+            'frontmatter_complete',
+            'hot_memory_fresh',
+            'warm_memory_fresh',
+            'file_sizes_ok',
+            'why_how_present',
+        }
+        assert set(result.keys()) == expected_keys
+        for k, v in result.items():
+            assert isinstance(v, bool), f"check {k} should return bool, got {type(v)}"
+
+    def test_failed_checklist_when_links_broken(self, temp_memory_dir, memory_lint):
+        """A broken markdown link must turn the all_links_valid check to False."""
+        (temp_memory_dir / "a.md").write_text(
+            "---\nname: a\ndescription: test\ntype: warm\n---\n"
+            "# A\n[ghost](does_not_exist.md)\n",
+            encoding="utf-8",
+        )
+        result = memory_lint.pre_delivery_checklist()
+
+        assert result['all_links_valid'] is False
+        # Ensure we still produced the full set of checks even after a failure.
+        assert isinstance(result['frontmatter_complete'], bool)
+

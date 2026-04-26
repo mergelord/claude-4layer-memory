@@ -47,17 +47,19 @@ L4 SEMANTIC Memory Layer - Cross-Project Search
     Пример: export L4_MODEL=all-MiniLM-L6-v2
 """
 
+import hashlib
+import json
 import logging
 import os
 import re
 import sys
-import json
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Sequence
 
 # Настройка UTF-8 для Windows консоли
 # NOTE: Необходимо для корректного отображения русского текста в Windows cmd/PowerShell
@@ -120,6 +122,45 @@ class GlobalSemanticMemory:
         normalized = re.sub(r'_+', '_', normalized)
         return normalized
 
+    @staticmethod
+    def _normalize_id_part(text: str) -> str:
+        """Build an ASCII-safe component for ChromaDB chunk IDs.
+
+        Non-ASCII names (e.g. ``тест.md``) would otherwise produce IDs that
+        break round-tripping through some Chroma backends and confuse the
+        ``where`` filters in ``_add_batch_to_collection``. We:
+
+        1. NFKD-normalize and ASCII-encode to drop diacritics where possible,
+        2. Replace any remaining non-``[A-Za-z0-9._-]`` characters with ``_``,
+        3. Append a short stable hash whenever lossy conversion happened
+           (so ``файл-один`` and ``файл-два`` don't collapse to the same
+           ASCII residue) — and use the hash on its own when everything
+           was stripped.
+        """
+        decomposed = unicodedata.normalize('NFKD', text)
+        ascii_only = decomposed.encode('ascii', 'ignore').decode('ascii')
+        safe = re.sub(r'[^A-Za-z0-9._-]', '_', ascii_only).strip('_-')
+
+        # Detect lossy conversion: re-running the same regex over the
+        # original text would keep all the high-codepoint characters that
+        # the NFKD/ASCII step dropped, so a length mismatch means we lost
+        # information.
+        original_safe = re.sub(r'[^A-Za-z0-9._-]', '_', text).strip('_-')
+        lost_information = len(original_safe) != len(safe)
+
+        # MD5 here is a non-cryptographic ID derivation (collision-resistance,
+        # not security), so we pass usedforsecurity=False to satisfy bandit/B324.
+        if not safe:
+            return hashlib.md5(  # nosec B324 - non-security collision check
+                text.encode('utf-8'), usedforsecurity=False
+            ).hexdigest()[:12]
+        if lost_information:
+            short_hash = hashlib.md5(  # nosec B324 - non-security collision check
+                text.encode('utf-8'), usedforsecurity=False
+            ).hexdigest()[:8]
+            return f"{safe}_{short_hash}"
+        return safe
+
     def __init__(self):
         """Инициализация с автоопределением путей"""
         self.home = Path.home()
@@ -152,14 +193,20 @@ class GlobalSemanticMemory:
         self.model = SentenceTransformer(model_name)
 
     def _load_config(self) -> Dict[str, Any]:
-        """Загрузка конфигурации из JSON или использование defaults"""
+        """Загрузка конфигурации из JSON или использование defaults.
+
+        Catches only the specific JSON / I/O error families instead of bare
+        ``Exception``: a malformed or unreadable config file should fall
+        back to defaults, but a programming bug elsewhere (e.g. ``TypeError``
+        in ``json.load``) should still surface as a hard failure.
+        """
         config_file = Path(__file__).parent.parent / "config" / "semantic_config.json"
 
         if config_file.exists() and os.access(config_file, os.R_OK):
             try:
                 with open(config_file, 'r', encoding='utf-8') as f:
                     return json.load(f)
-            except Exception as e:
+            except (json.JSONDecodeError, OSError, UnicodeDecodeError) as e:
                 logging.warning("Failed to load semantic_config.json: %s", e)
                 logging.warning("Using default configuration")
 
@@ -362,23 +409,46 @@ class GlobalSemanticMemory:
             return []
 
     def search_all(self, query: str, n_results: int = 10) -> List[Dict[str, Any]]:
-        """Кросс-проектный поиск (глобальная + все проекты)"""
-        all_results = []
+        """Cross-collection search (global + every project).
 
-        # Поиск в глобальной памяти
-        global_results = self.search_global(query, n_results)
-        all_results.extend(global_results)
+        Encodes the query once and reuses the embedding across all
+        collections instead of paying the SentenceTransformer cost
+        per-collection. With N projects this turns N encodings into 1.
+        """
+        query_embedding = self.model.encode([query]).tolist()
 
-        # Поиск во всех проектах
-        prefix = self.config['collection_names']['project_prefix']
+        all_results: List[Dict[str, Any]] = []
+
+        # Поиск в глобальной памяти (passing the pre-computed embedding).
         global_name = self.config['collection_names']['global']
+        try:
+            global_collection = self.client.get_collection(global_name)
+            all_results.extend(
+                self._search_in_collection(
+                    global_collection, query, n_results, "global",
+                    query_embedding=query_embedding,
+                )
+            )
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logging.warning("Global collection not available: %s", exc)
+
+        # Поиск во всех проектных коллекциях. Defensive: skip the global
+        # collection even if it happens to share the project prefix.
+        prefix = self.config['collection_names']['project_prefix']
         collections = self.client.list_collections()
         for collection_info in collections:
-            if collection_info.name.startswith(prefix) and collection_info.name != global_name:
-                collection = self.client.get_collection(collection_info.name)
-                project_name = collection_info.name[len(prefix):]
-                results = self._search_in_collection(collection, query, n_results // 2, project_name)
-                all_results.extend(results)
+            if not collection_info.name.startswith(prefix):
+                continue
+            if collection_info.name == global_name:
+                continue
+            collection = self.client.get_collection(collection_info.name)
+            project_name = collection_info.name[len(prefix):]
+            all_results.extend(
+                self._search_in_collection(
+                    collection, query, n_results // 2, project_name,
+                    query_embedding=query_embedding,
+                )
+            )
 
         # Сортируем по релевантности (distance)
         all_results.sort(key=lambda x: x.get('distance', 999))
@@ -503,7 +573,12 @@ class GlobalSemanticMemory:
         return indexed_count
 
     def _prepare_file_data(self, file_path: Path, source: str) -> Dict[str, Any]:
-        """Подготовка данных файла для индексации"""
+        """Read a markdown file, split it into chunks, and prepare a Chroma payload.
+
+        Returns ``{}`` when the file is unreadable, empty, or contains
+        only a YAML frontmatter block (no body) — those cases are skipped
+        with a warning so they don't silently disappear from the index.
+        """
         # Проверка прав доступа
         if not os.access(file_path, os.R_OK):
             logging.warning("No read access to %s", file_path)
@@ -518,13 +593,19 @@ class GlobalSemanticMemory:
         chunks = self._split_into_chunks(content)
 
         if not chunks:
+            logging.warning(
+                "Skipping %s: no indexable content (frontmatter-only or empty)",
+                file_path,
+            )
             return {}
 
         # Генерируем эмбеддинги
         embeddings = self.model.encode(chunks).tolist()
 
-        # Формируем данные
-        ids = [f"{source}_{file_path.stem}_{i}" for i in range(len(chunks))]
+        # Формируем данные. Имя файла нормализуется в ASCII-safe форму,
+        # чтобы ChromaDB не споткнулся на не-ASCII stem (например, "тест.md").
+        stem_safe = self._normalize_id_part(file_path.stem)
+        ids = [f"{source}_{stem_safe}_{i}" for i in range(len(chunks))]
         metadatas = [
             {
                 "file": file_path.name,
@@ -546,53 +627,131 @@ class GlobalSemanticMemory:
         }
 
     def _add_batch_to_collection(self, batch_data: List[Dict[str, Any]], collection):
-        """Добавление batch данных в коллекцию"""
-        for data in batch_data:
-            try:
-                # Удаляем старые записи для этого файла
-                existing = collection.get(where={
-                    "$and": [
-                        {"file": {"$eq": data['file_path'].name}},
-                        {"source": {"$eq": data['source']}}
-                    ]
-                })
-                stale_ids = existing.get("ids", [])
-                if stale_ids:
-                    collection.delete(ids=stale_ids)
+        """Add a batch of file payloads to a Chroma collection.
 
-                # Добавляем новые
-                collection.add(
-                    ids=data['ids'],
-                    embeddings=data['embeddings'],
-                    documents=data['documents'],
-                    metadatas=data['metadatas']
-                )
-            except Exception as e:
-                logging.warning("Failed to add %s to collection: %s", data['file_path'].name, e)
+        Coalesces stale-row deletion and the new-row ``add`` into one
+        ``get`` + at most one ``delete`` + one ``add`` call per batch
+        instead of three calls per file. With the previous per-file loop
+        a 50-file reindex was 150 round-trips to Chroma; now it's 3,
+        which is a meaningful win for SQLite-backed Chroma installs.
+
+        On bulk-add failure we fall back to per-file inserts so a single
+        bad payload doesn't lose the whole batch.
+        """
+        if not batch_data:
+            return
+
+        # 1. Bulk delete of stale rows for every (file, source) pair in this batch.
+        or_clauses = [
+            {
+                "$and": [
+                    {"file": {"$eq": data['file_path'].name}},
+                    {"source": {"$eq": data['source']}},
+                ]
+            }
+            for data in batch_data
+        ]
+        where = or_clauses[0] if len(or_clauses) == 1 else {"$or": or_clauses}
+
+        try:
+            existing = collection.get(where=where)
+            stale_ids = existing.get("ids", [])
+            if stale_ids:
+                collection.delete(ids=stale_ids)
+        except Exception as exc:  # pylint: disable=broad-exception-caught
+            logging.warning("Bulk stale-row cleanup failed, continuing: %s", exc)
+
+        # 2. Bulk add of all new rows.
+        all_ids: List[str] = []
+        all_embeddings: List[Any] = []
+        all_documents: List[str] = []
+        all_metadatas: List[Dict[str, Any]] = []
+        for data in batch_data:
+            all_ids.extend(data['ids'])
+            all_embeddings.extend(data['embeddings'])
+            all_documents.extend(data['documents'])
+            all_metadatas.extend(data['metadatas'])
+
+        if not all_ids:
+            return
+
+        try:
+            collection.add(
+                ids=all_ids,
+                embeddings=all_embeddings,
+                documents=all_documents,
+                metadatas=all_metadatas,
+            )
+        except Exception as bulk_exc:  # pylint: disable=broad-exception-caught
+            logging.warning(
+                "Bulk add failed (%s); falling back to per-file inserts", bulk_exc
+            )
+            for data in batch_data:
+                try:
+                    collection.add(
+                        ids=data['ids'],
+                        embeddings=data['embeddings'],
+                        documents=data['documents'],
+                        metadatas=data['metadatas'],
+                    )
+                except Exception as exc:  # pylint: disable=broad-exception-caught
+                    logging.warning(
+                        "Failed to add %s to collection: %s",
+                        data['file_path'].name, exc,
+                    )
 
     def _search_in_collection(
-        self, collection, query: str, n_results: int, source: str
+        self,
+        collection,
+        query: str,
+        n_results: int,
+        source: str,
+        *,
+        query_embedding: Optional[Sequence[Sequence[float]]] = None,
     ) -> List[Dict[str, Any]]:
-        """Поиск в конкретной коллекции"""
-        query_embedding = self.model.encode([query]).tolist()
+        """Run a Chroma query against one collection and normalise the result.
+
+        ``query_embedding`` may be passed in by the caller — that lets
+        ``search_all`` encode the query once and reuse the vector across
+        every project collection instead of re-encoding for each one.
+
+        We also clamp ``range`` to the shortest of ``ids`` / ``documents``
+        / ``metadatas`` so a malformed Chroma response (e.g. a partial
+        truncation) cannot cause an ``IndexError`` halfway through
+        formatting.
+        """
+        if query_embedding is None:
+            query_embedding = self.model.encode([query]).tolist()
 
         results = collection.query(
             query_embeddings=query_embedding,
-            n_results=n_results
+            n_results=n_results,
         )
 
-        formatted = []
-        # Проверяем что результаты не пустые
-        if results.get('ids') and results['ids'] and results['ids'][0]:
-            for i in range(len(results['ids'][0])):
-                distance = results.get('distances', [[]])[0][i] if results.get('distances') else None
-                formatted.append({
-                    'id': results['ids'][0][i],
-                    'text': results['documents'][0][i],
-                    'metadata': results['metadatas'][0][i],
-                    'distance': distance,
-                    'source': source
-                })
+        formatted: List[Dict[str, Any]] = []
+        ids_outer = results.get('ids') or []
+        if not ids_outer or not ids_outer[0]:
+            return formatted
+
+        ids = ids_outer[0]
+        docs = (results.get('documents') or [[]])[0]
+        metas = (results.get('metadatas') or [[]])[0]
+        distances_outer = results.get('distances') or []
+        distances = distances_outer[0] if distances_outer else []
+
+        # Defensive: trim to the shortest parallel array so we never
+        # index past the end of one of them if Chroma returns mismatched
+        # lengths (it shouldn't, but the cost of being safe is one min()).
+        n = min(len(ids), len(docs), len(metas))
+        for i in range(n):
+            distance = distances[i] if i < len(distances) else None
+            formatted.append({
+                'id': ids[i],
+                'text': docs[i],
+                'metadata': metas[i],
+                'distance': distance,
+                'source': source,
+            })
 
         return formatted
 

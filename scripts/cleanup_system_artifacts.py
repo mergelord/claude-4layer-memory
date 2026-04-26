@@ -46,9 +46,13 @@ def normalize_path(path_str: str) -> str:
 
 
 def is_system_artifact(project_name: str) -> bool:
-    """Проверяет является ли папка артефактом системной директории."""
-    normalized = normalize_path(project_name)
-    return normalized in SYSTEM_PATH_PATTERNS or project_name in SYSTEM_PATH_PATTERNS
+    """Проверяет является ли папка артефактом системной директории.
+
+    All entries in SYSTEM_PATH_PATTERNS are stored in normalized form
+    (slashes / backslashes / colons replaced by '-'), so we only need
+    one membership check after normalizing the input.
+    """
+    return normalize_path(project_name) in SYSTEM_PATH_PATTERNS
 
 
 def find_system_artifacts(projects_dir: Path) -> List[Path]:

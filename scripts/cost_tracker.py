@@ -170,7 +170,15 @@ class CostTracker:
         }
 
     def get_stats(self, days: int = 7) -> Dict[str, Any]:
-        """Статистика за последние N дней"""
+        """Статистика за последние N дней.
+
+        Note on timezones: timestamps are stored as ``datetime.now().isoformat()``
+        (i.e. the host's local time), so the ``WHERE`` clauses use
+        ``datetime('now', 'localtime', ...)`` — without the ``'localtime'``
+        modifier SQLite returns UTC, which would skew the cutoff by the
+        local UTC offset and silently include/exclude operations from
+        the last few hours.
+        """
         with self._get_connection() as conn:
             # Общая статистика
             row = conn.execute("""
@@ -180,7 +188,7 @@ class CostTracker:
                     SUM(output_tokens) as total_output_tokens,
                     SUM(total_cost) as total_cost
                 FROM operations
-                WHERE timestamp >= datetime('now', '-' || ? || ' days')
+                WHERE timestamp >= datetime('now', 'localtime', '-' || ? || ' days')
             """, (days,)).fetchone()
 
             # По типам операций
@@ -191,7 +199,7 @@ class CostTracker:
                     COUNT(*) as count,
                     SUM(total_cost) as cost
                 FROM operations
-                WHERE timestamp >= datetime('now', '-' || ? || ' days')
+                WHERE timestamp >= datetime('now', 'localtime', '-' || ? || ' days')
                 GROUP BY operation_type
                 ORDER BY cost DESC
             """, (days,)):

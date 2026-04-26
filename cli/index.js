@@ -21,6 +21,10 @@ program
   .description('Search memory using FTS5 + semantic search')
   .option('-g, --global', 'Search global memory only')
   .option('-p, --project', 'Search project memory only')
+  .option(
+    '--project-name <name>',
+    'Override project name (defaults to basename of current directory; only used with --project)'
+  )
   .option('-l, --limit <number>', 'Limit results', '10')
   .action(require('./commands/search'));
 
