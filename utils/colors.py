@@ -18,12 +18,19 @@ def _supports_ansi() -> bool:
         return True
 
     indicator_env_vars = (
-        'WT_SESSION',     # Windows Terminal
-        'TERM_PROGRAM',   # VS Code, modern shells, mintty
-        'ConEmuANSI',     # ConEmu (value 'ON' when enabled)
-        'ANSICON',        # ANSICON shim
+        'WT_SESSION',     # Windows Terminal (UUID, never 'OFF')
+        'TERM_PROGRAM',   # VS Code, modern shells, mintty (program name)
+        'ConEmuANSI',     # ConEmu — explicitly 'ON' or 'OFF'
+        'ANSICON',        # ANSICON shim (version string)
     )
-    return any(os.environ.get(var) for var in indicator_env_vars)
+    # Don't just check presence: ConEmuANSI=OFF is a truthy string but
+    # explicitly tells us the user disabled ANSI support, so we'd be
+    # writing escape codes into a terminal that won't render them.
+    # Treat empty / unset / 'OFF' as "no signal".
+    return any(
+        os.environ.get(var) not in (None, '', 'OFF')
+        for var in indicator_env_vars
+    )
 
 
 class Colors:

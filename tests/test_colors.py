@@ -39,6 +39,39 @@ def test_supports_ansi_on_windows_modern(monkeypatch, env_var):
     assert colors_mod._supports_ansi() is True  # pylint: disable=protected-access
 
 
+def test_supports_ansi_conemu_off_treated_as_unsupported(monkeypatch):
+    """ConEmuANSI='OFF' is a truthy string but explicitly disables ANSI.
+
+    Regression for the presence-only check that returned True for any
+    non-empty value: ``ConEmuANSI=OFF`` would have been treated as a
+    positive signal, sending escape codes to a terminal where the user
+    explicitly turned ANSI off.
+    """
+    monkeypatch.setattr(colors_mod.sys, "platform", "win32")
+    for var in ("WT_SESSION", "TERM_PROGRAM", "ConEmuANSI", "ANSICON"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("ConEmuANSI", "OFF")
+    assert colors_mod._supports_ansi() is False  # pylint: disable=protected-access
+
+
+def test_supports_ansi_conemu_on_treated_as_supported(monkeypatch):
+    """ConEmuANSI='ON' must enable ANSI."""
+    monkeypatch.setattr(colors_mod.sys, "platform", "win32")
+    for var in ("WT_SESSION", "TERM_PROGRAM", "ConEmuANSI", "ANSICON"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("ConEmuANSI", "ON")
+    assert colors_mod._supports_ansi() is True  # pylint: disable=protected-access
+
+
+def test_supports_ansi_empty_env_var_is_no_signal(monkeypatch):
+    """An env var explicitly set to '' must not be treated as a positive signal."""
+    monkeypatch.setattr(colors_mod.sys, "platform", "win32")
+    for var in ("WT_SESSION", "TERM_PROGRAM", "ConEmuANSI", "ANSICON"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("WT_SESSION", "")
+    assert colors_mod._supports_ansi() is False  # pylint: disable=protected-access
+
+
 def test_disable_clears_all_codes():
     """Colors.disable() must zero out every colour attribute."""
     saved = {
