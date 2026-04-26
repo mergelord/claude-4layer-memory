@@ -35,6 +35,32 @@ MOJIBAKE_FRAGMENT = (
 RECOVERED_FRAGMENT = 'Рефакторинг 6 модулей: безопасность'
 
 
+# Cyrillic-block-only mojibake: the original Russian word is composed
+# of letters whose UTF-8 second byte produces a cp1251 glyph in
+# U+0400..U+04FF (Cyrillic block) instead of U+0080..U+00BF (Latin-1
+# supplement). The strict ``_MOJIBAKE_RE`` does NOT detect these on
+# its own — only the broader ``_MOJIBAKE_RUN_RE`` does. Real samples
+# from observed Windows ``auto-remember`` corruption.
+CYRILLIC_BLOCK_MOJIBAKE_SAMPLES = [
+    ('РёСЃС‚РѕСЂРёСЏ', 'история'),
+    ('РіРѕСЂРѕРґ', 'город'),
+    ('РјРёСЂ', 'мир'),
+]
+
+
+# Legitimate uppercase Russian patterns that match the broader
+# ``_MOJIBAKE_RUN_RE`` shape (two consecutive ``[Р|С] + cp1251-high-
+# byte glyph`` pairs) but are NOT mojibake. They must be left alone
+# by ``assert_clean`` and ``scan_file`` thanks to the cp1251
+# round-trip false-positive filter.
+LEGITIMATE_UPPERCASE_RUSSIAN = [
+    'СССР',          # Soviet Union — 2 pairs (СС, СР)
+    'РОССИЯ',        # Russia, all caps — has 'РО','СС' run
+    'СИСТЕМА',       # System — has 'СИ','СТ' run
+    'СПАСИБО',       # Thank you, all caps — has 'СП','СИ' run
+]
+
+
 class TestAssertClean:
     def test_plain_ascii_passes(self):
         EncodingGate.assert_clean('Hello world: refactoring 6 modules.')
@@ -72,6 +98,32 @@ class TestAssertClean:
             EncodingGate.assert_clean(
                 MOJIBAKE_FRAGMENT, source='git log subprocess'
             )
+
+    @pytest.mark.parametrize(
+        'mojibake,recovered', CYRILLIC_BLOCK_MOJIBAKE_SAMPLES
+    )
+    def test_cyrillic_block_only_mojibake_rejected(
+        self, mojibake: str, recovered: str
+    ):
+        # Words like "история" / "город" / "мир" produce mojibake
+        # whose second char of every pair is a Cyrillic-block glyph
+        # (U+0400..U+04FF), not a Latin-1 supplement char. The strict
+        # _MOJIBAKE_RE alone misses these; the broader _MOJIBAKE_RUN_RE
+        # (gated by cp1251 round-trip) catches them. Without this
+        # path, --validate-encoding would silently report these files
+        # as clean.
+        del recovered  # unused; round-trip is exercised in TestRepairMojibake
+        with pytest.raises(EncodingError, match='mojibake'):
+            EncodingGate.assert_clean(mojibake, source='hook')
+
+    @pytest.mark.parametrize('text', LEGITIMATE_UPPERCASE_RUSSIAN)
+    def test_legitimate_uppercase_russian_passes(self, text: str):
+        # Uppercase Russian words / acronyms like СССР, РОССИЯ,
+        # СИСТЕМА match the broader regex shape but fail the cp1251
+        # round-trip (their cp1251 byte sequences aren't valid UTF-8),
+        # so the gate must NOT flag them. Without the round-trip
+        # check, all-caps Russian text would be falsely rejected.
+        EncodingGate.assert_clean(text)
 
 
 class TestAssertCleanBytes:
@@ -130,6 +182,36 @@ class TestScanFile:
         # No file -> scanner returns None silently (it's an audit
         # tool, not a presence checker).
         assert EncodingGate.scan_file(tmp_path / 'no-such.md') is None
+
+    @pytest.mark.parametrize(
+        'mojibake,recovered', CYRILLIC_BLOCK_MOJIBAKE_SAMPLES
+    )
+    def test_cyrillic_block_only_mojibake_file_returns_message(
+        self, tmp_path: Path, mojibake: str, recovered: str
+    ):
+        # Regression for Devin Review finding
+        # BUG_pr-review-job-15dd253a31bc4c8190d55ac467e80ab2_0001:
+        # files containing only cyrillic-block mojibake (история,
+        # город, мир) were silently reported as clean by --validate-
+        # encoding before the broader detector + round-trip filter.
+        del recovered  # exercised in TestRepairMojibake
+        f = tmp_path / 'broken.md'
+        f.write_text(mojibake, encoding='utf-8')
+        result = EncodingGate.scan_file(f)
+        assert result is not None
+        assert 'mojibake' in result
+
+    @pytest.mark.parametrize('text', LEGITIMATE_UPPERCASE_RUSSIAN)
+    def test_legitimate_uppercase_russian_file_returns_none(
+        self, tmp_path: Path, text: str
+    ):
+        # Uppercase Russian acronyms / words must NOT trigger the
+        # scanner. They match the broader regex shape but fail the
+        # cp1251 round-trip — the round-trip filter is the only thing
+        # keeping them from being falsely reported.
+        f = tmp_path / 'clean.md'
+        f.write_text(text, encoding='utf-8')
+        assert EncodingGate.scan_file(f) is None
 
 
 class TestRepairMojibake:

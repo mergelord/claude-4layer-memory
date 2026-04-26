@@ -412,6 +412,32 @@ class EncodingGate:
                 f"``proc.stdout.decode('cp1251').encode('utf-8')``."
             )
 
+        # Broader detector for the common case where every cp1251
+        # second byte decodes to a Cyrillic-block glyph (U+0400..U+04FF)
+        # rather than a Latin-1 supplement char. Words like "история",
+        # "город", "мир" produce mojibake whose pairs are entirely
+        # outside U+0080..U+00BF, so the strict regex misses them.
+        #
+        # ``_MOJIBAKE_RUN_RE`` alone over-matches on legitimate Russian
+        # uppercase patterns like "СССР" or "РОССИЯ". To eliminate
+        # those false positives we additionally require that the
+        # cp1251 round-trip (``chunk.encode('cp1251').decode('utf-8')``)
+        # actually recovers a clean UTF-8 string — the same evidence
+        # ``repair_mojibake`` uses to confirm a chunk is repairable.
+        # Real mojibake round-trips cleanly; legitimate text fails
+        # the round-trip because the source bytes don't form valid
+        # UTF-8 sequences.
+        run_match = cls._MOJIBAKE_RUN_RE.search(text)
+        if run_match is not None and cls._is_repairable_run(run_match.group(0)):
+            raise EncodingError(
+                f"Text from {source} contains a cp1251-as-utf8 mojibake "
+                f"run {run_match.group(0)!r}. This indicates sub-process "
+                f"output was concatenated into a UTF-8 file without "
+                f"re-decoding. Re-decode the sub-process output "
+                f"explicitly, e.g. "
+                f"``proc.stdout.decode('cp1251').encode('utf-8')``."
+            )
+
     @classmethod
     def assert_clean_bytes(
         cls,
@@ -463,6 +489,36 @@ class EncodingGate:
     _MOJIBAKE_RUN_RE = re.compile(
         r'(?:[\u0420\u0421][' + re.escape(_CP1251_HIGH_GLYPHS) + r']){2,}'
     )
+
+    @classmethod
+    def _is_repairable_run(cls, chunk: str) -> bool:
+        """Return True iff ``chunk`` round-trips through cp1251 to clean UTF-8.
+
+        Used as the false-positive filter for ``_MOJIBAKE_RUN_RE``
+        matches in ``assert_clean`` and ``scan_file``. A chunk is
+        considered real mojibake (and thus worth flagging) only if:
+
+        1. ``chunk.encode('cp1251')`` succeeds (Python's cp1251 codec
+           covers every char in ``_CP1251_HIGH_GLYPHS`` by construction,
+           plus the Cyrillic block, so this almost always succeeds).
+        2. The resulting bytes decode as valid UTF-8.
+        3. The recovered text contains no replacement char and no
+           strict-signature mojibake pair, i.e. recovery is complete.
+
+        Legitimate uppercase Russian patterns like "СССР" /
+        "РОССИЯ" / "СИСТЕМА" match the broader regex shape but fail
+        step 2 (their cp1251 byte sequences aren't valid UTF-8), so
+        they're not flagged.
+        """
+        try:
+            recovered = chunk.encode('cp1251').decode('utf-8')
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            return False
+        if cls.REPLACEMENT_CHAR in recovered:
+            return False
+        if cls._MOJIBAKE_RE.search(recovered) is not None:
+            return False
+        return True
 
     @classmethod
     def repair_mojibake(cls, text: str) -> "tuple[str, bool]":
@@ -558,4 +614,14 @@ class EncodingGate:
         match = cls._MOJIBAKE_RE.search(text)
         if match is not None:
             return f"contains cp1251-as-utf8 mojibake pair {match.group(0)!r}"
+        # Broader detector mirroring ``assert_clean``: catch mojibake
+        # runs whose second byte decodes to a Cyrillic-block glyph
+        # rather than a Latin-1 supplement (covers "история", "город",
+        # "мир", etc.). The cp1251 round-trip check filters out
+        # legitimate Russian uppercase patterns ("СССР", "РОССИЯ")
+        # that match the broader regex shape but don't actually
+        # decode back to clean UTF-8.
+        run_match = cls._MOJIBAKE_RUN_RE.search(text)
+        if run_match is not None and cls._is_repairable_run(run_match.group(0)):
+            return f"contains cp1251-as-utf8 mojibake run {run_match.group(0)!r}"
         return None
