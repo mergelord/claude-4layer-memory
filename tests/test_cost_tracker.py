@@ -16,7 +16,6 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
@@ -223,6 +222,24 @@ class TestGetStats:
         # Both should include the operation
         assert stats_7d['total_operations'] == 1
         assert stats_30d['total_operations'] == 1
+
+    def test_get_stats_includes_recent_operation_regardless_of_tz(self, tracker):
+        """Recent operations must show up in get_stats() regardless of host UTC offset.
+
+        Regression guard for the previous bug where stored timestamps were in
+        local time but the WHERE cutoff used SQLite's UTC ``datetime('now', ...)``.
+        On hosts with a non-UTC offset, operations from the last few hours could
+        silently fall outside the window. The fix adds the ``'localtime'``
+        modifier so both sides of the comparison are in the same zone.
+        """
+        tracker.track_operation("zone_check", input_tokens=10, output_tokens=5)
+
+        # An operation just written must appear in the 1-day window on every
+        # host, including UTC+12 / UTC-12 boxes. The assertion would fail under
+        # the pre-fix code on a sufficiently-offset CI runner.
+        stats = tracker.get_stats(days=1)
+        assert stats['total_operations'] == 1
+        assert stats['operations_by_type'].get('zone_check', {}).get('count') == 1
 
 
 class TestPrintStats:

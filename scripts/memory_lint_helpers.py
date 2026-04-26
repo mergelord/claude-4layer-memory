@@ -1,13 +1,40 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Memory Lint Helpers - Common patterns and utilities
-Extracted from memory_lint.py to reduce duplication
+Memory Lint Helpers — Common patterns and utilities for the planned MemoryLinter split.
+
+STATUS: NOT CURRENTLY IMPORTED.
+
+This module is preparatory infrastructure for splitting the monolithic
+``MemoryLint`` class in ``memory_lint.py`` into smaller focused linters
+(``FrontmatterValidator`` / ``LinkValidator`` / ``ContentValidator``).
+``memory_lint.py`` keeps its own private equivalents of these helpers
+until the split lands so we can iterate on the split design without
+breaking the working linter.
+
+If you are reading this and `git log --since='6 months ago'
+scripts/memory_lint_helpers.py` shows no integration activity,
+consider deleting this file — it is tracked under the
+"Integrate memory_lint_helpers.py during MemoryLinter split"
+GitHub issue.
+
+The classes below are intentionally re-exported via ``__all__`` so static
+analysers and dead-code linters (vulture, pylint W0611) understand
+they are part of the public, intentionally-unused surface, not stale
+private helpers.
 """
 
 import re
 from pathlib import Path
 from typing import Any, Callable, List, Optional
+
+__all__ = [
+    "RegexPatterns",
+    "CheckResultHandler",
+    "SafeFileOperations",
+    "FrontmatterExtractor",
+    "ValidationHelpers",
+]
 
 
 class RegexPatterns:

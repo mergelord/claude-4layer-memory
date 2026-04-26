@@ -5,9 +5,21 @@ Anti-pattern Checkers for Memory Lint
 Extracted from memory_lint.py to reduce complexity
 """
 
+import logging
 import re
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List, TypedDict
+
+logger = logging.getLogger(__name__)
+
+
+class CheckResult(TypedDict):
+    """Structure of a single anti-pattern / consistency check finding."""
+
+    file: Path
+    type: str
+    severity: str
+    message: str
 
 
 class AntiPatternChecker:
@@ -16,7 +28,9 @@ class AntiPatternChecker:
     def __init__(self, severity: str = 'medium'):
         self.severity = severity
 
-    def check(self, file_path: Path, content: str, frontmatter: Dict) -> List[Dict]:
+    def check(
+        self, file_path: Path, content: str, frontmatter: Dict[str, Any]
+    ) -> List[CheckResult]:
         """Check for anti-patterns. Override in subclasses."""
         raise NotImplementedError
 
@@ -27,7 +41,7 @@ class MissingWhyHowChecker(AntiPatternChecker):
     def __init__(self):
         super().__init__(severity='high')
 
-    def check(self, file_path: Path, content: str, frontmatter: Dict) -> List[Dict]:
+    def check(self, file_path: Path, content: str, frontmatter: Dict[str, Any]) -> List[CheckResult]:
         memory_type = frontmatter.get('type', '')
 
         if memory_type not in ['feedback', 'project']:
@@ -51,7 +65,7 @@ class ExcessiveCodeChecker(AntiPatternChecker):
         super().__init__(severity='medium')
         self.max_blocks = max_blocks
 
-    def check(self, file_path: Path, content: str, frontmatter: Dict) -> List[Dict]:
+    def check(self, file_path: Path, content: str, frontmatter: Dict[str, Any]) -> List[CheckResult]:
         code_blocks = re.findall(r'```[\s\S]*?```', content)
 
         if len(code_blocks) <= self.max_blocks:
@@ -73,7 +87,7 @@ class VagueDescriptionChecker(AntiPatternChecker):
     def __init__(self):
         super().__init__(severity='low')
 
-    def check(self, file_path: Path, content: str, frontmatter: Dict) -> List[Dict]:
+    def check(self, file_path: Path, content: str, frontmatter: Dict[str, Any]) -> List[CheckResult]:
         description = frontmatter.get('description', '')
 
         if not any(word in description.lower() for word in self.VAGUE_WORDS):
@@ -95,7 +109,7 @@ class TemporaryDataChecker(AntiPatternChecker):
     def __init__(self):
         super().__init__(severity='medium')
 
-    def check(self, file_path: Path, content: str, frontmatter: Dict) -> List[Dict]:
+    def check(self, file_path: Path, content: str, frontmatter: Dict[str, Any]) -> List[CheckResult]:
         # Skip handoff.md (HOT layer)
         if file_path.name == 'handoff.md':
             return []
@@ -119,7 +133,7 @@ class UndatedClaimsChecker(AntiPatternChecker):
     def __init__(self):
         super().__init__(severity='medium')
 
-    def check(self, file_path: Path, content: str, frontmatter: Dict) -> List[Dict]:
+    def check(self, file_path: Path, content: str, frontmatter: Dict[str, Any]) -> List[CheckResult]:
         has_claims = any(word in content.lower() for word in self.CLAIM_WORDS)
         has_dates = bool(re.search(r'\d{4}-\d{2}-\d{2}', content))
 
@@ -143,7 +157,7 @@ class GitDuplicationChecker(AntiPatternChecker):
         super().__init__(severity='low')
         self.max_markers = max_markers
 
-    def check(self, file_path: Path, content: str, frontmatter: Dict) -> List[Dict]:
+    def check(self, file_path: Path, content: str, frontmatter: Dict[str, Any]) -> List[CheckResult]:
         marker_count = sum(1 for marker in self.GIT_MARKERS if marker in content.lower())
 
         if marker_count <= self.max_markers:
@@ -170,9 +184,25 @@ class AntiPatternRegistry:
             GitDuplicationChecker()
         ]
 
-    def check_all(self, file_path: Path, content: str, frontmatter: Dict) -> List[Dict]:
-        """Run all checkers and collect results"""
-        results = []
+    def check_all(
+        self, file_path: Path, content: str, frontmatter: Dict[str, Any]
+    ) -> List[CheckResult]:
+        """Run all checkers and collect results.
+
+        A failure inside one checker is logged and skipped instead of
+        aborting the whole sweep — otherwise a single buggy or
+        misconfigured checker would silently turn off every other
+        check for the rest of the file.
+        """
+        results: List[CheckResult] = []
         for checker in self.checkers:
-            results.extend(checker.check(file_path, content, frontmatter))
+            try:
+                results.extend(checker.check(file_path, content, frontmatter))
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                logger.warning(
+                    "Checker %s failed on %s: %s",
+                    type(checker).__name__,
+                    file_path,
+                    exc,
+                )
         return results

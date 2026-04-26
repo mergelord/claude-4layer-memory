@@ -96,8 +96,21 @@ class MemoryLint(BaseReporter):
             }
 
     def find_all_md_files(self) -> List[Path]:
-        """Find all markdown files in memory directory with read access"""
-        all_files = list(self.memory_path.rglob("*.md"))
+        """Find all markdown files in memory directory with read access.
+
+        ``Path.rglob`` itself can raise ``PermissionError`` / ``OSError`` if it
+        descends into a directory the process can't read. Catch those and
+        warn instead of crashing the whole lint run, so a single unreadable
+        subtree doesn't block a multi-project sweep.
+        """
+        try:
+            all_files = list(self.memory_path.rglob("*.md"))
+        except (PermissionError, OSError) as err:
+            self.print_warn(
+                f"Could not enumerate markdown files under {self.memory_path}: {err}"
+            )
+            return []
+
         # Filter files with read access
         readable_files = [f for f in all_files if os.access(f, os.R_OK)]
 

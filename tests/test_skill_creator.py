@@ -41,8 +41,14 @@ class TestSkillCreatorInit:
         """Test default initialization"""
         creator = SkillCreator()
         assert creator.claude_dir == Path.home() / ".claude"
-        assert creator.min_pattern_count == 3
-        assert creator.min_success_rate == 0.8
+        assert creator.min_pattern_count == SkillCreator.DEFAULT_MIN_PATTERN_COUNT == 3
+        assert creator.min_success_rate == SkillCreator.DEFAULT_MIN_SUCCESS_RATE == 0.8
+
+    def test_init_custom_thresholds(self):
+        """min_pattern_count and min_success_rate must be overridable via __init__."""
+        creator = SkillCreator(min_pattern_count=5, min_success_rate=0.95)
+        assert creator.min_pattern_count == 5
+        assert creator.min_success_rate == 0.95
 
     def test_safe_file_path_valid(self, temp_claude_dir):
         """Test safe_file_path with valid path"""

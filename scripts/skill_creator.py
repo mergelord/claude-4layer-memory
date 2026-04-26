@@ -27,15 +27,22 @@ if sys.platform == 'win32':
 class SkillCreator:
     """Анализирует паттерны и создаёт навыки"""
 
-    def __init__(self):
+    DEFAULT_MIN_PATTERN_COUNT = 3
+    DEFAULT_MIN_SUCCESS_RATE = 0.8
+
+    def __init__(
+        self,
+        min_pattern_count: int = DEFAULT_MIN_PATTERN_COUNT,
+        min_success_rate: float = DEFAULT_MIN_SUCCESS_RATE,
+    ):
         self.claude_dir = Path.home() / ".claude"
         self.skills_dir = self.claude_dir / "skills"
         self.projects_dir = self.claude_dir / "projects"
         self.patterns_db = self.claude_dir / "skill_patterns.json"
 
-        # Минимальные пороги для создания skill
-        self.min_pattern_count = 3  # Паттерн должен повториться минимум 3 раза
-        self.min_success_rate = 0.8  # 80% успешных выполнений
+        # Минимальные пороги для создания skill (можно переопределить через __init__)
+        self.min_pattern_count = min_pattern_count
+        self.min_success_rate = min_success_rate
 
     def safe_file_path(self, path: Path) -> Path:
         """Validate that path is within allowed directories"""
@@ -247,6 +254,9 @@ class SkillCreator:
         tools = candidate['tools']
         examples = candidate['example_tasks'][:3]
 
+        tools_block = "\n".join(f"{i + 1}. {tool}" for i, tool in enumerate(tools))
+        examples_block = "\n".join(f"- {task}" for task in examples)
+
         # pylint: disable=line-too-long
         skill_content = f"""---
 name: {skill_name}
@@ -260,12 +270,12 @@ description: Auto-generated skill from successful pattern (used {candidate['coun
 ## Pattern
 
 This skill automates the following tool sequence:
-{chr(10).join(f'{i+1}. {tool}' for i, tool in enumerate(tools))}
+{tools_block}
 
 ## Example Tasks
 
 This pattern was successfully used for:
-{chr(10).join(f'- {task}' for task in examples)}
+{examples_block}
 
 ## Usage
 
@@ -319,7 +329,7 @@ This pattern was successfully used for:
             return 0
 
         # Collect all session files
-        session_files = []
+        session_files: List[Path] = []
         for project_dir in self.projects_dir.iterdir():
             if not project_dir.is_dir():
                 continue

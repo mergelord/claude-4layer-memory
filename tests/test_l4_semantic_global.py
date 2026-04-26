@@ -538,5 +538,113 @@ class TestEdgeCases:
             assert result is True
 
 
+class TestNormalizeIdPart:
+    """Tests for the ASCII-safe chunk-ID component builder."""
+
+    def test_ascii_passes_through(self):
+        result = GlobalSemanticMemory._normalize_id_part("hello-world.md")
+        assert result == "hello-world.md"
+
+    def test_cyrillic_only_falls_back_to_hash(self):
+        """A pure-Cyrillic stem must produce a stable non-empty ID component."""
+        result = GlobalSemanticMemory._normalize_id_part("тест")
+        assert result, "ID component must not be empty"
+        # Same input -> same output (deterministic, hash-based fallback).
+        assert result == GlobalSemanticMemory._normalize_id_part("тест")
+
+    def test_distinct_cyrillic_inputs_produce_distinct_ids(self):
+        """Two different non-ASCII names must not collide on the empty string."""
+        a = GlobalSemanticMemory._normalize_id_part("файл-один")
+        b = GlobalSemanticMemory._normalize_id_part("файл-два")
+        assert a != b
+
+    def test_special_chars_replaced(self):
+        result = GlobalSemanticMemory._normalize_id_part("a/b\\c:d")
+        assert "/" not in result
+        assert "\\" not in result
+        assert ":" not in result
+
+    def test_diacritic_collisions_disambiguated(self):
+        """ASCII vs diacritic-decomposed inputs must produce distinct IDs.
+
+        Regression for the length-vs-string lossy-conversion check:
+        ``naïve`` NFKD-decomposes to ``n a i + combining-diaeresis + v e``;
+        the combining mark is dropped by ASCII encoding so the residue
+        is ``naive`` (length 5). The original-text regex residue for
+        ``naïve`` is ``na_ve`` (length 5 too), so a length-only check
+        would falsely report "no information lost" and emit the same
+        chunk ID for ``naive`` and ``naïve``.
+        """
+        plain = GlobalSemanticMemory._normalize_id_part("naive")
+        accented = GlobalSemanticMemory._normalize_id_part("naïve")
+        assert plain != accented, (
+            f"naive and naïve must not collide; got {plain!r} == {accented!r}"
+        )
+
+        plain2 = GlobalSemanticMemory._normalize_id_part("file_one")
+        accented2 = GlobalSemanticMemory._normalize_id_part("filé_öne")
+        assert plain2 != accented2, (
+            f"file_one and filé_öne must not collide; "
+            f"got {plain2!r} == {accented2!r}"
+        )
+
+
+class TestSearchInCollectionDesync:
+    """_search_in_collection must tolerate truncated / mismatched Chroma payloads."""
+
+    @pytest.fixture
+    def memory(self, tmp_path):
+        with patch('pathlib.Path.home', return_value=tmp_path), \
+             patch('chromadb.PersistentClient'), \
+             patch('scripts.l4_semantic_global.SentenceTransformer') as mock_st:
+            (tmp_path / ".claude" / "memory").mkdir(parents=True)
+            (tmp_path / ".claude" / "projects").mkdir(parents=True)
+            mock_st.return_value.encode.return_value.tolist.return_value = [[0.1, 0.2]]
+            return GlobalSemanticMemory()
+
+    def test_clamps_to_shortest_array(self, memory):
+        """If documents/metadatas are shorter than ids, clamp instead of IndexError."""
+        collection = MagicMock()
+        # ids has 3 entries but documents only 2 — pre-fix this would IndexError.
+        collection.query.return_value = {
+            'ids': [['a', 'b', 'c']],
+            'documents': [['doc-a', 'doc-b']],
+            'metadatas': [[{'file': 'a'}, {'file': 'b'}]],
+            'distances': [[0.1, 0.2, 0.3]],
+        }
+
+        results = memory._search_in_collection(collection, "query", 3, "test")
+
+        assert len(results) == 2
+        assert [r['id'] for r in results] == ['a', 'b']
+
+    def test_empty_results(self, memory):
+        collection = MagicMock()
+        collection.query.return_value = {'ids': [[]]}
+        results = memory._search_in_collection(collection, "query", 5, "test")
+        assert results == []
+
+    def test_reuses_passed_query_embedding(self, memory):
+        """When a pre-computed embedding is passed, the model must NOT be called again."""
+        collection = MagicMock()
+        collection.query.return_value = {
+            'ids': [['x']],
+            'documents': [['doc']],
+            'metadatas': [[{}]],
+            'distances': [[0.0]],
+        }
+        precomputed = [[0.5, 0.6]]
+        memory.model.encode.reset_mock()
+
+        memory._search_in_collection(
+            collection, "query", 1, "test", query_embedding=precomputed
+        )
+
+        memory.model.encode.assert_not_called()
+        collection.query.assert_called_once()
+        kwargs = collection.query.call_args.kwargs
+        assert kwargs['query_embeddings'] is precomputed
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
