@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# pylint: disable=too-many-lines
 """
 Memory Lint System - Two-Layer Validation
 Inspired by llm-atomic-wiki's lint approach
@@ -28,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # pylint: disable=wrong-import-position,import-error
 from antipattern_checkers import AntiPatternRegistry  # noqa: E402
 from consistency_checkers import ConsistencyRegistry  # noqa: E402
+from memory_lint_helpers import EncodingGate  # noqa: E402
 from utils.base_reporter import BaseReporter  # noqa: E402
 from utils.colors import Colors  # noqa: E402
 # pylint: enable=wrong-import-position,import-error
@@ -902,6 +904,131 @@ Format as JSON:
 
         return True
 
+def _safe_rglob_md(memory_path: Path) -> List[Path]:
+    """Sorted ``*.md`` walk of ``memory_path`` that tolerates unreadable subtrees.
+
+    Mirrors ``MemoryLint.find_all_md_files()`` (lines 108-114): any
+    ``PermissionError`` / ``OSError`` raised while expanding ``rglob``
+    is downgraded to a stderr warning so the rest of the audit can
+    still proceed.
+    """
+    try:
+        return sorted(memory_path.rglob('*.md'))
+    except (PermissionError, OSError) as exc:
+        print(
+            f"Warning: could not fully walk {memory_path}: {exc}",
+            file=sys.stderr,
+        )
+        return []
+
+
+def _run_encoding_validation(memory_path: Path) -> int:
+    """Walk ``memory_path`` and report any markdown file with mojibake.
+
+    Returns 0 if every ``*.md`` file under ``memory_path`` is clean
+    UTF-8 with no cp1251-as-utf8 mojibake markers, otherwise 1. Used
+    by ``memory_lint --validate-encoding``.
+    """
+    if not memory_path.exists():
+        print(f"Memory path does not exist: {memory_path}", file=sys.stderr)
+        return 1
+    issues: List[Tuple[Path, str]] = []
+    for md_file in _safe_rglob_md(memory_path):
+        issue = EncodingGate.scan_file(md_file)
+        if issue is not None:
+            issues.append((md_file, issue))
+    if not issues:
+        print(f"Encoding validation passed: no mojibake in {memory_path}")
+        return 0
+    print(
+        f"Encoding validation FAILED: {len(issues)} file(s) under "
+        f"{memory_path} contain encoding corruption.",
+        file=sys.stderr,
+    )
+    for path, issue in issues:
+        try:
+            rel = path.relative_to(memory_path)
+        except ValueError:
+            rel = path
+        print(f"  {rel}: {issue}", file=sys.stderr)
+    print(
+        "\nRun ``memory_lint --repair-mojibake`` to preview a fix, "
+        "or ``--repair-mojibake --apply`` to apply it.",
+        file=sys.stderr,
+    )
+    return 1
+
+
+def _run_encoding_repair(memory_path: Path, *, apply: bool) -> int:
+    """Walk ``memory_path`` and attempt to repair every mojibake'd file.
+
+    Args:
+        memory_path: Directory to scan for ``*.md`` files.
+        apply: If True, overwrite the original file in place (after
+            saving a ``<file>.bak`` copy). If False, write the
+            repaired content next to the original as ``<file>.fixed``
+            so the user can diff before applying.
+
+    Returns:
+        0 if every corrupted file was successfully repaired (or the
+        directory was already clean). 1 if at least one file could
+        not be repaired automatically (mixed double-encoding,
+        unsupported codepoints, etc.) — those are listed and need
+        manual review.
+    """
+    if not memory_path.exists():
+        print(f"Memory path does not exist: {memory_path}", file=sys.stderr)
+        return 1
+    repaired_paths: List[Path] = []
+    skipped_clean: List[Path] = []
+    failed: List[Tuple[Path, str]] = []
+    for md_file in _safe_rglob_md(memory_path):
+        issue = EncodingGate.scan_file(md_file)
+        if issue is None:
+            skipped_clean.append(md_file)
+            continue
+        try:
+            text = md_file.read_text(encoding='utf-8')
+        except (OSError, UnicodeDecodeError) as exc:
+            failed.append((md_file, f"unreadable: {exc}"))
+            continue
+        recovered, ok = EncodingGate.repair_mojibake(text)
+        if not ok:
+            failed.append((md_file, f"could not repair: {issue}"))
+            continue
+        if apply:
+            backup = md_file.with_suffix(md_file.suffix + '.bak')
+            md_file.replace(backup)
+            md_file.write_text(recovered, encoding='utf-8')
+        else:
+            preview = md_file.with_suffix(md_file.suffix + '.fixed')
+            preview.write_text(recovered, encoding='utf-8')
+        repaired_paths.append(md_file)
+    print(
+        f"Encoding repair scan complete in {memory_path}:\n"
+        f"  clean: {len(skipped_clean)}\n"
+        f"  repaired: {len(repaired_paths)}\n"
+        f"  manual-review: {len(failed)}"
+    )
+    for path in repaired_paths:
+        try:
+            rel = path.relative_to(memory_path)
+        except ValueError:
+            rel = path
+        suffix = ".bak (original)" if apply else ".fixed (preview)"
+        print(f"  REPAIRED: {rel}  ->  {rel}{suffix}")
+    if failed:
+        print("\nManual review required for these files:", file=sys.stderr)
+        for path, reason in failed:
+            try:
+                rel = path.relative_to(memory_path)
+            except ValueError:
+                rel = path
+            print(f"  {rel}: {reason}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Memory Lint System - Two-Layer Validation'
@@ -931,14 +1058,63 @@ def main():
         action='store_true',
         help='Run pre-delivery checklist (all critical checks before commit)'
     )
+    parser.add_argument(
+        '--validate-encoding',
+        action='store_true',
+        help=(
+            'Scan every markdown file for cp1251-as-utf8 mojibake or '
+            'replacement characters and exit non-zero if any are found. '
+            'Use this on the existing tree before / after deploys to '
+            'catch corruption introduced by Windows write hooks.'
+        )
+    )
+    parser.add_argument(
+        '--repair-mojibake',
+        action='store_true',
+        help=(
+            'Walk the memory tree and try to invert cp1251-as-utf8 '
+            'mojibake on every corrupted markdown file. By default '
+            'writes recovered text to ``<file>.fixed`` next to the '
+            'original; pass --apply to overwrite the original (with '
+            'a ``<file>.bak`` rescue copy). Always lists files that '
+            'could NOT be repaired automatically and require manual '
+            'review.'
+        )
+    )
+    parser.add_argument(
+        '--apply',
+        action='store_true',
+        help=(
+            'Modifier for --repair-mojibake: actually overwrite the '
+            'original file (after saving ``<file>.bak``) instead of '
+            'producing a side-by-side ``<file>.fixed`` for review.'
+        )
+    )
 
     args = parser.parse_args()
+
+    # ``--apply`` is only meaningful in combination with
+    # ``--repair-mojibake`` (it switches the repair mode from
+    # ``.fixed`` preview to in-place rewrite). Reject the
+    # combination explicitly so users don't get silently-ignored
+    # flags.
+    if args.apply and not args.repair_mojibake:
+        parser.error("--apply requires --repair-mojibake")
 
     # Determine memory path
     if args.memory_path:
         memory_path = Path(args.memory_path)
     else:
         memory_path = Path.home() / ".claude" / "memory"
+
+    # Encoding validation is independent of the layered lint flow:
+    # it walks the tree once and reports without instantiating the
+    # full MemoryLint pipeline.
+    if args.validate_encoding:
+        sys.exit(_run_encoding_validation(memory_path))
+
+    if args.repair_mojibake:
+        sys.exit(_run_encoding_repair(memory_path, apply=args.apply))
 
     # Run lint
     lint = MemoryLint(memory_path, quick_mode=args.quick)
