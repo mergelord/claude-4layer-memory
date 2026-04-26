@@ -564,6 +564,30 @@ class TestNormalizeIdPart:
         assert "\\" not in result
         assert ":" not in result
 
+    def test_diacritic_collisions_disambiguated(self):
+        """ASCII vs diacritic-decomposed inputs must produce distinct IDs.
+
+        Regression for the length-vs-string lossy-conversion check:
+        ``naïve`` NFKD-decomposes to ``n a i + combining-diaeresis + v e``;
+        the combining mark is dropped by ASCII encoding so the residue
+        is ``naive`` (length 5). The original-text regex residue for
+        ``naïve`` is ``na_ve`` (length 5 too), so a length-only check
+        would falsely report "no information lost" and emit the same
+        chunk ID for ``naive`` and ``naïve``.
+        """
+        plain = GlobalSemanticMemory._normalize_id_part("naive")
+        accented = GlobalSemanticMemory._normalize_id_part("naïve")
+        assert plain != accented, (
+            f"naive and naïve must not collide; got {plain!r} == {accented!r}"
+        )
+
+        plain2 = GlobalSemanticMemory._normalize_id_part("file_one")
+        accented2 = GlobalSemanticMemory._normalize_id_part("filé_öne")
+        assert plain2 != accented2, (
+            f"file_one and filé_öne must not collide; "
+            f"got {plain2!r} == {accented2!r}"
+        )
+
 
 class TestSearchInCollectionDesync:
     """_search_in_collection must tolerate truncated / mismatched Chroma payloads."""

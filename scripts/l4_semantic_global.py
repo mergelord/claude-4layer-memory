@@ -141,12 +141,16 @@ class GlobalSemanticMemory:
         ascii_only = decomposed.encode('ascii', 'ignore').decode('ascii')
         safe = re.sub(r'[^A-Za-z0-9._-]', '_', ascii_only).strip('_-')
 
-        # Detect lossy conversion: re-running the same regex over the
-        # original text would keep all the high-codepoint characters that
-        # the NFKD/ASCII step dropped, so a length mismatch means we lost
-        # information.
+        # Detect lossy conversion by comparing the two residues *as
+        # strings*, not by length. Equal lengths can still mean lossy
+        # conversion: ``naïve`` NFKD-decomposes to ``n a i + combining
+        # diaeresis + v e``, the combining mark is dropped by ASCII
+        # encoding so ``safe`` becomes ``naive`` (length 5), while the
+        # original-text regex turns ``naïve`` into ``na_ve`` (length 5
+        # too) — a length-only check would miss the collision and emit
+        # the same chunk ID for ``naive`` and ``naïve``.
         original_safe = re.sub(r'[^A-Za-z0-9._-]', '_', text).strip('_-')
-        lost_information = len(original_safe) != len(safe)
+        lost_information = original_safe != safe
 
         # MD5 here is a non-cryptographic ID derivation (collision-resistance,
         # not security), so we pass usedforsecurity=False to satisfy bandit/B324.
