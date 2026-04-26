@@ -130,11 +130,10 @@ def reindex_memory() -> dict[str, Any]:
         Результат переиндексации
     """
     try:
-        result = fts5_search.reindex()
+        indexed_count = fts5_search.reindex_all()
         return {
             "success": True,
-            "indexed_files": result.get("indexed_files", 0),
-            "sources": result.get("sources", [])
+            "indexed_files": indexed_count,
         }
     except Exception as e:
         logging.error("Reindex failed: %s", e)
