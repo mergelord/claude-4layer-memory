@@ -27,7 +27,7 @@
 **Зачем:** Качество bash скриптов, предотвращение багов
 
 ### 3. Release (`release.yml`)
-**Триггер:** Push тега вида `v*.*.*` (например, `v1.2.0`)
+**Триггер:** Push тега вида `v*.*.*` (например, `v1.3.0`)
 
 **Что делает:**
 - Генерирует changelog из git commits
@@ -52,10 +52,10 @@ python audit.py --help
 ### Создать релиз
 ```bash
 # Создать тег
-git tag v1.2.0
+git tag v1.3.0
 
 # Запушить тег
-git push origin v1.2.0
+git push origin v1.3.0
 
 # GitHub Actions автоматически создаст Release
 ```
