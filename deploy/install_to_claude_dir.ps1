@@ -494,11 +494,11 @@ print(f'OK: claude-4layer-memory {v}, EncodingGate ready')
 Write-Header 'Summary'
 Write-Host "Source     : $Source"
 Write-Host "Target     : $Target"
-if ($backupPath) {
+if ($backupPath -and -not $DryRun) {
     Write-Host "Backup     : $backupPath"
 } elseif ($SkipBackup) {
     Write-Host 'Backup     : (skipped)'
-} else {
+} elseif ($DryRun) {
     Write-Host 'Backup     : (dry-run, no backup made)'
 }
 Write-Host "DryRun     : $DryRun"
