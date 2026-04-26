@@ -1,6 +1,6 @@
 {
   "name": "claude-memory-cli",
-  "version": "1.0.0",
+  "version": "1.3.0",
   "description": "CLI tool for Claude 4-Layer Memory System - intelligent memory management with semantic search",
   "main": "cli/index.js",
   "bin": {
