@@ -904,6 +904,24 @@ Format as JSON:
 
         return True
 
+def _safe_rglob_md(memory_path: Path) -> List[Path]:
+    """Sorted ``*.md`` walk of ``memory_path`` that tolerates unreadable subtrees.
+
+    Mirrors ``MemoryLint.find_all_md_files()`` (lines 108-114): any
+    ``PermissionError`` / ``OSError`` raised while expanding ``rglob``
+    is downgraded to a stderr warning so the rest of the audit can
+    still proceed.
+    """
+    try:
+        return sorted(memory_path.rglob('*.md'))
+    except (PermissionError, OSError) as exc:
+        print(
+            f"Warning: could not fully walk {memory_path}: {exc}",
+            file=sys.stderr,
+        )
+        return []
+
+
 def _run_encoding_validation(memory_path: Path) -> int:
     """Walk ``memory_path`` and report any markdown file with mojibake.
 
@@ -915,7 +933,7 @@ def _run_encoding_validation(memory_path: Path) -> int:
         print(f"Memory path does not exist: {memory_path}", file=sys.stderr)
         return 1
     issues: List[Tuple[Path, str]] = []
-    for md_file in sorted(memory_path.rglob('*.md')):
+    for md_file in _safe_rglob_md(memory_path):
         issue = EncodingGate.scan_file(md_file)
         if issue is not None:
             issues.append((md_file, issue))
@@ -964,7 +982,7 @@ def _run_encoding_repair(memory_path: Path, *, apply: bool) -> int:
     repaired_paths: List[Path] = []
     skipped_clean: List[Path] = []
     failed: List[Tuple[Path, str]] = []
-    for md_file in sorted(memory_path.rglob('*.md')):
+    for md_file in _safe_rglob_md(memory_path):
         issue = EncodingGate.scan_file(md_file)
         if issue is None:
             skipped_clean.append(md_file)
@@ -1074,6 +1092,14 @@ def main():
     )
 
     args = parser.parse_args()
+
+    # ``--apply`` is only meaningful in combination with
+    # ``--repair-mojibake`` (it switches the repair mode from
+    # ``.fixed`` preview to in-place rewrite). Reject the
+    # combination explicitly so users don't get silently-ignored
+    # flags.
+    if args.apply and not args.repair_mojibake:
+        parser.error("--apply requires --repair-mojibake")
 
     # Determine memory path
     if args.memory_path:
