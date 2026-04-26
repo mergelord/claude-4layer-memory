@@ -78,7 +78,7 @@
 param(
     [string]$Source = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path,
     [string]$Target = (Join-Path $env:USERPROFILE '.claude'),
-    [string]$BackupRoot = (Split-Path -Parent (Join-Path $env:USERPROFILE '.claude')),
+    [string]$BackupRoot = (Split-Path -Parent $Target),
     [switch]$DryRun,
     [switch]$SkipBackup,
     [switch]$Force,
