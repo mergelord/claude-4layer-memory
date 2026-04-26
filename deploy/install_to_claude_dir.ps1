@@ -420,6 +420,12 @@ if ($SkipValidation -or $DryRun) {
     # tree (helpers + module resolution) and surfaces any leftover
     # shadowing or partial-write issues.
     Push-Location $Target
+    # Locally relax $ErrorActionPreference so that ``2>&1`` redirects
+    # from native commands (python.exe) don't get re-raised as
+    # terminating ``NativeCommandError``s. We rely on $LASTEXITCODE +
+    # explicit branches inside this block for failure signalling.
+    $previousEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
     try {
         Write-Host '    -> python -c (import EncodingGate + read VERSION)'
         $sanityCmd = @"
@@ -485,6 +491,7 @@ print(f'OK: claude-4layer-memory {v}, EncodingGate ready')
         }
     } finally {
         Pop-Location
+        $ErrorActionPreference = $previousEAP
     }
 }
 
