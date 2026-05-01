@@ -1,19 +1,19 @@
-# Claude 4-Layer Memory System
+﻿# Claude 4-Layer Memory System
 
-**Version 1.3.0**
+**Version 1.3.1**
 
 **Intelligent memory management system for Claude Code with semantic search and cross-project knowledge sharing.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-1.3.0-blue.svg)](https://github.com/mergelord/claude-4layer-memory/releases)
+[![Version](https://img.shields.io/badge/version-1.3.1-blue.svg)](https://github.com/mergelord/claude-4layer-memory/releases)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)](https://github.com/mergelord/claude-4layer-memory)
 
 ---
 
-## 🌟 Features
+## рџЊџ Features
 
-- **4-Layer Memory Architecture** - HOT (24h) → WARM (14d) → COLD (permanent) → SEMANTIC (indexed)
+- **4-Layer Memory Architecture** - HOT (24h) в†’ WARM (14d) в†’ COLD (permanent) в†’ SEMANTIC (indexed)
 - **Dual-Level System** - Global memory (cross-project) + Project memory (project-specific)
 - **Semantic Search** - Find information by meaning, not keywords (multilingual support)
 - **Linguistic Triggers** - Automatic context retrieval on natural language signals (inspired by Claude Opus 4.7)
@@ -30,7 +30,7 @@
 
 ---
 
-## 📋 Table of Contents
+## рџ“‹ Table of Contents
 
 - [Quick Start](#quick-start)
 - [Installation](#installation)
@@ -45,7 +45,7 @@
 
 ---
 
-## 🚀 Quick Start
+## рџљЂ Quick Start
 
 ```bash
 # Clone the repository
@@ -72,7 +72,7 @@ python scripts/l4_semantic_global.py stats
 
 ---
 
-## 📦 Installation
+## рџ“¦ Installation
 
 ### Prerequisites
 
@@ -121,28 +121,28 @@ See [INSTALL.md](docs/INSTALL.md) for detailed instructions.
 
 ---
 
-## 🏗️ Architecture
+## рџЏ—пёЏ Architecture
 
 ### 4-Layer Memory System
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│ Layer 4: SEMANTIC (Vector Search)                       │
-│ ├─ ChromaDB + sentence-transformers                     │
-│ └─ Multilingual semantic search                         │
-├─────────────────────────────────────────────────────────┤
-│ Layer 3: COLD (Permanent Archive)                       │
-│ ├─ archive/ directory                                   │
-│ └─ Long-term storage                                    │
-├─────────────────────────────────────────────────────────┤
-│ Layer 2: WARM (14 days)                                 │
-│ ├─ decisions.md                                         │
-│ └─ Important decisions, architectural choices           │
-├─────────────────────────────────────────────────────────┤
-│ Layer 1: HOT (24 hours)                                 │
-│ ├─ handoff.md                                           │
-│ └─ Recent events, quick context recovery                │
-└─────────────────────────────────────────────────────────┘
+в”Њв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”ђ
+в”‚ Layer 4: SEMANTIC (Vector Search)                       в”‚
+в”‚ в”њв”Ђ ChromaDB + sentence-transformers                     в”‚
+в”‚ в””в”Ђ Multilingual semantic search                         в”‚
+в”њв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”¤
+в”‚ Layer 3: COLD (Permanent Archive)                       в”‚
+в”‚ в”њв”Ђ archive/ directory                                   в”‚
+в”‚ в””в”Ђ Long-term storage                                    в”‚
+в”њв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”¤
+в”‚ Layer 2: WARM (14 days)                                 в”‚
+в”‚ в”њв”Ђ decisions.md                                         в”‚
+в”‚ в””в”Ђ Important decisions, architectural choices           в”‚
+в”њв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”¤
+в”‚ Layer 1: HOT (24 hours)                                 в”‚
+в”‚ в”њв”Ђ handoff.md                                           в”‚
+в”‚ в””в”Ђ Recent events, quick context recovery                в”‚
+в””в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”
 ```
 
 ### Dual-Level System
@@ -161,7 +161,7 @@ See [ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md) for details.
 
 ---
 
-## 💡 Usage
+## рџ’Ў Usage
 
 ### Basic Commands
 
@@ -208,7 +208,7 @@ See [USAGE.md](docs/guides/USAGE.md) for more examples.
 
 ---
 
-## ⚙️ Configuration
+## вљ™пёЏ Configuration
 
 ### GLOBAL_PROJECTS.md
 
@@ -220,7 +220,7 @@ Central registry of all projects:
 ### 1. Project Name
 **Path:** `C:\path\to\project`
 **Memory:** `~/.claude/projects/C--path-to-project/memory/`
-**Status:** ✅ Active
+**Status:** вњ… Active
 ```
 
 ### Memory Structure
@@ -229,19 +229,19 @@ Customize memory organization in each project:
 
 ```
 memory/
-├── MEMORY.md           # Index
-├── handoff.md          # HOT layer
-├── decisions.md        # WARM layer
-├── archive/            # COLD layer
-├── semantic_db/        # L4 layer
-└── outputs/            # Reports
+в”њв”Ђв”Ђ MEMORY.md           # Index
+в”њв”Ђв”Ђ handoff.md          # HOT layer
+в”њв”Ђв”Ђ decisions.md        # WARM layer
+в”њв”Ђв”Ђ archive/            # COLD layer
+в”њв”Ђв”Ђ semantic_db/        # L4 layer
+в””в”Ђв”Ђ outputs/            # Reports
 ```
 
 See [CONFIGURATION.md](docs/guides/CONFIGURATION.md) for details.
 
 ---
 
-## 📚 Examples
+## рџ“љ Examples
 
 ### Example 1: Cross-Project Learning
 
@@ -281,16 +281,16 @@ python scripts/memory_lint.py --layer all
 python memory_health_check.py
 
 # Output:
-# ✓ HOT memory: 3 entries (within 24h window)
-# ✓ WARM memory: 12 entries (within 14d window)
-# ✓ L4 index: 489 chunks across 3 collections
+# вњ“ HOT memory: 3 entries (within 24h window)
+# вњ“ WARM memory: 12 entries (within 14d window)
+# вњ“ L4 index: 489 chunks across 3 collections
 ```
 
 See [examples/](examples/) directory for more.
 
 ---
 
-## 📖 Documentation
+## рџ“– Documentation
 
 - **[Installation Guide](docs/INSTALL.md)** - Detailed installation instructions
 - **[Architecture Overview](docs/architecture/ARCHITECTURE.md)** - System design and components
@@ -304,7 +304,7 @@ See [examples/](examples/) directory for more.
 
 ---
 
-## 🤝 Contributing
+## рџ¤ќ Contributing
 
 Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
@@ -324,7 +324,7 @@ python -m pytest tests/
 
 ---
 
-## 🙏 Credits
+## рџ™Џ Credits
 
 This project integrates ideas and concepts from multiple sources:
 
@@ -348,13 +348,13 @@ See [CREDITS.md](CREDITS.md) for detailed acknowledgments.
 
 ---
 
-## 📄 License
+## рџ“„ License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ---
 
-## 🔗 Links
+## рџ”— Links
 
 - **Documentation:** [https://github.com/mergelord/claude-4layer-memory](https://github.com/mergelord/claude-4layer-memory)
 - **Issues:** [https://github.com/mergelord/claude-4layer-memory/issues](https://github.com/mergelord/claude-4layer-memory/issues)
@@ -362,10 +362,10 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-## ⭐ Star History
+## в­ђ Star History
 
 If you find this project useful, please consider giving it a star!
 
 ---
 
-**Made with ❤️ for the Claude Code community**
+**Made with вќ¤пёЏ for the Claude Code community**

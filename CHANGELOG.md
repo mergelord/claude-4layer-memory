@@ -1,38 +1,47 @@
-# Changelog
+﻿# Changelog
 
 All notable changes to claude-4layer-memory will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.1] - 2026-05-01
+
+### Fixed
+- `git-activity-detector.py`: stop writing Git-status spam to handoff.md on every session end
+- `stop_handoff_universal.py`: emergency_trim_handoff now filters noise from keep_entries
+
+### Added
+- `scripts/clean_handoffs.py`: utility to clean existing bloated handoff.md files
+
 ## [1.3.0] - 2026-04-25
 
 ### Added
 
-#### EncodingGate — fail-loud cp1251-as-utf8 mojibake protection (PR #13)
+#### EncodingGate вЂ” fail-loud cp1251-as-utf8 mojibake protection (PR #13)
 - New `scripts/memory_lint_helpers.py::EncodingGate` class:
-  - `assert_clean(text)` / `assert_clean_bytes(data)` — refuse to write
+  - `assert_clean(text)` / `assert_clean_bytes(data)` вЂ” refuse to write
     mojibake or U+FFFD before it lands on disk.
-  - `scan_file(path)` — non-raising audit used by
+  - `scan_file(path)` вЂ” non-raising audit used by
     `memory_lint --validate-encoding`.
-  - `repair_mojibake(text)` — chunked cp1251 round-trip recovery used
+  - `repair_mojibake(text)` вЂ” chunked cp1251 round-trip recovery used
     by `memory_lint --repair-mojibake [--apply]`.
 - Two-layer detector:
-  - Strict `_MOJIBAKE_RE` — `[Р|С] + Latin-1 supplement (U+0080..U+00BF)`.
-  - Broader `_MOJIBAKE_RUN_RE` — 2+ consecutive `[Р|С] + cp1251-high-glyph`
+  - Strict `_MOJIBAKE_RE` вЂ” `[Р |РЎ] + Latin-1 supplement (U+0080..U+00BF)`.
+  - Broader `_MOJIBAKE_RUN_RE` вЂ” 2+ consecutive `[Р |РЎ] + cp1251-high-glyph`
     pairs, gated by a cp1251 round-trip verification so legitimate
-    uppercase Russian (СССР, РОССИЯ, СИСТЕМА, СПАСИБО) is not
+    uppercase Russian (РЎРЎРЎР , Р РћРЎРЎРРЇ, РЎРРЎРўР•РњРђ, РЎРџРђРЎРР‘Рћ) is not
     flagged.
-- Catches Cyrillic-block-only mojibake (история, город, мир) that
+- Catches Cyrillic-block-only mojibake (РёСЃС‚РѕСЂРёСЏ, РіРѕСЂРѕРґ, РјРёСЂ) that
   the strict regex alone misses.
 - 65 unit tests covering all four public surfaces of the gate.
 - Real-world fixture in tests verifies recovery of an actual corrupted
   Windows handoff.md fragment.
 
 #### Audit documentation (PR #12)
-- `audit/independence_from_external_ai.md` — what the system can and
+- `audit/independence_from_external_ai.md` вЂ” what the system can and
   cannot do without calling out to an LLM.
-- `audit/llm_reasoning_responsibility_stack.md` — 4-layer responsibility
+- `audit/llm_reasoning_responsibility_stack.md` вЂ” 4-layer responsibility
   stack (state -> triggers -> scripts -> skills -> policy -> LLM)
   describing where each leak point lives.
 
@@ -56,15 +65,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `memory_lint_helpers`, `cost_tracker`, `mcp_server`, `cli/index.js`,
   `cli/commands/search.js`, `scripts/cleanup_system_artifacts`,
   `scripts/skill_creator`, `scripts/l4_*`, `tests/test_*`,
-  `utils/colors.py` — small correctness, ergonomics, and lint
+  `utils/colors.py` вЂ” small correctness, ergonomics, and lint
   improvements; full list in the PR description.
 
 ### Fixed
 
-- **MCP `reindex_memory` crash (PR #9)** — `reindex_memory` now calls
+- **MCP `reindex_memory` crash (PR #9)** вЂ” `reindex_memory` now calls
   `reindex_all()` instead of the non-existent `reindex()`, restoring
   manual reindexing from the MCP client.
-- **`cli search` broken reference (PR #6)** — replaced the missing
+- **`cli search` broken reference (PR #6)** вЂ” replaced the missing
   `l4_hybrid.{bat,sh}` invocation with the actual hybrid search entry
   point so the CLI's search command works on a fresh checkout.
 
@@ -74,7 +83,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Lint: ruff clean, pylint 10.00/10 (test import-error is a known
   sys.path quirk pre-existing v1.2.0), mypy clean, bandit clean,
   shellcheck clean, radon complexity green.
-- CI matrix: 9 platform combinations (Linux / macOS / Windows × Python
+- CI matrix: 9 platform combinations (Linux / macOS / Windows Г— Python
   3.10 / 3.11 / 3.12) all green.
 - Real-snapshot regression: EncodingGate detects the same 2 corrupted
   files (`decisions.md`, `handoff.md`) on the user's actual
@@ -89,7 +98,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Possessive pronouns: "my project", "our code", "my system"
   - Definite articles: "the script", "the bug", "the solution"
   - Past tense references: "you recommended", "we discussed", "you helped"
-  - Russian equivalents: "ты рекомендовал", "мы обсуждали", "моего проекта"
+  - Russian equivalents: "С‚С‹ СЂРµРєРѕРјРµРЅРґРѕРІР°Р»", "РјС‹ РѕР±СЃСѓР¶РґР°Р»Рё", "РјРѕРµРіРѕ РїСЂРѕРµРєС‚Р°"
 - **Automatic context retrieval** on natural linguistic signals
 - **Trigger logging** to `~/.claude/hooks/semantic_search.log` for debugging
 - Bilingual support (English + Russian)
@@ -225,11 +234,11 @@ All existing functionality preserved:
 ## Roadmap
 
 ### [1.4.0] - Planned
-- [ ] CostBudgetGate — fail-loud on token / spend overruns (no
+- [ ] CostBudgetGate вЂ” fail-loud on token / spend overruns (no
       equivalent in claude-mem; deliberate moat).
-- [ ] OutdatedDateChecker — flag stale dates / "today" references in
+- [ ] OutdatedDateChecker вЂ” flag stale dates / "today" references in
       memory (memory hygiene moat).
-- [ ] `claude-memory-cli verify-hooks` — diff installed hooks against
+- [ ] `claude-memory-cli verify-hooks` вЂ” diff installed hooks against
       the repo's expected hook manifest.
 - [ ] Layer 2: Claude API integration for contradiction detection.
 - [ ] Auto-fix mode (`--fix` flag).
