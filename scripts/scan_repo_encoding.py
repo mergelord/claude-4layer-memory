@@ -119,6 +119,29 @@ def _is_excluded_file(path: Path, repo_root: Path) -> bool:
     return rel.as_posix() in EXCLUDE_FILES
 
 
+def _relative_parts(path: Path, repo_root: Path) -> Tuple[str, ...]:
+    """Return ``path``'s parts relative to ``repo_root`` when possible.
+
+    ``EXCLUDE_DIRS`` is meant to filter out directories *inside* the
+    repository (e.g. ``.git``, ``node_modules``, ``memory``). Matching
+    against the absolute parts of ``path`` would silently exclude
+    every file in the repo if the clone happened to live under a
+    directory whose name collides with the exclusion list (e.g.
+    ``/home/user/build/repo/``, ``/srv/dist/repo/``). Resolving the
+    parts against ``repo_root`` first prevents that false-pass.
+    """
+    try:
+        rel = path.resolve().relative_to(repo_root.resolve())
+    except ValueError:
+        # ``path`` lives outside the repo (CLI passed an absolute path
+        # to somewhere unrelated). Fall back to absolute parts so the
+        # filter still has a chance to skip obvious exclusions like
+        # ``__pycache__``; this is a best-effort rather than a
+        # silent-pass.
+        return path.parts
+    return rel.parts
+
+
 def _passes_filters(path: Path, repo_root: Path) -> bool:
     """Return True iff ``path`` survives every include/exclude filter.
 
@@ -127,10 +150,14 @@ def _passes_filters(path: Path, repo_root: Path) -> bool:
     passing a file on the CLI must not bypass exclusions that would
     otherwise apply during a directory walk.
     """
-    # Skip excluded directories anywhere in the relative path. ``.git``
-    # / ``__pycache__`` / ``node_modules`` etc. should never be scanned
-    # even if a single file inside them is passed on the CLI.
-    if any(part in EXCLUDE_DIRS for part in path.parts):
+    # Skip excluded directories *inside the repo*. ``.git`` /
+    # ``__pycache__`` / ``node_modules`` etc. should never be scanned
+    # even if a single file inside them is passed on the CLI. Match
+    # against the path *relative to ``repo_root``* so the scanner is
+    # not defeated by clones living under a directory whose name
+    # happens to be in ``EXCLUDE_DIRS`` (``/home/user/build/repo/``
+    # is a valid checkout location and must scan correctly).
+    if any(part in EXCLUDE_DIRS for part in _relative_parts(path, repo_root)):
         return False
     # Skip ``.bak_<timestamp>`` style suffixes (pattern: anything
     # starting with ``.bak`` or ``.fixed``).
