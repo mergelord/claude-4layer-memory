@@ -58,6 +58,8 @@ echo.
 echo Copying scripts...
 copy /Y "scripts\l4_semantic_global.py" "%USERPROFILE%\.claude\hooks\" >nul
 copy /Y "scripts\windows\*.bat" "%USERPROFILE%\.claude\hooks\" >nul
+copy /Y "hooks\git-activity-detector.py" "%USERPROFILE%\.claude\hooks\" >nul
+copy /Y "hooks\stop_handoff_universal.py" "%USERPROFILE%\.claude\hooks\" >nul
 
 echo [OK] Scripts copied
 
