@@ -79,6 +79,25 @@ jobs:
       run: |
         ruff check scripts/*.py audit.py
 
+  encoding:
+    name: EncodingGate (mojibake detector)
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    # The scanner only depends on stdlib + ``memory_lint_helpers`` from
+    # the repo itself, so we deliberately skip pip install to keep the
+    # job cheap and fast (target: <30s wall clock).
+    - name: Scan repository for cp1251-as-utf8 mojibake / U+FFFD
+      run: |
+        python scripts/scan_repo_encoding.py
+
   security-and-complexity:
     name: ${{ matrix.tool.name }}
     runs-on: ubuntu-latest

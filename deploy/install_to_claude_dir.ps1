@@ -76,9 +76,9 @@
 
 [CmdletBinding()]
 param(
-    [string]$Source = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path,
+    [string]$Source,
     [string]$Target = (Join-Path $env:USERPROFILE '.claude'),
-    [string]$BackupRoot = (Split-Path -Parent $Target),
+    [string]$BackupRoot,
     [switch]$DryRun,
     [switch]$SkipBackup,
     [switch]$Force,
@@ -87,6 +87,43 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+
+# ----------------------------------------------------------------------------
+# Resolve script directory robustly.
+# ----------------------------------------------------------------------------
+# ``$PSScriptRoot`` is normally populated by the PowerShell engine, but
+# there are documented edge cases where it ends up empty:
+#
+#   * dot-sourcing the script under PowerShell ISE,
+#   * invoking via ``powershell.exe -File <relative>`` from certain
+#     non-interactive contexts,
+#   * very old PowerShell hosts (3.0 and below).
+#
+# When that happens, ``Join-Path '' '..'`` resolves against the current
+# working directory rather than the script directory and the script
+# silently picks up the wrong source repo. Fall back through three
+# layers before giving up.
+$ScriptDir = $PSScriptRoot
+if (-not $ScriptDir -and $MyInvocation.MyCommand.Path) {
+    $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+}
+if (-not $ScriptDir -and $PSCommandPath) {
+    $ScriptDir = Split-Path -Parent $PSCommandPath
+}
+if (-not $ScriptDir) {
+    throw (
+        'Cannot determine script directory: $PSScriptRoot, ' +
+        '$MyInvocation.MyCommand.Path and $PSCommandPath are all ' +
+        'empty. Re-run with an explicit -Source argument.'
+    )
+}
+
+if (-not $Source) {
+    $Source = (Resolve-Path (Join-Path $ScriptDir '..')).Path
+}
+if (-not $BackupRoot) {
+    $BackupRoot = Split-Path -Parent $Target
+}
 
 # ----------------------------------------------------------------------------
 # Configuration: managed paths
