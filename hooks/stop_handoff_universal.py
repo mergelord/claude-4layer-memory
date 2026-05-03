@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """Universal Stop Hook - automatic handoff recording for all projects.
 
 Records session summary to memory/handoff.md when session ends.
@@ -13,14 +13,26 @@ from pathlib import Path
 from collections import Counter
 
 
+def _legacy_mojibake(s: str) -> str:
+    """Return the cp1251-as-utf8 mojibake form of ``s``.
+
+    Hook versions before v1.3.2 wrote some hardcoded Russian markers into
+    user memory files in this corrupted form. Computing the legacy form at
+    runtime (instead of inlining it as a string literal) keeps this source
+    file clean from EncodingGate's perspective while still letting the code
+    recognise files written by the older hooks.
+    """
+    return s.encode('utf-8').decode('cp1251', errors='replace')
+
+
 def encode_project_path(project_path: Path) -> str:
-    """РљРѕРґРёСЂСѓРµС‚ РїСѓС‚СЊ РїСЂРѕРµРєС‚Р° РґР»СЏ РёСЃРїРѕР»СЊР·РѕРІР°РЅРёСЏ РІ РёРјРµРЅРё РґРёСЂРµРєС‚РѕСЂРёРё."""
+    """Кодирует путь проекта для использования в имени директории."""
     return str(project_path).replace(':', '').replace('\\', '-').replace('/', '-')
 
 
 def detect_project():
-    """РћРїСЂРµРґРµР»СЏРµС‚ С‚РµРєСѓС‰РёР№ РїСЂРѕРµРєС‚ РёР· РїРµСЂРµРјРµРЅРЅРѕР№ РѕРєСЂСѓР¶РµРЅРёСЏ РёР»Рё CWD."""
-    # Blacklist СЃРёСЃС‚РµРјРЅС‹С… РїР°РїРѕРє (Р°СЂС‚РµС„Р°РєС‚С‹ Р·Р°РїСѓСЃРєР° РёР·-РїРѕРґ Р°РґРјРёРЅР°)
+    """Определяет текущий проект из переменной окружения или CWD."""
+    # Blacklist системных папок (артефакты запуска из-под админа)
     SYSTEM_BLACKLIST = [
         'system32', 'System32', 'SYSTEM32',
         'Windows', 'WINDOWS', 'windows',
@@ -28,32 +40,32 @@ def detect_project():
         'ProgramData', 'AppData'
     ]
 
-    # РџСЂРёРѕСЂРёС‚РµС‚ 1: CLAUDE_PROJECT_PATH
+    # Приоритет 1: CLAUDE_PROJECT_PATH
     project_path = os.getenv('CLAUDE_PROJECT_PATH')
     if project_path:
         resolved = Path(project_path).resolve()
-        # РџСЂРѕРІРµСЂРєР° РЅР° СЃРёСЃС‚РµРјРЅС‹Рµ РїР°РїРєРё
+        # Проверка на системные папки
         if any(blacklisted in str(resolved) for blacklisted in SYSTEM_BLACKLIST):
-            return None  # РРіРЅРѕСЂРёСЂСѓРµРј СЃРёСЃС‚РµРјРЅС‹Рµ РїР°РїРєРё
+            return None  # Игнорируем системные папки
         return resolved
 
-    # РџСЂРёРѕСЂРёС‚РµС‚ 2: РўРµРєСѓС‰Р°СЏ РґРёСЂРµРєС‚РѕСЂРёСЏ
+    # Приоритет 2: Текущая директория
     cwd = Path.cwd()
 
-    # РџСЂРѕРІРµСЂРєР° РЅР° СЃРёСЃС‚РµРјРЅС‹Рµ РїР°РїРєРё
+    # Проверка на системные папки
     if any(blacklisted in str(cwd) for blacklisted in SYSTEM_BLACKLIST):
-        return None  # РРіРЅРѕСЂРёСЂСѓРµРј СЃРёСЃС‚РµРјРЅС‹Рµ РїР°РїРєРё
+        return None  # Игнорируем системные папки
 
-    # РџСЂРѕРІРµСЂСЏРµРј, РµСЃС‚СЊ Р»Рё CLAUDE.md РІ С‚РµРєСѓС‰РµР№ РґРёСЂРµРєС‚РѕСЂРёРё
+    # Проверяем, есть ли CLAUDE.md в текущей директории
     if (cwd / "CLAUDE.md").exists():
         return cwd
 
-    # Fallback: РёСЃРїРѕР»СЊР·СѓРµРј CWD
+    # Fallback: используем CWD
     return cwd
 
 
 def get_memory_paths(project_path: Path):
-    """Р’РѕР·РІСЂР°С‰Р°РµС‚ РїСѓС‚Рё Рє С„Р°Р№Р»Р°Рј РїР°РјСЏС‚Рё РґР»СЏ РїСЂРѕРµРєС‚Р°."""
+    """Возвращает пути к файлам памяти для проекта."""
     encoded = encode_project_path(project_path)
     base = Path.home() / ".claude" / "projects" / encoded
 
@@ -192,7 +204,10 @@ def emergency_trim_handoff(handoff_file: Path, decisions_file: Path):
     keep_entries = entries[-10:]
     rotate_entries = entries[:-10]
 
-    NOISE = ['Session completed', 'Git stat', 'Settings updated', 'Git СЃС‚Р°С‚СѓСЃ']
+    # Match both the clean 'Git статус' and its cp1251-as-utf8 mojibake
+    # form written by hook versions before v1.3.2.
+    NOISE = ['Session completed', 'Git stat', 'Settings updated',
+             'Git статус', _legacy_mojibake('Git статус')]
     # Filter NOISE from rotate_entries (don't pollute decisions.md)
     rotate_entries = [e for e in rotate_entries if not any(n in e for n in NOISE)]
     # Prefer meaningful entries in keep_entries too
@@ -200,7 +215,7 @@ def emergency_trim_handoff(handoff_file: Path, decisions_file: Path):
     if meaningful_keep:
         keep_entries = meaningful_keep[-10:]
     elif keep_entries:
-        keep_entries = keep_entries[-3:]  # All noise вЂ” keep only last 3
+        keep_entries = keep_entries[-3:]  # All noise — keep only last 3
     if rotate_entries:
         # Append to decisions.md
         decisions_file.parent.mkdir(parents=True, exist_ok=True)
@@ -209,30 +224,36 @@ def emergency_trim_handoff(handoff_file: Path, decisions_file: Path):
         else:
             decisions_content = """# Decisions - WARM Memory
 
-Р’Р°Р¶РЅС‹Рµ СЂРµС€РµРЅРёСЏ Рё РёР·РјРµРЅРµРЅРёСЏ Р·Р° РїРѕСЃР»РµРґРЅРёРµ 14 РґРЅРµР№.
+Важные решения и изменения за последние 14 дней.
 
-**РћР±РЅРѕРІР»СЏРµС‚СЃСЏ:** РђРІС‚РѕРјР°С‚РёС‡РµСЃРєРё РёР· handoff.md (Р·Р°РїРёСЃРё СЃС‚Р°СЂС€Рµ 24С‡)
-**Р РѕС‚Р°С†РёСЏ:** Р—Р°РїРёСЃРё СЃС‚Р°СЂС€Рµ 14 РґРЅРµР№ в†’ COLD (archive/)
-**Р Р°Р·РјРµСЂ:** РќРµРѕРіСЂР°РЅРёС‡РµРЅ
+**Обновляется:** Автоматически из handoff.md (записи старше 24ч)
+**Ротация:** Записи старше 14 дней → COLD (archive/)
+**Размер:** Неограничен
 
 ---
 
 """
 
-        # Insert rotated entries before last update line
-        if '**РџРѕСЃР»РµРґРЅРµРµ РѕР±РЅРѕРІР»РµРЅРёРµ:**' in decisions_content:
-            parts = decisions_content.rsplit('**РџРѕСЃР»РµРґРЅРµРµ РѕР±РЅРѕРІР»РµРЅРёРµ:**', 1)
-            decisions_content = parts[0] + '\n'.join(rotate_entries) + '\n\n**РџРѕСЃР»РµРґРЅРµРµ РѕР±РЅРѕРІР»РµРЅРёРµ:**' + parts[1]
+        # Insert rotated entries before last update line. Поддерживаем
+        # legacy mojibake-маркер для decisions.md от версий до v1.3.2.
+        new_marker = '**Последнее обновление:**'
+        old_marker = _legacy_mojibake(new_marker)
+        existing_marker = new_marker if new_marker in decisions_content else (
+            old_marker if old_marker in decisions_content else None
+        )
+        if existing_marker:
+            parts = decisions_content.rsplit(existing_marker, 1)
+            decisions_content = parts[0] + '\n'.join(rotate_entries) + '\n\n' + new_marker + parts[1]
         else:
-            decisions_content += '\n'.join(rotate_entries) + f"\n\n**РџРѕСЃР»РµРґРЅРµРµ РѕР±РЅРѕРІР»РµРЅРёРµ:** {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
+            decisions_content += '\n'.join(rotate_entries) + f"\n\n{new_marker} {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
 
         decisions_file.write_text(decisions_content, encoding='utf-8')
         print(f"[TRIM] Rotated {len(rotate_entries)} entries to decisions.md", file=sys.stderr)
 
     # Update handoff with only newest entries
     new_content = header + '\n\n' + '\n\n'.join(keep_entries)
-    new_content += f"\n\n**Р’СЃРµРіРѕ Р·Р°РїРёСЃРµР№:** {len(keep_entries)}/10\n"
-    new_content += f"**РџРѕСЃР»РµРґРЅРµРµ РѕР±РЅРѕРІР»РµРЅРёРµ:** {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
+    new_content += f"\n\n**Всего записей:** {len(keep_entries)}/10\n"
+    new_content += f"**Последнее обновление:** {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
 
     handoff_file.write_text(new_content, encoding='utf-8')
     return True
@@ -289,7 +310,7 @@ def emergency_trim_decisions(decisions_file: Path, memory_dir: Path):
         else:
             with open(archive_file, 'w', encoding='utf-8') as f:
                 f.write(f"# Archived Decisions - {datetime.now().strftime('%Y-%m')}\n\n")
-                f.write("РђСЂС…РёРІРЅС‹Рµ СЂРµС€РµРЅРёСЏ, СЂРѕС‚РёСЂРѕРІР°РЅРЅС‹Рµ РёР· WARM РїР°РјСЏС‚Рё.\n\n---\n\n")
+                f.write("Архивные решения, ротированные из WARM памяти.\n\n---\n\n")
                 f.write('\n\n'.join(rotate_entries))
 
         print(f"[TRIM] Rotated {len(rotate_entries)} entries to {archive_file.name}", file=sys.stderr)
@@ -313,7 +334,7 @@ def emergency_trim_decisions(decisions_file: Path, memory_dir: Path):
 
     # Update decisions with only newest entries
     new_content = header + '\n\n' + '\n\n'.join(keep_entries)
-    new_content += f"\n\n**РџРѕСЃР»РµРґРЅРµРµ РѕР±РЅРѕРІР»РµРЅРёРµ:** {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
+    new_content += f"\n\n**Последнее обновление:** {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
 
     decisions_file.write_text(new_content, encoding='utf-8')
     return True
@@ -321,7 +342,7 @@ def emergency_trim_decisions(decisions_file: Path, memory_dir: Path):
 
 def update_handoff(handoff_file: Path, project_name: str, summary: str):
     """Insert summary into handoff.md after header."""
-    # РЎРѕР·РґР°С‘Рј РґРёСЂРµРєС‚РѕСЂРёСЋ РµСЃР»Рё РЅРµС‚
+    # Создаём директорию если нет
     handoff_file.parent.mkdir(parents=True, exist_ok=True)
 
     # Backup
@@ -333,15 +354,15 @@ def update_handoff(handoff_file: Path, project_name: str, summary: str):
     if handoff_file.exists():
         lines = handoff_file.read_text(encoding='utf-8').split('\n')
     else:
-        # РЎРѕР·РґР°С‘Рј РЅРѕРІС‹Р№ С„Р°Р№Р»
+        # Создаём новый файл
         lines = [
             "# Handoff - HOT Memory",
             "",
-            f"РџРѕСЃР»РµРґРЅРёРµ 10 РІР°Р¶РЅС‹С… СЃРѕР±С‹С‚РёР№ РІ РїСЂРѕРµРєС‚Рµ {project_name}.",
+            f"Последние 10 важных событий в проекте {project_name}.",
             "",
-            "**РћР±РЅРѕРІР»СЏРµС‚СЃСЏ:** РђРІС‚РѕРјР°С‚РёС‡РµСЃРєРё РїСЂРё РІР°Р¶РЅС‹С… РёР·РјРµРЅРµРЅРёСЏС…",
-            "**Р РѕС‚Р°С†РёСЏ:** Р—Р°РїРёСЃРё СЃС‚Р°СЂС€Рµ 24С‡ в†’ WARM (decisions.md)",
-            "**Р Р°Р·РјРµСЂ:** РњР°РєСЃ 10 Р·Р°РїРёСЃРµР№",
+            "**Обновляется:** Автоматически при важных изменениях",
+            "**Ротация:** Записи старше 24ч → WARM (decisions.md)",
+            "**Размер:** Макс 10 записей",
             "",
             "---",
         ]
