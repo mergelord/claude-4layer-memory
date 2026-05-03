@@ -1,0 +1,49 @@
+# Pre-commit hooks for claude-4layer-memory.
+#
+# Install once per clone:
+#   pip install pre-commit
+#   pre-commit install
+#
+# Run manually against the whole repo:
+#   pre-commit run --all-files
+#
+# Each hook is intentionally fast (<1s on a clean repo) so contributors
+# don't disable hooks out of frustration.
+
+repos:
+  - repo: meta
+    hooks:
+      - id: check-hooks-apply
+      - id: check-useless-excludes
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: end-of-file-fixer
+        # VERSION is consumed by ``cat`` and string-equality checks; a
+        # trailing newline would change its content. Keep it raw.
+        exclude: ^VERSION$
+      - id: trailing-whitespace
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ['--maxkb=1024']
+      - id: mixed-line-ending
+        args: ['--fix=no']
+
+  # Local hook: EncodingGate regression gate.
+  #
+  # Walks every .py / .md / .yml / .toml / .json / .ps1 / .sh / .bat
+  # file in the repo and rejects any that contain cp1251-as-utf8
+  # mojibake or U+FFFD replacement characters. This is the same check
+  # the ``encoding`` job runs in CI; running it locally catches
+  # regressions before they ever reach the PR.
+  - repo: local
+    hooks:
+      - id: encoding-gate
+        name: EncodingGate (cp1251-as-utf8 mojibake detector)
+        entry: python scripts/scan_repo_encoding.py
+        language: system
+        types_or: [python, markdown, yaml, toml, json, shell, batch, powershell]
+        pass_filenames: true
