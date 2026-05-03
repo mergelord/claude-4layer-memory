@@ -13,6 +13,18 @@ from pathlib import Path
 from collections import Counter
 
 
+def _legacy_mojibake(s: str) -> str:
+    """Return the cp1251-as-utf8 mojibake form of ``s``.
+
+    Hook versions before v1.3.2 wrote some hardcoded Russian markers into
+    user memory files in this corrupted form. Computing the legacy form at
+    runtime (instead of inlining it as a string literal) keeps this source
+    file clean from EncodingGate's perspective while still letting the code
+    recognise files written by the older hooks.
+    """
+    return s.encode('utf-8').decode('cp1251', errors='replace')
+
+
 def encode_project_path(project_path: Path) -> str:
     """Кодирует путь проекта для использования в имени директории."""
     return str(project_path).replace(':', '').replace('\\', '-').replace('/', '-')
@@ -192,7 +204,10 @@ def emergency_trim_handoff(handoff_file: Path, decisions_file: Path):
     keep_entries = entries[-10:]
     rotate_entries = entries[:-10]
 
-    NOISE = ['Session completed', 'Git stat', 'Settings updated', 'Git статус']
+    # Match both the clean 'Git статус' and its cp1251-as-utf8 mojibake
+    # form written by hook versions before v1.3.2.
+    NOISE = ['Session completed', 'Git stat', 'Settings updated',
+             'Git статус', _legacy_mojibake('Git статус')]
     # Filter NOISE from rotate_entries (don't pollute decisions.md)
     rotate_entries = [e for e in rotate_entries if not any(n in e for n in NOISE)]
     # Prefer meaningful entries in keep_entries too
@@ -219,12 +234,18 @@ def emergency_trim_handoff(handoff_file: Path, decisions_file: Path):
 
 """
 
-        # Insert rotated entries before last update line
-        if '**Последнее обновление:**' in decisions_content:
-            parts = decisions_content.rsplit('**Последнее обновление:**', 1)
-            decisions_content = parts[0] + '\n'.join(rotate_entries) + '\n\n**Последнее обновление:**' + parts[1]
+        # Insert rotated entries before last update line. Поддерживаем
+        # legacy mojibake-маркер для decisions.md от версий до v1.3.2.
+        new_marker = '**Последнее обновление:**'
+        old_marker = _legacy_mojibake(new_marker)
+        existing_marker = new_marker if new_marker in decisions_content else (
+            old_marker if old_marker in decisions_content else None
+        )
+        if existing_marker:
+            parts = decisions_content.rsplit(existing_marker, 1)
+            decisions_content = parts[0] + '\n'.join(rotate_entries) + '\n\n' + new_marker + parts[1]
         else:
-            decisions_content += '\n'.join(rotate_entries) + f"\n\n**Последнее обновление:** {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
+            decisions_content += '\n'.join(rotate_entries) + f"\n\n{new_marker} {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
 
         decisions_file.write_text(decisions_content, encoding='utf-8')
         print(f"[TRIM] Rotated {len(rotate_entries)} entries to decisions.md", file=sys.stderr)

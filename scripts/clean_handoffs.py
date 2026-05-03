@@ -6,7 +6,23 @@ import shutil
 from pathlib import Path
 from datetime import datetime
 
-NOISE_TITLES = ['Git статус проверен', 'Git stat']
+
+def _legacy_mojibake(s: str) -> str:
+    """Return the cp1251-as-utf8 mojibake form of ``s``.
+
+    Hook versions before v1.3.2 wrote some hardcoded Russian titles and
+    markers into user handoff/decisions files in this corrupted form.
+    Computing the legacy form at runtime (instead of inlining it) keeps
+    this source file clean from EncodingGate's perspective while still
+    letting the cleanup utility recognise legacy noise entries.
+    """
+    return s.encode('utf-8').decode('cp1251', errors='replace')
+
+
+# Match both clean 'Git статус проверен' and its mojibake form left
+# behind by hook versions before v1.3.2.
+NOISE_TITLES = ['Git статус проверен', 'Git stat',
+                _legacy_mojibake('Git статус проверен')]
 
 
 def is_noise_entry(entry: str) -> bool:
@@ -53,10 +69,16 @@ def clean_handoff(filepath: Path) -> tuple[int, int]:
     shutil.copy2(filepath, filepath.with_suffix('.md.bak'))
     kept = good[-10:] if len(good) > 10 else good
     now = datetime.now().strftime('%Y-%m-%d %H:%M')
-    if '**Последнее обновление:**' in header:
-        parts = header.split('**Последнее обновление:**', 1)
+    # Поддерживаем legacy mojibake-маркер для handoff.md от версий до v1.3.2.
+    new_marker = '**Последнее обновление:**'
+    old_marker = _legacy_mojibake(new_marker)
+    existing_marker = new_marker if new_marker in header else (
+        old_marker if old_marker in header else None
+    )
+    if existing_marker:
+        parts = header.split(existing_marker, 1)
         rest = parts[1].split('\n', 1)
-        header = (parts[0] + f'**Последнее обновление:** {now}\n'
+        header = (parts[0] + f'{new_marker} {now}\n'
                   + (rest[1] if len(rest) > 1 else ''))
     new_content = header + '\n\n' + '\n\n'.join(kept) + '\n'
     filepath.write_text(new_content, encoding='utf-8')

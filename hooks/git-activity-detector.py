@@ -22,6 +22,18 @@ from datetime import datetime
 from pathlib import Path
 
 
+def _legacy_mojibake(s: str) -> str:
+    """Return the cp1251-as-utf8 mojibake form of ``s``.
+
+    Hook versions before v1.3.2 wrote some hardcoded Russian markers into
+    user memory files in this corrupted form. Computing the legacy form at
+    runtime (instead of inlining it as a string literal) keeps this source
+    file clean from EncodingGate's perspective while still letting the code
+    recognise files written by the older hooks.
+    """
+    return s.encode('utf-8').decode('cp1251', errors='replace')
+
+
 def get_cwd():
     """Получает текущую рабочую директорию."""
     return Path(os.getcwd())
@@ -328,12 +340,18 @@ def update_memory(memory_file: Path, new_entry: str):
         # Читаем существующий
         content = memory_file.read_text(encoding='utf-8')
 
-        # Обновляем timestamp
-        if '**Последнее обновление:**' in content:
-            parts = content.split('**Последнее обновление:**')
+        # Обновляем timestamp. Поддерживаем legacy mojibake-маркер
+        # для файлов, записанных версиями до v1.3.2 (cp1251-as-utf8).
+        new_marker = '**Последнее обновление:**'
+        old_marker = _legacy_mojibake(new_marker)
+        existing_marker = new_marker if new_marker in content else (
+            old_marker if old_marker in content else None
+        )
+        if existing_marker:
+            parts = content.split(existing_marker, 1)
             before = parts[0]
             after = parts[1].split('\n', 1)
-            content = before + f"**Последнее обновление:** {datetime.now().strftime('%Y-%m-%d %H:%M')}\n" + after[1]
+            content = before + f"{new_marker} {datetime.now().strftime('%Y-%m-%d %H:%M')}\n" + after[1]
 
         # Добавляем новую запись после разделителя
         if '---' in content:
