@@ -110,15 +110,18 @@ if (-not $ScriptDir -and $MyInvocation.MyCommand.Path) {
 if (-not $ScriptDir -and $PSCommandPath) {
     $ScriptDir = Split-Path -Parent $PSCommandPath
 }
-if (-not $ScriptDir) {
-    throw (
-        'Cannot determine script directory: $PSScriptRoot, ' +
-        '$MyInvocation.MyCommand.Path and $PSCommandPath are all ' +
-        'empty. Re-run with an explicit -Source argument.'
-    )
-}
 
+# Only fail if we actually need ``$ScriptDir`` to derive ``-Source``.
+# If the caller passed ``-Source`` explicitly, an empty ``$ScriptDir``
+# is harmless because we never read it.
 if (-not $Source) {
+    if (-not $ScriptDir) {
+        throw (
+            'Cannot determine script directory: $PSScriptRoot, ' +
+            '$MyInvocation.MyCommand.Path and $PSCommandPath are all ' +
+            'empty. Re-run with an explicit -Source argument.'
+        )
+    }
     $Source = (Resolve-Path (Join-Path $ScriptDir '..')).Path
 }
 if (-not $BackupRoot) {

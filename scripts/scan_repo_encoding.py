@@ -119,31 +119,45 @@ def _is_excluded_file(path: Path, repo_root: Path) -> bool:
     return rel.as_posix() in EXCLUDE_FILES
 
 
+def _passes_filters(path: Path, repo_root: Path) -> bool:
+    """Return True iff ``path`` survives every include/exclude filter.
+
+    Centralising this lets the file-branch and recursive-branch of
+    :func:`_iter_source_files` apply identical rules — explicitly
+    passing a file on the CLI must not bypass exclusions that would
+    otherwise apply during a directory walk.
+    """
+    # Skip excluded directories anywhere in the relative path. ``.git``
+    # / ``__pycache__`` / ``node_modules`` etc. should never be scanned
+    # even if a single file inside them is passed on the CLI.
+    if any(part in EXCLUDE_DIRS for part in path.parts):
+        return False
+    # Skip ``.bak_<timestamp>`` style suffixes (pattern: anything
+    # starting with ``.bak`` or ``.fixed``).
+    if any(part.startswith('.bak') or part.startswith('.fixed')
+           for part in path.suffixes):
+        return False
+    suffix = path.suffix.lower()
+    if suffix in EXCLUDE_SUFFIXES:
+        return False
+    if suffix not in INCLUDE_SUFFIXES:
+        return False
+    if _is_excluded_file(path, repo_root):
+        return False
+    return True
+
+
 def _iter_source_files(root: Path, repo_root: Path) -> Iterable[Path]:
     """Yield every source file under ``root`` honouring exclusions."""
     if root.is_file():
-        if not _is_excluded_file(root, repo_root):
+        if _passes_filters(root, repo_root):
             yield root
         return
     for path in root.rglob('*'):
         if not path.is_file():
             continue
-        # Skip excluded directories anywhere in the relative path.
-        if any(part in EXCLUDE_DIRS for part in path.parts):
-            continue
-        # Skip ``.bak_<timestamp>`` style suffixes (pattern: anything
-        # starting with ``.bak`` or ``.fixed``).
-        if any(part.startswith('.bak') or part.startswith('.fixed')
-               for part in path.suffixes):
-            continue
-        suffix = path.suffix.lower()
-        if suffix in EXCLUDE_SUFFIXES:
-            continue
-        if suffix not in INCLUDE_SUFFIXES:
-            continue
-        if _is_excluded_file(path, repo_root):
-            continue
-        yield path
+        if _passes_filters(path, repo_root):
+            yield path
 
 
 def _scan(
