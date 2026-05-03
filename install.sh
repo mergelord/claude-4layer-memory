@@ -64,6 +64,11 @@ chmod +x "$HOME/.claude/hooks/l4_semantic_global.py"
 cp -f scripts/linux/*.sh "$HOME/.claude/hooks/"
 chmod +x "$HOME/.claude/hooks/"*.sh
 
+cp -f hooks/git-activity-detector.py "$HOME/.claude/hooks/"
+cp -f hooks/stop_handoff_universal.py "$HOME/.claude/hooks/"
+chmod +x "$HOME/.claude/hooks/git-activity-detector.py"
+chmod +x "$HOME/.claude/hooks/stop_handoff_universal.py"
+
 echo -e "${GREEN}[OK]${NC} Scripts copied"
 
 # Copy templates
