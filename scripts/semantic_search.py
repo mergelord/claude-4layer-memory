@@ -152,6 +152,7 @@ def execute_semantic_search(user_prompt: str, trigger_found: str) -> None:
     The hook itself never raises – every path falls back to printing
     the original user_prompt so Claude Code stays unblocked.
     """
+    # pylint: disable=too-many-return-statements
     try:
         l4_script = safe_path(CONFIG['l4_script'])
     except ValueError as exc:
