@@ -12,6 +12,33 @@ from datetime import datetime
 from pathlib import Path
 from collections import Counter
 
+# Make EncodingGate importable in both the source repo layout
+# (``<repo>/hooks/stop_handoff_universal.py`` next to ``<repo>/scripts/``)
+# and the deployed layout (``~/.claude/hooks/`` next to
+# ``~/.claude/scripts/``). Failure to import is non-fatal: the hook
+# still runs without the runtime guard so a missing helper file never
+# blocks a user's session.
+_SCRIPTS_DIR = Path(__file__).resolve().parent.parent / "scripts"
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
+try:
+    from memory_lint_helpers import (  # type: ignore[import-not-found]
+        EncodingError,
+        EncodingGate,
+    )
+except ImportError:  # pragma: no cover — defensive fallback for partial installs
+    EncodingGate = None  # type: ignore[assignment]
+
+    class EncodingError(Exception):  # type: ignore[no-redef]
+        """Sentinel raised by the fallback gate (never instantiated).
+
+        Defined as a distinct subclass of :class:`Exception` so the
+        ``except EncodingError`` / ``except Exception`` pair in
+        :func:`main` does not collapse into a duplicate-except when
+        ``memory_lint_helpers`` is missing from a partial install.
+        """
+
 
 def _legacy_mojibake(s: str) -> str:
     """Return the cp1251-as-utf8 mojibake form of ``s``.
@@ -324,6 +351,8 @@ def emergency_trim_decisions(decisions_file: Path, memory_dir: Path):
                     [sys.executable, str(semantic_indexer), 'index', str(archive_file)],
                     capture_output=True,
                     text=True,
+                    encoding='utf-8',
+                    errors='replace',
                     timeout=30,
                     check=False
                 )
@@ -341,7 +370,24 @@ def emergency_trim_decisions(decisions_file: Path, memory_dir: Path):
 
 
 def update_handoff(handoff_file: Path, project_name: str, summary: str):
-    """Insert summary into handoff.md after header."""
+    """Insert summary into handoff.md after header.
+
+    The summary is built from the activity log and modified-file
+    listing; on Windows shells those values can carry cp1251-as-utf8
+    mojibake or ``U+FFFD`` from a sub-process that mis-decoded its
+    output. Run :class:`EncodingGate` on the freshly-generated chunk
+    before touching disk so a corrupted summary fails loud here
+    instead of silently polluting ``handoff.md``. Existing file
+    contents are left untouched — legacy mojibake from pre-v1.3.2
+    hooks is preserved on disk and only checked when new text is
+    written.
+    """
+    if EncodingGate is not None:
+        EncodingGate.assert_clean(
+            summary,
+            source=f"stop_handoff_universal:{handoff_file.name}",
+        )
+
     # Создаём директорию если нет
     handoff_file.parent.mkdir(parents=True, exist_ok=True)
 
@@ -431,6 +477,13 @@ def main():
         if emergency_trim_decisions(decisions_file, paths['memory_dir']):
             print("[OK] Emergency trim completed for decisions", file=sys.stderr)
 
+    except EncodingError as e:
+        # EncodingGate refused to write a corrupted summary. Skip the
+        # handoff update for this session; the next clean-input session
+        # will succeed. Failing loud here is better than silently
+        # polluting ``handoff.md`` with mojibake.
+        print(f"[ENCODING-GATE] Refused to write handoff: {e}", file=sys.stderr)
+        sys.exit(1)
     except Exception as e:
         print(f"Error updating handoff: {e}", file=sys.stderr)
         sys.exit(1)
