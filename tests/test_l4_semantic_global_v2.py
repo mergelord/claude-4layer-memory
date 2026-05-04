@@ -131,11 +131,11 @@ class GlobalSemanticMemory:
     # MAIN SEARCH
     # ----------------------------
 
-    # pylint: disable=too-many-locals
     def search_all(self, query: str, n_results: int = 10) -> List[Dict[str, Any]]:
         """
         Semantic cross-project search (hybrid-ready).
         """
+        # pylint: disable=too-many-locals
         start_time = time.time()
         embedding = self._encode(query)
 
