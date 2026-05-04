@@ -106,7 +106,7 @@ class GlobalSemanticMemory:
             n_results=limit
         )
 
-        out = []
+        out: List[Dict[str, Any]] = []
 
         if not res.get("ids"):
             return out
