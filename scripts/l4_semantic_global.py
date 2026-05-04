@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# pylint: disable=too-many-lines
 r"""
 L4 SEMANTIC Memory Layer - Cross-Project Search
 
@@ -898,13 +899,42 @@ def execute_search_project(config: CommandConfig) -> None:
 
 
 def execute_search_all(config: CommandConfig) -> None:
-    """Execute search-all command"""
-    if not config.args:
-        print("Usage: l4_semantic_global.py search-all <query>")
+    """Execute search-all command.
+
+    Supports a ``--json`` flag for machine-readable output, used by
+    :func:`scripts.l4_fts5_search.cmd_hybrid` when assembling the
+    inputs for Reciprocal Rank Fusion. Without the flag the output
+    is the same human-readable format as before.
+    """
+    json_mode = '--json' in config.args
+    text_args = [a for a in config.args if a != '--json']
+    if not text_args:
+        print("Usage: l4_semantic_global.py search-all <query> [--json]")
         sys.exit(1)
 
-    query = ' '.join(config.args)
+    query = ' '.join(text_args)
     results = config.memory.search_all(query)
+
+    if json_mode:
+        # Slim JSON envelope so the consumer doesn't have to know the
+        # full ChromaDB result schema. ``key`` is the join field used
+        # by the RRF merger; everything else is preserved for
+        # explainability.
+        payload = {
+            'query': query,
+            'results': [
+                {
+                    'key': f"[{r['source']}] {r.get('metadata', {}).get('file', '')}",
+                    'source_scope': r['source'],
+                    'file': r.get('metadata', {}).get('file', ''),
+                    'distance': r.get('distance'),
+                    'text': r.get('text', ''),
+                }
+                for r in results
+            ],
+        }
+        print(json.dumps(payload, ensure_ascii=False))
+        return
 
     print(f"\n[SEARCH ALL] '{query}'\n")
     for i, result in enumerate(results, 1):

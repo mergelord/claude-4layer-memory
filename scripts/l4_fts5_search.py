@@ -13,6 +13,7 @@ L4 FTS5 Search - Fast keyword search for memory system
     python l4_fts5_search.py hybrid "query" # Гибридный поиск (FTS5 + ChromaDB)
 """
 
+import json
 import logging
 import os
 import sqlite3
@@ -32,6 +33,10 @@ try:
     COST_TRACKING_ENABLED = True
 except ImportError:
     COST_TRACKING_ENABLED = False
+
+# RRF ranker is local + stdlib-only, safe to import eagerly.
+# pylint: disable-next=wrong-import-position,import-error
+from ranking import normalize_existing_key, normalize_scores, rrf_merge  # noqa: E402
 
 # Настройка UTF-8 для Windows
 if sys.platform == 'win32':
@@ -407,59 +412,130 @@ def cmd_stats(fts: L4FTS5Search):
         print(f"      {source}: {count} documents")
 
 
-def cmd_hybrid(fts: L4FTS5Search, query: str):
-    """Обработчик команды hybrid"""
-    fts_results = fts.search(query, limit=5)
+def _fetch_semantic_results(query: str, timeout: int = 30) -> list[dict]:
+    """Run the semantic search subprocess in JSON mode and return its hits.
+
+    Returns an empty list if the semantic engine is unavailable, fails,
+    or its stdout is unparseable. Hybrid search degrades gracefully
+    rather than blocking the caller — FTS-only is still useful.
+    """
+    semantic_script = Path(__file__).parent / "l4_semantic_global.py"
+    if not semantic_script.exists():
+        return []
 
     try:
-        semantic_script = Path(__file__).parent / "l4_semantic_global.py"
+        result = subprocess.run(
+            [sys.executable, str(semantic_script), "search-all", query, "--json"],
+            capture_output=True,
+            text=True,
+            encoding='utf-8',
+            errors='replace',
+            timeout=timeout,
+            check=False,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        logging.warning("Semantic search subprocess failed: %s", exc)
+        return []
 
-        if semantic_script.exists():
-            result = subprocess.run(
-                [sys.executable, str(semantic_script), "search-all", query],
-                capture_output=True,
-                text=True,
-                encoding='utf-8',
-                errors='replace',
-                timeout=30,
-                check=False
-            )
+    if result.returncode != 0:
+        logging.warning(
+            "Semantic search exited %s: %s",
+            result.returncode, result.stderr.strip(),
+        )
+        return []
 
-            print(f"\n[HYBRID SEARCH] '{query}'")
-            print("=" * 70)
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        logging.warning("Semantic JSON parse failed: %s", exc)
+        return []
 
-            print("\n[FTS5 Results - Keyword Match]")
-            print("-" * 70)
-            if fts_results:
-                for i, res in enumerate(fts_results, 1):
-                    print(f"[{i}] {res.path} (rank: {res.rank:.3f})")
-                    print(f"    {res.snippet}")
-                    print()
-            else:
-                print("No FTS5 results found\n")
+    return payload.get('results', []) if isinstance(payload, dict) else []
 
-            print("\n[Semantic Results - Meaning Match]")
-            print("-" * 70)
-            if result.returncode == 0:
-                print(result.stdout)
-            else:
-                print("Semantic search failed or not available\n")
-        else:
-            print("[WARN] l4_semantic_global.py not found")
-            print("       Falling back to FTS5 only")
 
-            for i, res in enumerate(fts_results, 1):
-                print(f"[{i}] {res.path} (rank: {res.rank:.3f})")
-                print(f"    {res.snippet}")
-                print()
+def cmd_hybrid(fts: L4FTS5Search, query: str):
+    """Hybrid search: merge FTS5 + semantic via Reciprocal Rank Fusion.
 
-    except Exception as e:
-        logging.error("Hybrid search failed: %s", e)
-        print("[ERROR] Hybrid search failed, showing FTS5 results only:")
-        for i, res in enumerate(fts_results, 1):
-            print(f"[{i}] {res.path} (rank: {res.rank:.3f})")
-            print(f"    {res.snippet}")
-            print()
+    Replaces the previous side-by-side display (which printed two
+    independent lists and made the caller eyeball-merge) with a
+    single ranked output where each result carries:
+    - a ``final_score`` summed across contributing engines,
+    - a ``normalized_score`` ∈ [0, 1] for UI display,
+    - a per-source breakdown (``fts``, ``semantic``) explaining why
+      each result was selected.
+
+    Falls back to FTS5-only output if the semantic engine is missing
+    or fails — hybrid is best-effort, never blocking.
+    """
+    fts_results = fts.search(query, limit=5)
+    semantic_results = _fetch_semantic_results(query)
+
+    # Both engines emit "[source] filename" but the source bracket
+    # differs: FTS5 stores the raw directory name (``my-app``) while
+    # the semantic engine reports the ChromaDB collection name
+    # (``my_app``). Re-canonicalise both sides through one helper so
+    # RRF actually merges the same logical document.
+    fts_stream = [
+        {
+            "key": normalize_existing_key(res.path),
+            "display_path": res.path,
+            "snippet": res.snippet,
+            "bm25_rank": res.rank,
+        }
+        for res in fts_results
+    ]
+    semantic_stream = [
+        {**hit, "key": normalize_existing_key(hit.get("key", ""))}
+        for hit in semantic_results
+    ]
+
+    print(f"\n[HYBRID SEARCH] '{query}'")
+    print("=" * 70)
+
+    if not fts_stream and not semantic_stream:
+        print("No results from either engine.\n")
+        return
+
+    merged = normalize_scores(
+        rrf_merge(("fts", fts_stream), ("semantic", semantic_stream))
+    )
+
+    print(
+        f"\nMerged {len(merged)} unique result(s) "
+        f"(FTS: {len(fts_stream)}, Semantic: {len(semantic_stream)})"
+    )
+    print("-" * 70)
+
+    for i, entry in enumerate(merged[:10], 1):
+        contributors = sorted(entry.sources.keys())
+        print(
+            f"[{i}] {entry.key}  "
+            f"score={entry.score:.4f}  "
+            f"normalized={entry.normalized_score:.3f}  "
+            f"sources=[{', '.join(contributors)}]"
+        )
+        for source_name in contributors:
+            for hit in entry.sources[source_name]:
+                rank = hit.get("rank", "?")
+                contrib = hit.get("rrf_contribution", 0.0)
+                if source_name == "fts":
+                    extra = hit.get("snippet", "").strip().replace("\n", " ")[:120]
+                    print(
+                        f"    [{source_name} rank={rank} rrf={contrib:.4f}] {extra}"
+                    )
+                else:
+                    distance = hit.get("distance")
+                    distance_str = (
+                        f"{distance:.3f}"
+                        if isinstance(distance, (int, float))
+                        else "n/a"
+                    )
+                    text = hit.get("text", "").strip().replace("\n", " ")[:120]
+                    print(
+                        f"    [{source_name} rank={rank} rrf={contrib:.4f} "
+                        f"dist={distance_str}] {text}"
+                    )
+        print()
 
 
 def main():

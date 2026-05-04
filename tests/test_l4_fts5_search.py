@@ -323,5 +323,111 @@ class TestL4FTS5SearchEdgeCases(unittest.TestCase):
         self.assertIsInstance(results, list)
 
 
+class TestCmdHybridIntegration(unittest.TestCase):
+    """Integration tests for cmd_hybrid: RRF merge + structured output.
+
+    These tests cover the contract between the FTS5 engine, the
+    semantic JSON envelope, and the RRF merger — the integration
+    point where 'feature exists' becomes 'feature integrates'.
+    """
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.db_path = Path(self.temp_dir) / "hybrid_fts5.db"
+        self.fts = L4FTS5Search(db_path=self.db_path)
+        self.fts.init_fts()
+        # Seed FTS with one document so .search() returns something deterministic.
+        seed = Path(self.temp_dir) / "handoff.md"
+        seed.write_text("# Handoff\nsession context restoration\n", encoding="utf-8")
+        self.fts.index_file(seed, "global")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def _capture_hybrid(self, semantic_payload):
+        """Run cmd_hybrid with mocked semantic subprocess; return stdout."""
+        from io import StringIO
+        from l4_fts5_search import cmd_hybrid
+
+        # Mock the semantic subprocess to return our deterministic payload.
+        with patch(
+            "l4_fts5_search._fetch_semantic_results",
+            return_value=semantic_payload,
+        ):
+            buf = StringIO()
+            with patch("sys.stdout", new=buf):
+                cmd_hybrid(self.fts, "session")
+            return buf.getvalue()
+
+    def test_hybrid_outputs_unified_ranked_list_not_two_lists(self):
+        """Output must be a single merged ranking, not side-by-side blocks."""
+        semantic = [
+            {"key": "[global] handoff.md", "distance": 0.1, "text": "session ctx"},
+        ]
+        out = self._capture_hybrid(semantic)
+
+        # Sanity: previous side-by-side header text must NOT appear.
+        self.assertNotIn("[FTS5 Results - Keyword Match]", out)
+        self.assertNotIn("[Semantic Results - Meaning Match]", out)
+        # New unified format MUST appear.
+        self.assertIn("[HYBRID SEARCH]", out)
+        self.assertIn("Merged", out)
+        self.assertIn("score=", out)
+        self.assertIn("normalized=", out)
+        self.assertIn("sources=", out)
+
+    def test_hybrid_merges_same_doc_from_both_engines_into_one_entry(self):
+        """If FTS and semantic both find the same file, one merged row."""
+        semantic = [
+            {"key": "[global] handoff.md", "distance": 0.1, "text": "match"},
+        ]
+        out = self._capture_hybrid(semantic)
+        # 'Merged 1 unique result' confirms the merger collapsed duplicates.
+        self.assertIn("Merged 1 unique result", out)
+        # Both source contributions should be visible.
+        self.assertIn("sources=[fts, semantic]", out)
+
+    def test_hybrid_normalises_hyphenated_project_keys_across_engines(self):
+        """Cross-source key bug: FTS my-app + Semantic my_app must merge.
+
+        Reproduces the silent-bug class ranking.normalize_existing_key
+        was introduced to prevent.
+        """
+        # Re-seed FTS under a hyphenated project name.
+        seed = Path(self.temp_dir) / "decisions.md"
+        seed.write_text("# Decisions\nsession plan\n", encoding="utf-8")
+        self.fts.index_file(seed, "my-fancy-app")
+
+        # Semantic side reports the ChromaDB-normalised form.
+        semantic = [
+            {"key": "[my_fancy_app] decisions.md", "distance": 0.2, "text": "ctx"},
+        ]
+        out = self._capture_hybrid(semantic)
+        # Must NOT see two separate rows for the same logical doc.
+        self.assertEqual(out.count("decisions.md"), 1)
+        self.assertIn("sources=[fts, semantic]", out)
+
+    def test_hybrid_handles_empty_semantic_gracefully(self):
+        """Falls back to FTS-only ranking if semantic engine returns nothing."""
+        out = self._capture_hybrid(semantic_payload=[])
+        self.assertIn("Merged", out)
+        self.assertIn("sources=[fts]", out)
+
+    def test_hybrid_handles_both_engines_empty(self):
+        """Empty FTS and semantic → friendly message, no crash."""
+        # Use a query with no matches at all.
+        from io import StringIO
+        from l4_fts5_search import cmd_hybrid
+
+        with patch("l4_fts5_search._fetch_semantic_results", return_value=[]):
+            buf = StringIO()
+            with patch("sys.stdout", new=buf):
+                cmd_hybrid(self.fts, "absolutely_no_match_query_xyz_zzz")
+            out = buf.getvalue()
+
+        self.assertIn("No results from either engine", out)
+
+
 if __name__ == '__main__':
     unittest.main()
