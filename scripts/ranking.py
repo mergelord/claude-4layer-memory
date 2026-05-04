@@ -22,6 +22,37 @@ References
 ----------
 Cormack et al., "Reciprocal Rank Fusion outperforms Condorcet and
 Individual Rank Learning Methods", SIGIR 2009.
+
+Why k=60
+--------
+The damping constant ``k`` controls how steeply the per-rank
+contribution ``1 / (k + rank)`` decays. The choice of ``k=60`` is not
+arbitrary — it is the point at which RRF starts behaving like a
+*consensus* operator (rewarding documents that appear in multiple
+sources at middle ranks) rather than a winner-takes-all union (where
+a single rank-1 hit dominates everything else):
+
+- At ``k=0``, ``1/(0+1) = 1.0`` and ``1/(0+4) = 0.25`` — the curve is
+  steep enough that one rank-1 hit always beats the sum of mid-rank
+  hits in another source. RRF collapses into "best single source".
+- At ``k=60`` (this default), ``1/(60+1) ≈ 0.0164`` and
+  ``1/(60+4) ≈ 0.0156`` — the curve is flat enough that two
+  cross-source mid-rank hits sum past one single-source rank-1 hit.
+  Cross-source consensus is rewarded, which is the entire point of
+  hybrid search.
+- At very large ``k``, all ranks become indistinguishable and the
+  merger degenerates into "documents that appear in any source".
+
+The three calibration scenarios exercising this trade-off are pinned
+in ``tests/test_rrf_calibration.py`` (obvious-case, single-source
+dominance, many-weak-vs-one-strong, plus a counter-case at ``k=0``
+that demonstrates the inversion). For human inspection on synthetic
+or real data, run ``scripts/validate_rrf.py``.
+
+If ``DEFAULT_K`` is ever changed, the calibration tests must be
+re-run against representative real memory data — the ``k=60`` choice
+is anchored on the consensus-vs-dominance trade-off, not on Cormack's
+original empirical retrieval benchmarks.
 """
 
 from __future__ import annotations
@@ -31,7 +62,14 @@ from dataclasses import dataclass, field
 from typing import Any, Iterable, List, Mapping, Tuple
 
 DEFAULT_K = 60
-"""Standard RRF damping constant (Cormack 2009)."""
+"""Standard RRF damping constant (Cormack 2009).
+
+The default of 60 is also the inflection point at which RRF behaves
+as a consensus operator rather than a single-source-dominance
+operator. See the module docstring's "Why k=60" section and
+``tests/test_rrf_calibration.py`` for the three pinned scenarios
+that fix this contract.
+"""
 
 _KEY_PATTERN = re.compile(r'^\[([^\]]+)\]\s+(.+)$')
 _SOURCE_NON_ALNUM = re.compile(r'[^a-zA-Z0-9_]')
