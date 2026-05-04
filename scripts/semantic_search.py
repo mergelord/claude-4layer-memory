@@ -158,44 +158,101 @@ def track_search_cost(user_prompt: str, result_stdout: str, trigger_found: str) 
         logging.debug("Cost tracking failed: %s", e)
 
 
+def _emit_fallback(user_prompt: str, reason: str, detail: str) -> None:
+    """Emit the bare prompt to stdout and a diagnostic line to stderr.
+
+    All failure paths in :func:`execute_semantic_search` end here, so the
+    hook is guaranteed to keep Claude Code unblocked even when the L4
+    script is missing, slow, or crashing. ``reason`` is a short tag
+    (``timeout``, ``not_found``, ``no_access``, ``subprocess_error``,
+    ``unexpected``) for log-grep friendliness; ``detail`` is the
+    underlying exception message or context.
+    """
+    logging.warning("Semantic search fallback (%s): %s", reason, detail)
+    print(f"[WARN] Semantic search skipped ({reason}): {detail}", file=sys.stderr)
+    print(user_prompt)
+
+
+# Subprocess deadline for the L4 script (search + ChromaDB load). Kept
+# as a module-level constant so tests can monkey-patch it without
+# poking through CONFIG.
+SEMANTIC_SEARCH_TIMEOUT_SECONDS = 30
+
+
+# Each early return below corresponds to a distinct fallback reason.
+# Collapsing them into a single try/except would re-introduce exactly
+# the diagnostic gap this function is designed to close, so the
+# ``too-many-return-statements`` lint here is intentional.
+# pylint: disable-next=too-many-return-statements
 def execute_semantic_search(user_prompt: str, trigger_found: str) -> None:
-    """Execute semantic search and print results"""
+    """Execute semantic search and print results.
+
+    Each failure mode has an explicit handler so log triage can
+    distinguish *"the L4 index was slow"* (``TimeoutExpired``) from
+    *"someone moved the script"* (``FileNotFoundError``) from *"the
+    script crashed mid-query"* (``CalledProcessError`` /
+    ``subprocess.SubprocessError``). The hook itself never raises -
+    every path falls back to printing the original ``user_prompt`` so
+    Claude Code stays unblocked.
+    """
     try:
         l4_script = safe_path(CONFIG['l4_script'])
+    except ValueError as exc:
+        _emit_fallback(user_prompt, "unsafe_path", str(exc))
+        return
 
-        # Проверяем существование и права на выполнение
-        if not l4_script.exists():
-            raise FileNotFoundError(f"L4 script not found: {l4_script}")
-        if not os.access(l4_script, os.R_OK):
-            raise PermissionError(f"No read access to L4 script: {l4_script}")
+    if not l4_script.exists():
+        _emit_fallback(
+            user_prompt, "not_found", f"L4 script not found: {l4_script}"
+        )
+        return
+    if not os.access(l4_script, os.R_OK):
+        _emit_fallback(
+            user_prompt, "no_access", f"No read access to L4 script: {l4_script}"
+        )
+        return
 
-        # Выполняем поиск
+    try:
         result = subprocess.run(
             [sys.executable, str(l4_script), "search-all", user_prompt],
             capture_output=True,
             text=True,
             encoding=CONFIG['encoding'],
             check=False,
-            timeout=30  # 30 секунд таймаут
+            timeout=SEMANTIC_SEARCH_TIMEOUT_SECONDS,
         )
+    except subprocess.TimeoutExpired as exc:
+        _emit_fallback(
+            user_prompt,
+            "timeout",
+            f"L4 search exceeded {exc.timeout:.0f}s budget for trigger '{trigger_found}'",
+        )
+        return
+    except FileNotFoundError as exc:
+        # Raised when sys.executable itself is missing/unreachable.
+        _emit_fallback(user_prompt, "not_found", str(exc))
+        return
+    except PermissionError as exc:
+        _emit_fallback(user_prompt, "no_access", str(exc))
+        return
+    except subprocess.SubprocessError as exc:
+        _emit_fallback(user_prompt, "subprocess_error", str(exc))
+        return
+    except OSError as exc:
+        _emit_fallback(user_prompt, "os_error", str(exc))
+        return
 
-        # Отслеживаем стоимость операции
-        track_search_cost(user_prompt, result.stdout, trigger_found)
+    # Отслеживаем стоимость операции
+    track_search_cost(user_prompt, result.stdout, trigger_found)
 
-        # Проверяем, есть ли результаты
-        if "[SEARCH ALL]" in result.stdout:
-            print(user_prompt)
-            print()
-            print("<semantic_context>")
-            print(result.stdout)
-            print("</semantic_context>")
-        else:
-            print(user_prompt)
-
-    except Exception as e:
-        # При ошибке просто возвращаем оригинальный prompt
-        print(user_prompt, file=sys.stderr)
-        print(f"[ERROR] Semantic search failed: {e}", file=sys.stderr)
+    # Проверяем, есть ли результаты
+    if "[SEARCH ALL]" in result.stdout:
+        print(user_prompt)
+        print()
+        print("<semantic_context>")
+        print(result.stdout)
+        print("</semantic_context>")
+    else:
         print(user_prompt)
 
 
