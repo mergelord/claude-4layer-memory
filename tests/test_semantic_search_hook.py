@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """Tests for semantic_search.py fallback paths."""
 
@@ -15,6 +15,7 @@ import semantic_search
 
 @pytest.fixture
 def dummy_script(tmp_path):
+    """Создаёт временный python-файл, используемый как заглушка L4-скрипта."""
     script = tmp_path / "dummy.py"
     script.write_text("# dummy script")
     return script
@@ -66,3 +67,12 @@ class TestExecuteSemanticSearch:
             semantic_search.execute_semantic_search("test query", "как мы")
         mock_logging.warning.assert_called_once()
         assert "unsafe_path" in str(mock_logging.warning.call_args)
+
+    @patch('semantic_search.logging')
+    def test_permission_error(self, mock_logging, dummy_script):
+        with patch('semantic_search.safe_path', return_value=dummy_script):
+            with patch('semantic_search.subprocess.run',
+                       side_effect=PermissionError("permission denied")):
+                semantic_search.execute_semantic_search("test query", "как мы")
+        mock_logging.warning.assert_called_once()
+        assert "no_access" in str(mock_logging.warning.call_args)
