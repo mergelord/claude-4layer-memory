@@ -1,0 +1,23 @@
+# Hybrid retrieval ranking configuration
+#
+# Controls how Reciprocal Rank Fusion (RRF) merges FTS5 keyword
+# results with semantic (ChromaDB) results. See scripts/ranking.py.
+
+rrf:
+  # RRF damping constant. Higher values flatten the ranking;
+  # lower values sharpen it. 60 is the canonical default
+  # (Cormack et al. 2009). Sweep range tested in literature: 10..100.
+  k: 60
+
+# Per-source weighting placeholder. RRF itself is unweighted by design,
+# but downstream code may multiply contributions before summing if a
+# source needs to be promoted/demoted. 1.0 = no bias.
+weights:
+  fts5: 1.0
+  semantic: 1.0
+
+# Layer bias placeholder for future PR-Obs-3 (typed query routing).
+# Format: query_type -> {HOT, WARM, COLD, SEMANTIC} -> weight in [0, 1].
+# Empty here intentionally — kept as a forward-compatibility hook so
+# config schema is stable across the upcoming routing PR.
+layer_bias: {}
