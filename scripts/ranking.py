@@ -26,11 +26,68 @@ Individual Rank Learning Methods", SIGIR 2009.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, Iterable, List, Mapping, Tuple
 
 DEFAULT_K = 60
 """Standard RRF damping constant (Cormack 2009)."""
+
+_KEY_PATTERN = re.compile(r'^\[([^\]]+)\]\s+(.+)$')
+_SOURCE_NON_ALNUM = re.compile(r'[^a-zA-Z0-9_]')
+_SOURCE_REPEATED_UNDERSCORE = re.compile(r'_+')
+
+
+def _normalize_source(source: str) -> str:
+    """Apply ChromaDB-style normalisation to a source/scope name.
+
+    Replaces every non-alphanumeric / non-underscore character with
+    ``_`` and collapses runs of underscores. Empty input → ``""``.
+
+    Mirrors :meth:`GlobalSemanticMemory.normalize_project_name` so that
+    a project indexed as ``my-app`` on the FTS side (raw directory
+    name) and as ``my_app`` on the semantic side (ChromaDB collection
+    name) end up with the same join key.
+    """
+    if not source:
+        return ""
+    normalised = _SOURCE_NON_ALNUM.sub('_', source)
+    normalised = _SOURCE_REPEATED_UNDERSCORE.sub('_', normalised).strip('_')
+    return normalised
+
+
+def make_join_key(source: str, filename: str) -> str:
+    """Build a stable identifier suitable for joining results across sources.
+
+    Args:
+        source: Scope name as stored by either engine. ``"global"`` for
+            global memory; project directory name for project memory.
+            FTS5 stores raw names while the semantic engine normalises
+            them — :func:`make_join_key` collapses both into the same
+            canonical form so RRF actually merges duplicate hits.
+        filename: Bare filename (no scope brackets). Stored verbatim.
+
+    Returns:
+        A string of the form ``"[normalised_source] filename"``.
+    """
+    return f"[{_normalize_source(source)}] {filename}"
+
+
+def normalize_existing_key(key: str) -> str:
+    """Re-normalise an already-formatted ``"[source] filename"`` key.
+
+    Used by integration code that receives pre-built keys from FTS5
+    output or from the semantic JSON envelope and just needs to
+    canonicalise the source bracket without re-parsing the engine's
+    full result schema.
+
+    Returns the input unchanged if it doesn't match the expected
+    bracket form (defensive: no surprise mutations on unparsed input).
+    """
+    match = _KEY_PATTERN.match(key)
+    if not match:
+        return key
+    return make_join_key(match.group(1), match.group(2))
 
 
 @dataclass

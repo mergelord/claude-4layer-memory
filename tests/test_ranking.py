@@ -25,6 +25,8 @@ if str(_SCRIPTS_DIR) not in sys.path:
 from ranking import (  # noqa: E402  pylint: disable=wrong-import-position
     DEFAULT_K,
     RankedResult,
+    make_join_key,
+    normalize_existing_key,
     normalize_scores,
     rrf_merge,
 )
@@ -248,3 +250,81 @@ def test_normalize_scores_preserves_ordering():
     keys_after = [r.key for r in merged]
 
     assert keys_before == keys_after
+
+
+# ---------------------------------------------------------------------------
+# Cross-source key normalisation — guards against the silent-bug class
+# where FTS stores ``my-app`` and ChromaDB stores ``my_app`` and RRF
+# fails to merge them.
+# ---------------------------------------------------------------------------
+
+
+def test_make_join_key_global_passthrough():
+    """``global`` is already alphanumeric and must round-trip unchanged."""
+    assert make_join_key("global", "handoff.md") == "[global] handoff.md"
+
+
+def test_make_join_key_normalises_hyphenated_source():
+    """Project dir ``my-app`` must canonicalise to ``my_app``."""
+    assert make_join_key("my-app", "decisions.md") == "[my_app] decisions.md"
+
+
+def test_make_join_key_collapses_repeated_specials():
+    """Multiple consecutive non-alnum chars collapse to a single ``_``."""
+    assert make_join_key("a---b   c", "x.md") == "[a_b_c] x.md"
+
+
+def test_make_join_key_strips_edge_underscores():
+    """Leading/trailing non-alnum characters disappear (no empty bracket)."""
+    assert make_join_key("--proj--", "x.md") == "[proj] x.md"
+
+
+def test_make_join_key_empty_source():
+    """Empty source produces empty bracket — caller's defensive contract."""
+    assert make_join_key("", "f.md") == "[] f.md"
+
+
+def test_make_join_key_fts_and_semantic_collide_after_normalisation():
+    """Different raw forms of the same project must produce identical keys.
+
+    This is the exact bug class ``ranking.py`` exists to prevent: FTS5
+    stores the raw directory name while ChromaDB collection naming
+    rules force underscores. Without normalisation, RRF would treat
+    them as two separate documents.
+    """
+    fts_raw = "my-fancy-app"           # FTS5 stores raw dir name
+    semantic_normalised = "my_fancy_app"  # ChromaDB collection name
+
+    assert make_join_key(fts_raw, "x.md") == make_join_key(semantic_normalised, "x.md")
+
+
+def test_normalize_existing_key_canonicalises_bracket():
+    """``"[my-app] f.md"`` (raw) and ``"[my_app] f.md"`` (normalised)
+    must converge to the same canonical string."""
+    assert normalize_existing_key("[my-app] f.md") == normalize_existing_key("[my_app] f.md")
+
+
+def test_normalize_existing_key_returns_input_on_unparseable():
+    """Defensive: arbitrary strings without bracket prefix pass through."""
+    assert normalize_existing_key("no brackets here") == "no brackets here"
+    assert normalize_existing_key("") == ""
+
+
+def test_normalize_existing_key_handles_nested_or_weird_filenames():
+    """Filename portion is preserved verbatim — only the source bracket is touched."""
+    assert (
+        normalize_existing_key("[my-app] sub/dir/file with spaces.md")
+        == "[my_app] sub/dir/file with spaces.md"
+    )
+
+
+def test_rrf_merges_after_cross_source_normalisation():
+    """End-to-end: pre-normalised keys from two sources must merge into one entry."""
+    fts = [{"key": normalize_existing_key("[my-app] handoff.md")}]
+    semantic = [{"key": normalize_existing_key("[my_app] handoff.md")}]
+
+    merged = rrf_merge(("fts", fts), ("semantic", semantic))
+
+    assert len(merged) == 1
+    assert merged[0].key == "[my_app] handoff.md"
+    assert set(merged[0].sources.keys()) == {"fts", "semantic"}
