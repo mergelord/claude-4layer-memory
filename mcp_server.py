@@ -38,21 +38,31 @@ cost_tracker = CostTracker()
 
 
 @mcp.tool()
-def search_memory(query: str, limit: int = 10) -> dict[str, Any]:
+def search_memory(
+    query: str,
+    limit: int = 10,
+    debug: bool = False,
+) -> dict[str, Any]:
     """
-    Поиск в памяти через FTS5 keyword search
+    Поиск в памяти через FTS5 keyword search.
 
     Args:
-        query: Поисковый запрос
-        limit: Максимум результатов (default: 10)
+        query: Поисковый запрос.
+        limit: Максимум результатов (default: 10).
+        debug: Если True, ответ содержит дополнительный блок ``meta`` со
+            structured explanation (query tokens, candidate count,
+            engine identification). Это first-class explainability — не
+            текстовое логирование.
 
     Returns:
-        Результаты поиска с путями и сниппетами
+        ``{"success": True, "query": str, "count": int, "results": [...]}``.
+        При ``debug=True`` добавляется ``"meta": {...}`` с полями
+        ``engine``, ``query_tokens``, ``total_candidates``, ``limit``.
     """
     try:
         results = fts5_search.search(query, limit)
 
-        return {
+        response: dict[str, Any] = {
             "success": True,
             "query": query,
             "count": len(results),
@@ -61,16 +71,27 @@ def search_memory(query: str, limit: int = 10) -> dict[str, Any]:
                     "path": r.path,
                     "snippet": r.snippet,
                     "rank": r.rank,
-                    "source": r.source
+                    "source": r.source,
                 }
                 for r in results
-            ]
+            ],
         }
+
+        if debug:
+            response["meta"] = {
+                "engine": "fts5",
+                "query": query,
+                "query_tokens": query.split(),
+                "limit": limit,
+                "total_candidates": len(results),
+            }
+
+        return response
     except Exception as e:
         logging.error("Search failed: %s", e)
         return {
             "success": False,
-            "error": str(e)
+            "error": str(e),
         }
 
 

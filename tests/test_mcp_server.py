@@ -53,3 +53,49 @@ def test_search_memory_returns_results():
     assert result["success"] is True
     assert result["count"] == 1
     assert result["results"][0]["path"] == "/x/handoff.md"
+
+
+def test_search_memory_omits_meta_when_debug_false():
+    """Debug payload is opt-in — must not appear in default responses."""
+    with patch.object(mcp_server.fts5_search, "search", return_value=[]):
+        result = mcp_server.search_memory("ping", limit=3)
+
+    assert "meta" not in result
+
+
+def test_search_memory_emits_structured_meta_when_debug_true():
+    """debug=True → response['meta'] is a dict with the documented schema."""
+    fake_results = [
+        SearchResult(
+            path="[global] handoff.md",
+            snippet="hit",
+            rank=0.9,
+            source="global",
+        ),
+        SearchResult(
+            path="[global] decisions.md",
+            snippet="hit2",
+            rank=0.5,
+            source="global",
+        ),
+    ]
+    with patch.object(mcp_server.fts5_search, "search", return_value=fake_results):
+        result = mcp_server.search_memory("session handoff", limit=5, debug=True)
+
+    assert result["success"] is True
+    assert "meta" in result
+    meta = result["meta"]
+    assert meta["engine"] == "fts5"
+    assert meta["query"] == "session handoff"
+    assert meta["query_tokens"] == ["session", "handoff"]
+    assert meta["limit"] == 5
+    assert meta["total_candidates"] == 2
+
+
+def test_search_memory_meta_total_candidates_zero_for_empty_results():
+    """Empty result set must still produce a well-formed meta block."""
+    with patch.object(mcp_server.fts5_search, "search", return_value=[]):
+        result = mcp_server.search_memory("nothing", limit=10, debug=True)
+
+    assert result["meta"]["total_candidates"] == 0
+    assert result["meta"]["query_tokens"] == ["nothing"]
