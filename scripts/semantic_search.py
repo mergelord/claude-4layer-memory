@@ -59,6 +59,7 @@ TRIGGERS = [
 ]
 
 TRIGGERS_SET = set(TRIGGERS)
+TRIGGERS_LOWER = {trigger.lower() for trigger in TRIGGERS}
 
 
 def safe_path(path: str) -> Path:
@@ -75,7 +76,7 @@ def safe_path(path: str) -> Path:
 def should_search(prompt: str) -> Tuple[bool, str]:
     """Проверяет, нужен ли семантический поиск"""
     prompt_lower = prompt.lower()
-    for trigger in TRIGGERS_SET:
+    for trigger in TRIGGERS_LOWER:
         if trigger in prompt_lower:
             return True, trigger
     return False, ""
@@ -167,8 +168,14 @@ def execute_semantic_search(user_prompt: str, trigger_found: str) -> None:
             timeout=SEMANTIC_SEARCH_TIMEOUT_SECONDS
         )
     except subprocess.TimeoutExpired:
-        _emit_fallback(user_prompt, "timeout",
-                       f"L4 search exceeded {SEMANTIC_SEARCH_TIMEOUT_SECONDS}s budget for trigger '{trigger_found}'")
+        _emit_fallback(
+            user_prompt,
+            "timeout",
+            (
+                f"L4 search exceeded {SEMANTIC_SEARCH_TIMEOUT_SECONDS}s "
+                f"budget for trigger '{trigger_found}'"
+            ),
+        )
         return
     except FileNotFoundError:
         _emit_fallback(user_prompt, "not_found", f"L4 script not found: {l4_script}")
