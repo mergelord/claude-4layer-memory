@@ -21,6 +21,33 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 
+# Make EncodingGate importable in both the source repo layout
+# (``<repo>/hooks/git-activity-detector.py`` next to ``<repo>/scripts/``)
+# and the deployed layout (``~/.claude/hooks/`` next to
+# ``~/.claude/scripts/``). Failure to import is non-fatal: the hook
+# still runs without the runtime guard so a missing helper file never
+# blocks a user's session.
+_SCRIPTS_DIR = Path(__file__).resolve().parent.parent / "scripts"
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
+try:
+    from memory_lint_helpers import (  # type: ignore[import-not-found]
+        EncodingError,
+        EncodingGate,
+    )
+except ImportError:  # pragma: no cover — defensive fallback for partial installs
+    EncodingGate = None  # type: ignore[assignment]
+
+    class EncodingError(Exception):  # type: ignore[no-redef]
+        """Sentinel raised by the fallback gate (never instantiated).
+
+        Defined as a distinct subclass of :class:`Exception` so the
+        ``except EncodingError`` / ``except Exception`` pair in
+        :func:`main` does not collapse into a duplicate-except when
+        ``memory_lint_helpers`` is missing from a partial install.
+        """
+
 
 def _legacy_mojibake(s: str) -> str:
     """Return the cp1251-as-utf8 mojibake form of ``s``.
@@ -90,13 +117,25 @@ def get_global_memory_paths():
 
 
 def run_git_command(cmd, cwd=None):
-    """Выполняет git команду и возвращает результат."""
+    """Выполняет git команду и возвращает результат.
+
+    Subprocess output is forced to UTF-8 with ``errors='replace'`` so
+    that Cyrillic commit messages, branch names and file paths from
+    git are decoded consistently across platforms (Windows defaults to
+    cp1251 for ``text=True`` without explicit ``encoding``, which
+    produces cp1251-as-utf8 mojibake when concatenated into UTF-8
+    memory files). Any undecodable byte becomes ``U+FFFD``, which the
+    EncodingGate write barrier in :func:`update_memory` will catch
+    before it can corrupt a memory file.
+    """
     try:
         result = subprocess.run(
             cmd,
             cwd=cwd,
             capture_output=True,
             text=True,
+            encoding='utf-8',
+            errors='replace',
             timeout=5,
             check=False
         )
@@ -321,7 +360,23 @@ def is_global_worthy(git_activity, git_events):
 
 
 def update_memory(memory_file: Path, new_entry: str):
-    """Обновляет файл памяти."""
+    """Обновляет файл памяти.
+
+    The new entry is generated from git subprocess output and may
+    contain Cyrillic commit messages or branch names. We run it
+    through :class:`EncodingGate` before any disk write so that
+    corrupted bytes from a misconfigured ``LANG`` / ``chcp`` setup
+    fail loud instead of silently appending mojibake to ``handoff.md``.
+    Existing file content is left untouched: legacy mojibake from
+    pre-v1.3.2 hooks is preserved on disk and only checked when fresh
+    text is being added.
+    """
+    if EncodingGate is not None:
+        EncodingGate.assert_clean(
+            new_entry,
+            source=f"git-activity-detector:{memory_file.name}",
+        )
+
     memory_file.parent.mkdir(parents=True, exist_ok=True)
 
     if not memory_file.exists():
@@ -391,7 +446,7 @@ def main():
         # Иначе каждая сессия пишет "Git статус проверен" даже без действий
         if not git_events:
             return 0
-         
+
         # Генерируем сводку
         summary = generate_git_summary(project_path, git_activity, git_events)
 
@@ -406,6 +461,12 @@ def main():
 
         return 0
 
+    except EncodingError as e:
+        # EncodingGate refused to write the git summary. Skip this
+        # update; the next clean-input session will succeed. Failing
+        # loud here is better than silently polluting handoff.md.
+        print(f"[ENCODING-GATE] Refused to write git summary: {e}", file=sys.stderr)
+        return 1
     except Exception as e:
         print(f"[ERROR] Git activity detector failed: {e}", file=sys.stderr)
         import traceback

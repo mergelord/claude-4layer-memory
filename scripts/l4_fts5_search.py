@@ -419,6 +419,8 @@ def cmd_hybrid(fts: L4FTS5Search, query: str):
                 [sys.executable, str(semantic_script), "search-all", query],
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
                 timeout=30,
                 check=False
             )

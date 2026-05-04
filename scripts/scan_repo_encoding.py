@@ -88,6 +88,10 @@ EXCLUDE_FILES = frozenset({
     # Intentional test fixtures: real cp1251-as-utf8 mojibake samples
     # the EncodingGate test suite asserts the detector catches.
     'tests/test_memory_lint_helpers.py',
+    # Hook-level EncodingGate runtime guard tests: also embed the
+    # canonical cp1251-as-utf8 mojibake fragment as a fixture to verify
+    # the hooks refuse to write it.
+    'tests/test_hooks_encoding_gate.py',
     # Documentation that quotes EncodingGate's own report verbatim,
     # which by construction contains mojibake characters as examples.
     'deploy/INSTALL_WINDOWS.md',

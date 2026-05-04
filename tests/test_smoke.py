@@ -11,7 +11,10 @@ def test_memory_lint_help():
     result = subprocess.run(
         [sys.executable, 'scripts/memory_lint.py', '--help'],
         capture_output=True,
-        text=True
+        text=True,
+        encoding='utf-8',
+        errors='replace',
+        check=False,
     )
     assert result.returncode == 0
     assert 'Memory Lint' in result.stdout or 'usage' in result.stdout
@@ -22,7 +25,10 @@ def test_audit_help():
     result = subprocess.run(
         [sys.executable, 'audit.py', '--help'],
         capture_output=True,
-        text=True
+        text=True,
+        encoding='utf-8',
+        errors='replace',
+        check=False,
     )
     assert result.returncode == 0
     assert 'usage' in result.stdout or 'audit' in result.stdout.lower()
