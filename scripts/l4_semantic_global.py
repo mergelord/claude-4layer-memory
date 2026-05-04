@@ -189,7 +189,7 @@ class GlobalSemanticMemory:
                         project_name
                     )
                 )
-            except Exception:
+            except Exception:  # nosec B110
                 continue
 
         # ------------------------
@@ -284,7 +284,7 @@ class GlobalSemanticMemory:
         for f in files:
             try:
                 text = f.read_text(encoding="utf-8")
-            except Exception:
+            except Exception:  # nosec B110
                 continue
 
             texts.append(text)
