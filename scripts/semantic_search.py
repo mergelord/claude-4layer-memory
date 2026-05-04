@@ -109,8 +109,15 @@ def log_trigger(user_prompt: str, trigger_found: str) -> None:
             with open(log_file, 'a', encoding=CONFIG['encoding']) as f:
                 timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 max_len = CONFIG['max_prompt_log_length']
-                prompt_preview = user_prompt[:max_len] + "..." if len(user_prompt) > max_len else user_prompt
-                f.write(f"[{timestamp}] Trigger: '{trigger_found}' | Prompt: {prompt_preview}\n")
+                if len(user_prompt) > max_len:
+                    prompt_preview = user_prompt[:max_len] + "..."
+                else:
+                    prompt_preview = user_prompt
+                f.write(
+                    f"[{timestamp}] "
+                    f"Trigger: '{trigger_found}' | "
+                    f"Prompt: {prompt_preview}\n"
+                )
     except (OSError, IOError, ValueError) as e:
         logging.debug("Logging failed: %s", e)
 
@@ -172,7 +179,8 @@ def execute_semantic_search(user_prompt: str, trigger_found: str) -> None:
             user_prompt,
             "timeout",
             (
-                f"L4 search exceeded {SEMANTIC_SEARCH_TIMEOUT_SECONDS}s "
+                f"L4 search exceeded "
+                f"{SEMANTIC_SEARCH_TIMEOUT_SECONDS}s "
                 f"budget for trigger '{trigger_found}'"
             ),
         )
@@ -195,7 +203,10 @@ def execute_semantic_search(user_prompt: str, trigger_found: str) -> None:
 
     # Проверяем код возврата – если скрипт упал, это тоже ошибка
     if result.returncode != 0:
-        detail = result.stderr.strip() or f"L4 search returned non-zero exit code: {result.returncode}"
+        detail = (
+            result.stderr.strip()
+            or f"L4 search returned non-zero exit code: {result.returncode}"
+        )
         _emit_fallback(user_prompt, "subprocess_error", detail)
         return
 
