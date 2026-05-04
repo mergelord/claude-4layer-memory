@@ -171,23 +171,32 @@ def _run_scenario(name: str, scenario: Dict[str, Any], k: int) -> None:
     print(f"  Scenario id: {name}")
 
 
-def _run_stdin_payload(k: int) -> None:
-    """Read a custom ``{fts: [...], semantic: [...]}`` JSON blob from stdin."""
+def _run_stdin_payload(k: int) -> int:
+    """Read a custom ``{fts: [...], semantic: [...]}`` JSON blob from stdin.
+
+    Returns ``0`` on a successfully formatted report, ``2`` on any
+    input validation failure (mirrors :func:`main`'s contract so a
+    programmatic caller invoking ``main(["--stdin"])`` with bad input
+    receives a return code rather than an uncaught :class:`SystemExit`).
+    """
     raw = sys.stdin.read().strip()
     if not raw:
-        print("error: --stdin requires a JSON payload on standard input")
-        sys.exit(2)
+        print("error: --stdin requires a JSON payload on standard input", file=sys.stderr)
+        return 2
     try:
         payload = json.loads(raw)
     except json.JSONDecodeError as exc:
-        print(f"error: invalid JSON on stdin: {exc}")
-        sys.exit(2)
+        print(f"error: invalid JSON on stdin: {exc}", file=sys.stderr)
+        return 2
 
     fts = payload.get("fts", [])
     semantic = payload.get("semantic", [])
     if not isinstance(fts, list) or not isinstance(semantic, list):
-        print("error: payload must have list-typed 'fts' and 'semantic' fields")
-        sys.exit(2)
+        print(
+            "error: payload must have list-typed 'fts' and 'semantic' fields",
+            file=sys.stderr,
+        )
+        return 2
 
     print(f"\n{'=' * 72}")
     print(f"Custom payload from stdin  (k={k})")
@@ -202,6 +211,7 @@ def _run_stdin_payload(k: int) -> None:
 
     print()
     print(_format_merged(merged))
+    return 0
 
 
 def _build_argparser() -> argparse.ArgumentParser:
@@ -242,12 +252,11 @@ def main(argv: List[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.k < 0:
-        print("error: --k must be non-negative")
+        print("error: --k must be non-negative", file=sys.stderr)
         return 2
 
     if args.stdin:
-        _run_stdin_payload(args.k)
-        return 0
+        return _run_stdin_payload(args.k)
 
     scenarios_to_run = (
         [(args.scenario, SCENARIOS[args.scenario])]
