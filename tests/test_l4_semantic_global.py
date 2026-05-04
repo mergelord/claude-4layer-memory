@@ -362,6 +362,87 @@ class TestSearch:
 
             assert isinstance(results, list)
 
+    def test_search_all_encodes_query_only_once_across_n_collections(
+        self, temp_home, mock_chroma, mock_sentence_transformer
+    ):
+        """Regression guard: ``search_all`` must encode the query exactly
+        once and reuse the resulting embedding across every project
+        collection. With N projects this turns N encodings into 1 — a
+        cheap optimisation that also guarantees identical embeddings
+        across collections (no risk of drift).
+
+        This test locks the contract in: future refactors that
+        accidentally re-introduce per-collection encoding will fail
+        loudly instead of silently regressing search latency.
+        """
+        with patch('pathlib.Path.home', return_value=temp_home):
+            (temp_home / ".claude" / "memory").mkdir(parents=True)
+            (temp_home / ".claude" / "projects").mkdir(parents=True)
+
+            memory = GlobalSemanticMemory()
+
+            # Reset call count after construction-time embeds (none, but
+            # be defensive: any future eager-init wouldn't pollute this
+            # measurement).
+            memory.model.encode.reset_mock()
+
+            # Synthesise five project collections in addition to global.
+            # Each collection.query() returns one fake hit so the loop
+            # actually exercises every branch.
+            def make_info(name):
+                info = MagicMock()
+                info.name = name
+                info.metadata = None
+                return info
+
+            project_collections = []
+            for i in range(5):
+                pc = MagicMock()
+                pc.query.return_value = {
+                    'ids': [[f'p{i}_id']],
+                    'documents': [['fake doc']],
+                    'metadatas': [[{'file': f'f{i}.md'}]],
+                    'distances': [[0.2 + i * 0.01]],
+                }
+                project_collections.append(pc)
+
+            global_collection = MagicMock()
+            global_collection.query.return_value = {
+                'ids': [['g_id']],
+                'documents': [['global doc']],
+                'metadatas': [[{'file': 'g.md'}]],
+                'distances': [[0.1]],
+            }
+
+            def get_collection(name):
+                if name == 'memory_global':
+                    return global_collection
+                idx = int(name.replace('memory_proj', ''))
+                return project_collections[idx]
+
+            memory.client.get_collection = get_collection
+            memory.client.list_collections.return_value = [
+                make_info('memory_global'),
+                *[make_info(f'memory_proj{i}') for i in range(5)],
+            ]
+
+            results = memory.search_all('test query', n_results=10)
+
+            assert memory.model.encode.call_count == 1, (
+                f'expected encode() to be called exactly once across '
+                f'1 global + 5 project collections; got '
+                f'{memory.model.encode.call_count}'
+            )
+            assert isinstance(results, list)
+            # Every collection's .query() must have been invoked with
+            # ``query_embeddings`` matching the single pre-computed
+            # embedding, never with raw ``query_texts``.
+            for coll in (global_collection, *project_collections):
+                coll.query.assert_called_once()
+                kwargs = coll.query.call_args.kwargs
+                assert 'query_embeddings' in kwargs
+                assert 'query_texts' not in kwargs
+
 
 class TestCleanup:
     """Test cleanup operations"""
