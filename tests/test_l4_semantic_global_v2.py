@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Тесты для L4 Semantic Global Memory (v2) — без реальных импортов."""
+"""Тесты для нового L4 Semantic Global Memory (v2)."""
 
 import sys
 from pathlib import Path
@@ -12,13 +12,12 @@ sys.modules['sentence_transformers'] = MagicMock()
 sys.modules['chromadb'] = MagicMock()
 sys.modules['chromadb.config'] = MagicMock()
 
-# Теперь импортируем наш модуль
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 from l4_semantic_global import GlobalSemanticMemory
 
 
 class TestEncode:
-    """Тесты кэширования эмбеддингов (мок)."""
+    """Тесты кэширования эмбеддингов."""
 
     def test_encode_returns_list_of_floats(self):
         memory = GlobalSemanticMemory.__new__(GlobalSemanticMemory)
@@ -26,7 +25,7 @@ class TestEncode:
         emb_mock = MagicMock()
         emb_mock.tolist.return_value = [0.1, 0.2, 0.3]
         memory.model.encode.return_value = [emb_mock]
-        result = memory._encode("test")
+        result = memory._encode_query("test")
         assert result == [0.1, 0.2, 0.3]
 
     def test_encode_is_cached(self):
@@ -35,14 +34,14 @@ class TestEncode:
         emb_mock = MagicMock()
         emb_mock.tolist.return_value = [0.1, 0.2]
         memory.model.encode.return_value = [emb_mock]
-        r1 = memory._encode("test")
-        r2 = memory._encode("test")
+        r1 = memory._encode_query("test")
+        r2 = memory._encode_query("test")
         assert r1 == r2
         assert memory.model.encode.call_count == 1
 
 
 class TestSearchAll:
-    """Тесты основного поиска (мок)."""
+    """Тесты основного поиска."""
 
     def test_search_all_returns_results(self):
         memory = GlobalSemanticMemory.__new__(GlobalSemanticMemory)
