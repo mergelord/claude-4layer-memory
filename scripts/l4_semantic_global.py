@@ -10,6 +10,7 @@ L4 Semantic Global Memory Layer (Hybrid-ready)
 - RRF-ready fusion layer (BM25 future hook)
 - Stable chunk-level dedup
 - Embedding caching (LRU)
+- Embedding Gateway (P1) – все поисковые запросы проходят через _encode_query
 """
 
 import os
@@ -62,15 +63,16 @@ class GlobalSemanticMemory:
         self.collection_prefix = "memory_"
         self.global_collection = "memory_global"
 
-    # ----------------------------
-    # EMBEDDINGS (with cache)
-    # ----------------------------
-
+    # =====================================================
+    # EMBEDDING GATEWAY (P1)
+    # All search queries MUST use this method.
+    # Direct calls to self.model.encode() are forbidden.
+    # =====================================================
     @lru_cache(maxsize=128)
-    def _encode(self, text: str):
+    def _encode_query(self, query: str) -> List[float]:
         """Возвращает embedding для запроса. Результат кэшируется."""
-        emb = self.model.encode([text])[0]
-        return emb.tolist() if hasattr(emb, "tolist") else emb
+        result = self.model.encode([query])[0]
+        return result.tolist() if hasattr(result, 'tolist') else result
 
     # ----------------------------
     # COLLECTIONS
@@ -137,7 +139,7 @@ class GlobalSemanticMemory:
         Semantic cross-project search (hybrid-ready).
         """
         start_time = time.time()
-        embedding = self._encode(query)
+        embedding = self._encode_query(query)
 
         results_by_source: Dict[str, List[Dict[str, Any]]] = {
             "semantic": []
@@ -147,6 +149,7 @@ class GlobalSemanticMemory:
         # GLOBAL MEMORY
         # ------------------------
 
+        # pylint: disable=broad-except
         try:
             global_col = self._get_collection(self.global_collection)
 
