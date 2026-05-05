@@ -69,7 +69,7 @@ class GlobalSemanticMemory:
     # Direct calls to self.model.encode() are forbidden.
     # =====================================================
     @lru_cache(maxsize=128)
-    def _encode_query(self, query: str):
+    def _encode_query(self, query: str) -> List[float]:
         """Возвращает embedding для запроса. Результат кэшируется."""
         result = self.model.encode([query])[0]
         return result.tolist() if hasattr(result, 'tolist') else result
