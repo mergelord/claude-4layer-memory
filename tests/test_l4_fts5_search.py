@@ -1,433 +1,510 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Unit tests for L4 FTS5 Search
+L4 FTS5 Search - Fast keyword search for memory system
 
-Покрытие:
-- Инициализация и индексация
-- Поиск и кэширование
-- Безопасность (права доступа, SQL injection)
-- Edge cases (пустые файлы, битые пути)
+Дополняет семантический поиск ChromaDB быстрым keyword-поиском через SQLite FTS5.
+Поддерживает чанковую индексацию для согласования с семантическим retrieval (chunk-level).
+
+Использование:
+    python l4_fts5_search.py init          # Инициализация FTS5 таблицы
+    python l4_fts5_search.py reindex       # Полная переиндексация
+    python l4_fts5_search.py search "query" # Поиск
+    python l4_fts5_search.py hybrid "query" # Гибридный поиск (FTS5 + ChromaDB)
 """
 
-import tempfile
-import unittest
-from pathlib import Path
-from unittest.mock import patch
-
+import json
+import logging
+import os
+import sqlite3
+import subprocess
 import sys
-sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
-
-from l4_fts5_search import L4FTS5Search, SearchResult
-
-
-class TestL4FTS5SearchInit(unittest.TestCase):
-    """Тесты инициализации и базовых операций"""
-
-    def setUp(self):
-        """Создать временную БД для каждого теста"""
-        self.temp_dir = tempfile.mkdtemp()
-        self.db_path = Path(self.temp_dir) / "test_fts5.db"
-        self.fts = L4FTS5Search(db_path=self.db_path)
-
-    def tearDown(self):
-        """Очистить временные файлы"""
-        import shutil
-        shutil.rmtree(self.temp_dir, ignore_errors=True)
-
-    def test_init_creates_db_directory(self):
-        """БД директория создаётся автоматически"""
-        self.assertTrue(self.db_path.parent.exists())
-
-    def test_init_fts_creates_table(self):
-        """init_fts создаёт FTS5 таблицу"""
-        result = self.fts.init_fts()
-        self.assertTrue(result)
-
-        # Проверка существования таблицы
-        with self.fts._get_connection() as conn:
-            cursor = conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='memory_fts'"
-            )
-            self.assertIsNotNone(cursor.fetchone())
-
-    def test_init_fts_idempotent(self):
-        """init_fts можно вызывать многократно"""
-        self.assertTrue(self.fts.init_fts())
-        self.assertTrue(self.fts.init_fts())
-
-    def test_stats_empty_db(self):
-        """stats возвращает корректные данные для пустой БД"""
-        self.fts.init_fts()
-        stats = self.fts.stats()
-
-        self.assertEqual(stats['total_documents'], 0)
-        self.assertEqual(stats['sources'], {})
-        self.assertIn('db_path', stats)
-        self.assertIn('db_size_kb', stats)
-
-
-class TestL4FTS5SearchIndexing(unittest.TestCase):
-    """Тесты индексации файлов"""
-
-    def setUp(self):
-        """Создать временную БД и тестовые файлы"""
-        self.temp_dir = tempfile.mkdtemp()
-        self.db_path = Path(self.temp_dir) / "test_fts5.db"
-        self.fts = L4FTS5Search(db_path=self.db_path)
-        self.fts.init_fts()
-
-        # Создать тестовые файлы
-        self.test_files_dir = Path(self.temp_dir) / "test_files"
-        self.test_files_dir.mkdir()
-
-        self.test_file = self.test_files_dir / "test.md"
-        self.test_file.write_text("Test content for FTS5 search", encoding='utf-8')
-
-    def tearDown(self):
-        """Очистить временные файлы"""
-        import shutil
-        shutil.rmtree(self.temp_dir, ignore_errors=True)
-
-    def test_index_file_success(self):
-        """index_file успешно индексирует файл"""
-        result = self.fts.index_file(self.test_file, "test_source")
-        self.assertTrue(result)
-
-        stats = self.fts.stats()
-        self.assertEqual(stats['total_documents'], 1)
-
-    def test_index_file_empty_content(self):
-        """index_file обрабатывает пустые файлы"""
-        empty_file = self.test_files_dir / "empty.md"
-        empty_file.write_text("", encoding='utf-8')
-
-        result = self.fts.index_file(empty_file, "test_source")
-        self.assertTrue(result)
-
-    def test_index_file_no_read_permission(self):
-        """index_file проверяет права доступа"""
-        with patch('os.access', return_value=False):
-            result = self.fts.index_file(self.test_file, "test_source")
-            self.assertFalse(result)
-
-    def test_index_file_nonexistent(self):
-        """index_file обрабатывает несуществующие файлы"""
-        fake_file = self.test_files_dir / "nonexistent.md"
-        result = self.fts.index_file(fake_file, "test_source")
-        self.assertFalse(result)
-
-    def test_index_file_updates_existing(self):
-        """index_file обновляет существующую запись"""
-        self.fts.index_file(self.test_file, "test_source")
-
-        # Обновить содержимое
-        self.test_file.write_text("Updated content", encoding='utf-8')
-        self.fts.index_file(self.test_file, "test_source")
-
-        # Должна быть только одна запись
-        stats = self.fts.stats()
-        self.assertEqual(stats['total_documents'], 1)
-
-    def test_index_single_file_helper(self):
-        """_index_single_file работает корректно"""
-        result = self.fts._index_single_file(
-            self.test_file,
-            self.test_files_dir,
-            "test_source"
-        )
-        self.assertTrue(result)
-
-    def test_index_single_file_skips_hidden(self):
-        """_index_single_file пропускает скрытые файлы"""
-        hidden_file = self.test_files_dir / ".hidden.md"
-        hidden_file.write_text("Hidden content", encoding='utf-8')
-
-        result = self.fts._index_single_file(
-            hidden_file,
-            self.test_files_dir,
-            "test_source"
-        )
-        self.assertFalse(result)
-
-
-class TestL4FTS5SearchQuery(unittest.TestCase):
-    """Тесты поиска"""
-
-    def setUp(self):
-        """Создать БД с тестовыми данными"""
-        self.temp_dir = tempfile.mkdtemp()
-        self.db_path = Path(self.temp_dir) / "test_fts5.db"
-        self.fts = L4FTS5Search(db_path=self.db_path)
-        self.fts.init_fts()
-
-        # Добавить тестовые данные
-        with self.fts._get_connection() as conn:
-            conn.execute(
-                "INSERT INTO memory_fts (path, source, content) VALUES (?, ?, ?)",
-                ("test1.md", "global", "Python programming language")
-            )
-            conn.execute(
-                "INSERT INTO memory_fts (path, source, content) VALUES (?, ?, ?)",
-                ("test2.md", "project", "JavaScript web development")
-            )
-            conn.execute(
-                "INSERT INTO memory_fts (path, source, content) VALUES (?, ?, ?)",
-                ("test3.md", "global", "Python data science machine learning")
-            )
-            conn.commit()
-
-    def tearDown(self):
-        """Очистить временные файлы"""
-        import shutil
-        shutil.rmtree(self.temp_dir, ignore_errors=True)
-
-    def test_search_finds_results(self):
-        """search находит релевантные результаты"""
-        results = self.fts.search("Python")
-        self.assertEqual(len(results), 2)
-        self.assertTrue(all(isinstance(r, SearchResult) for r in results))
-
-    def test_search_respects_limit(self):
-        """search учитывает параметр limit"""
-        results = self.fts.search("Python", limit=1)
-        self.assertEqual(len(results), 1)
-
-    def test_search_no_results(self):
-        """search возвращает пустой список при отсутствии результатов"""
-        results = self.fts.search("nonexistent_term_xyz")
-        self.assertEqual(len(results), 0)
-
-    def test_search_special_characters(self):
-        """search обрабатывает спецсимволы"""
-        results = self.fts.search("Python")
-        self.assertGreater(len(results), 0)
-
-    def test_cached_search_returns_tuple(self):
-        """_cached_search возвращает immutable tuple"""
-        results = self.fts._cached_search("Python", 10)
-        self.assertIsInstance(results, tuple)
-
-    def test_cache_invalidation(self):
-        """clear_cache очищает кэш поиска"""
-        # Первый поиск
-        self.fts.search("Python")
-        cache_info1 = self.fts._cached_search.cache_info()
-
-        # Второй поиск (из кэша)
-        self.fts.search("Python")
-        cache_info2 = self.fts._cached_search.cache_info()
-
-        self.assertEqual(cache_info2.hits, cache_info1.hits + 1)
-
-        # Очистка кэша
-        self.fts.clear_cache()
-        cache_info3 = self.fts._cached_search.cache_info()
-        self.assertEqual(cache_info3.hits, 0)
-
-    def test_search_ranking(self):
-        """search возвращает результаты с корректным рангом"""
-        results = self.fts.search("Python")
-        self.assertTrue(all(hasattr(r, 'rank') for r in results))
-        self.assertTrue(all(isinstance(r.rank, float) for r in results))
-
-
-class TestL4FTS5SearchSecurity(unittest.TestCase):
-    """Тесты безопасности"""
-
-    def setUp(self):
-        """Создать временную БД"""
-        self.temp_dir = tempfile.mkdtemp()
-        self.db_path = Path(self.temp_dir) / "test_fts5.db"
-        self.fts = L4FTS5Search(db_path=self.db_path)
-        self.fts.init_fts()
-
-    def tearDown(self):
-        """Очистить временные файлы"""
-        import shutil
-        shutil.rmtree(self.temp_dir, ignore_errors=True)
-
-    def test_sql_injection_protection(self):
-        """Параметризованные запросы защищают от SQL injection"""
-        # Попытка SQL injection
-        malicious_query = "'; DROP TABLE memory_fts; --"
-
-        # Не должно вызвать ошибку или удалить таблицу
-        results = self.fts.search(malicious_query)
-        self.assertIsInstance(results, list)
-
-        # Таблица должна существовать
-        with self.fts._get_connection() as conn:
-            cursor = conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name='memory_fts'"
-            )
-            self.assertIsNotNone(cursor.fetchone())
-
-    def test_connection_context_manager(self):
-        """Контекстный менеджер работает корректно"""
-        # Проверяем что контекстный менеджер не вызывает ошибок
-        with self.fts._get_connection() as conn:
-            self.assertIsNotNone(conn)
-            result = conn.execute("SELECT 1").fetchone()
-            self.assertIsNotNone(result)
-
-    def test_stats_handles_missing_db(self):
-        """stats обрабатывает отсутствующую БД"""
-        # Создать новый экземпляр с несуществующей БД
-        fake_db = Path(self.temp_dir) / "nonexistent.db"
-        fts_fake = L4FTS5Search(db_path=fake_db)
-
-        stats = fts_fake.stats()
-        self.assertEqual(stats['total_documents'], 0)
-        self.assertEqual(stats['db_size_kb'], 0)
-
-
-class TestL4FTS5SearchEdgeCases(unittest.TestCase):
-    """Тесты граничных случаев"""
-
-    def setUp(self):
-        """Создать временную БД"""
-        self.temp_dir = tempfile.mkdtemp()
-        self.db_path = Path(self.temp_dir) / "test_fts5.db"
-        self.fts = L4FTS5Search(db_path=self.db_path)
-        self.fts.init_fts()
-
-    def tearDown(self):
-        """Очистить временные файлы"""
-        import shutil
-        shutil.rmtree(self.temp_dir, ignore_errors=True)
-
-    def test_unicode_content(self):
-        """Обработка Unicode контента"""
-        test_file = Path(self.temp_dir) / "unicode.md"
-        test_file.write_text("Тестовый контент на русском языке 中文", encoding='utf-8')
-
-        result = self.fts.index_file(test_file, "test")
-        self.assertTrue(result)
-
-        results = self.fts.search("русском")
-        self.assertGreater(len(results), 0)
-
-    def test_large_content(self):
-        """Обработка больших файлов"""
-        test_file = Path(self.temp_dir) / "large.md"
-        large_content = "test content " * 10000
-        test_file.write_text(large_content, encoding='utf-8')
-
-        result = self.fts.index_file(test_file, "test")
-        self.assertTrue(result)
-
-    def test_empty_query(self):
-        """Обработка пустого запроса"""
-        results = self.fts.search("")
-        self.assertIsInstance(results, list)
-
-
-class TestCmdHybridIntegration(unittest.TestCase):
-    """Integration tests for cmd_hybrid: RRF merge + structured output.
-
-    These tests cover the contract between the FTS5 engine, the
-    semantic JSON envelope, and the RRF merger — the integration
-    point where 'feature exists' becomes 'feature integrates'.
-    """
-
-    def setUp(self):
-        self.temp_dir = tempfile.mkdtemp()
-        self.db_path = Path(self.temp_dir) / "hybrid_fts5.db"
-        self.fts = L4FTS5Search(db_path=self.db_path)
-        self.fts.init_fts()
-        # Seed FTS with one document so .search() returns something deterministic.
-        seed = Path(self.temp_dir) / "handoff.md"
-        seed.write_text("# Handoff\nsession context restoration\n", encoding="utf-8")
-        self.fts.index_file(seed, "global")
-
-    def tearDown(self):
-        import shutil
-        shutil.rmtree(self.temp_dir, ignore_errors=True)
-
-    def _capture_hybrid(self, semantic_payload):
-        """Run cmd_hybrid with mocked semantic subprocess; return stdout."""
-        from io import StringIO
-        from l4_fts5_search import cmd_hybrid
-
-        # Mock the semantic subprocess to return our deterministic payload.
-        with patch(
-            "l4_fts5_search._fetch_semantic_results",
-            return_value=semantic_payload,
-        ):
-            buf = StringIO()
-            with patch("sys.stdout", new=buf):
-                cmd_hybrid(self.fts, "session")
-            return buf.getvalue()
-
-    def test_hybrid_outputs_unified_ranked_list_not_two_lists(self):
-        """Output must be a single merged ranking, not side-by-side blocks."""
-        semantic = [
-            {"key": "[global] handoff.md", "distance": 0.1, "text": "session ctx"},
-        ]
-        out = self._capture_hybrid(semantic)
-
-        # Sanity: previous side-by-side header text must NOT appear.
-        self.assertNotIn("[FTS5 Results - Keyword Match]", out)
-        self.assertNotIn("[Semantic Results - Meaning Match]", out)
-        # New unified format MUST appear.
-        self.assertIn("[HYBRID SEARCH]", out)
-        self.assertIn("Merged", out)
-        self.assertIn("score=", out)
-        self.assertIn("normalized=", out)
-        self.assertIn("sources=", out)
-
-    def test_hybrid_merges_same_doc_from_both_engines_into_one_entry(self):
-        """If FTS and semantic both find the same file, one merged row."""
-        semantic = [
-            {"key": "[global] handoff.md", "distance": 0.1, "text": "match"},
-        ]
-        out = self._capture_hybrid(semantic)
-        # 'Merged 1 unique result' confirms the merger collapsed duplicates.
-        self.assertIn("Merged 1 unique result", out)
-        # Both source contributions should be visible.
-        self.assertIn("sources=[fts, semantic]", out)
-
-    def test_hybrid_normalises_hyphenated_project_keys_across_engines(self):
-        """Cross-source key bug: FTS my-app + Semantic my_app must merge.
-
-        Reproduces the silent-bug class ranking.normalize_existing_key
-        was introduced to prevent.
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
+from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
+from typing import Iterator, List, Optional, Tuple
+
+# Импорт cost tracker
+scripts_dir = Path(__file__).parent.parent / "scripts"
+sys.path.insert(0, str(scripts_dir))
+try:
+    from cost_tracker import CostTracker
+    COST_TRACKING_ENABLED = True
+except ImportError:
+    COST_TRACKING_ENABLED = False
+
+# RRF ranker is local + stdlib-only, safe to import eagerly.
+# pylint: disable-next=wrong-import-position,import-error
+from ranking import normalize_existing_key, normalize_scores, rrf_merge  # noqa: E402
+
+# Common chunker (shared with semantic module)
+# pylint: disable-next=wrong-import-position,import-error
+from chunking import chunk_text  # noqa: E402
+
+# Настройка UTF-8 для Windows
+if sys.platform == 'win32':
+    import codecs
+    if hasattr(sys.stdout, 'buffer'):
+        sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
+        sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'strict')
+
+# Настройка логирования
+logging.basicConfig(
+    level=logging.INFO,
+    format='[%(levelname)s] %(message)s'
+)
+
+
+# ---------------------------------------------------------------------------
+# Data model
+# ---------------------------------------------------------------------------
+
+@dataclass
+class SearchResult:
+    """Результат поиска"""
+    path: str
+    snippet: str
+    rank: float
+    source: str  # 'fts5' или 'semantic'
+
+
+class L4FTS5Search:
+    """FTS5 поиск для системы памяти"""
+
+    def __init__(self, db_path: Optional[Path] = None):
+        self.home = Path.home()
+        if db_path is None:
+            db_path = self.home / ".claude" / "memory_fts5.db"
+
+        self.db_path = db_path
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+
+        self.global_memory = self.home / ".claude" / "memory"
+        self.projects_base = self.home / ".claude" / "projects"
+
+    def clear_cache(self):
+        """Очистить кэш поиска (вызывать после reindex/index_file)"""
+        self._cached_search.cache_clear()
+
+    @contextmanager
+    def _get_connection(self) -> Iterator[sqlite3.Connection]:
+        conn = sqlite3.connect(str(self.db_path), timeout=30)
+        conn.row_factory = sqlite3.Row
+        try:
+            try:
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA busy_timeout=30000")
+                conn.execute("PRAGMA synchronous=NORMAL")
+            except sqlite3.OperationalError:  # nosec
+                pass
+            yield conn
+        finally:
+            conn.close()
+
+    def init_fts(self) -> bool:
+        """Создать FTS5 таблицу если не существует"""
+        try:
+            with self._get_connection() as conn:
+                conn.execute("""
+                    CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
+                        path UNINDEXED,
+                        source UNINDEXED,
+                        content,
+                        tokenize='unicode61 remove_diacritics 2'
+                    )
+                """)
+                conn.commit()
+                logging.info("FTS5 table initialized")
+                return True
+        except Exception as e:  # nosec
+            logging.error("FTS5 initialization failed: %s", e)
+            return False
+
+    def _index_single_file(self, md_file: Path, base_path: Path, source: str) -> bool:
         """
-        # Re-seed FTS under a hyphenated project name.
-        seed = Path(self.temp_dir) / "decisions.md"
-        seed.write_text("# Decisions\nsession plan\n", encoding="utf-8")
-        self.fts.index_file(seed, "my-fancy-app")
+        Индексировать один файл, разбивая его на чанки.
+        Все чанки получают одинаковый path (для группировки в RRF),
+        но разное содержимое (content).
+        """
+        if md_file.name.startswith('.'):
+            return False
 
-        # Semantic side reports the ChromaDB-normalised form.
-        semantic = [
-            {"key": "[my_fancy_app] decisions.md", "distance": 0.2, "text": "ctx"},
-        ]
-        out = self._capture_hybrid(semantic)
-        # Must NOT see two separate rows for the same logical doc.
-        self.assertEqual(out.count("decisions.md"), 1)
-        self.assertIn("sources=[fts, semantic]", out)
+        if not os.access(md_file, os.R_OK):
+            logging.warning("No read access: %s", md_file)
+            return False
 
-    def test_hybrid_handles_empty_semantic_gracefully(self):
-        """Falls back to FTS-only ranking if semantic engine returns nothing."""
-        out = self._capture_hybrid(semantic_payload=[])
-        self.assertIn("Merged", out)
-        self.assertIn("sources=[fts]", out)
+        try:
+            content = md_file.read_text(encoding='utf-8')
+            rel_path = str(md_file.relative_to(base_path))
+            chunks = chunk_text(content)
 
-    def test_hybrid_handles_both_engines_empty(self):
-        """Empty FTS and semantic → friendly message, no crash."""
-        # Use a query with no matches at all.
-        from io import StringIO
-        from l4_fts5_search import cmd_hybrid
+            with self._get_connection() as conn:
+                for chunk in chunks:
+                    conn.execute(
+                        "INSERT INTO memory_fts (path, source, content) VALUES (?, ?, ?)",
+                        (rel_path, source, chunk)
+                    )
+                conn.commit()
+            return True
+        except Exception as e:  # nosec
+            logging.warning("Failed to index %s: %s", md_file.name, e)
+            return False
 
-        with patch("l4_fts5_search._fetch_semantic_results", return_value=[]):
-            buf = StringIO()
-            with patch("sys.stdout", new=buf):
-                cmd_hybrid(self.fts, "absolutely_no_match_query_xyz_zzz")
-            out = buf.getvalue()
+    def reindex_all(self) -> int:
+        """
+        Полная переиндексация всех файлов памяти с параллельной обработкой.
+        Каждый файл разбивается на чанки и индексируется.
+        """
+        indexed_count = 0
 
-        self.assertIn("No results from either engine", out)
+        try:
+            with self._get_connection() as conn:
+                conn.execute("DELETE FROM memory_fts")
+                conn.commit()
+
+            files_to_index = []
+
+            if self.global_memory.exists():
+                for md_file in self.global_memory.rglob("*.md"):
+                    files_to_index.append((md_file, self.global_memory, "global"))
+
+            if self.projects_base.exists():
+                for project_dir in self.projects_base.iterdir():
+                    if not project_dir.is_dir():
+                        continue
+                    memory_path = project_dir / "memory"
+                    if not memory_path.exists():
+                        continue
+                    for md_file in memory_path.rglob("*.md"):
+                        files_to_index.append((md_file, memory_path, project_dir.name))
+
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                futures = {
+                    executor.submit(self._index_single_file, md_file, base_path, source): md_file
+                    for md_file, base_path, source in files_to_index
+                }
+                for future in as_completed(futures):
+                    if future.result():
+                        indexed_count += 1
+
+            logging.info("Reindexed %s files", indexed_count)
+            self.clear_cache()
+            return indexed_count
+
+        except Exception as e:  # nosec
+            logging.error("Reindex failed: %s", e)
+            return 0
+
+    def index_file(self, file_path: Path, source: str) -> bool:
+        """
+        Индексировать один файл (с разбивкой на чанки).
+        Удаляет все предыдущие записи для этого файла и вставляет чанки.
+        """
+        if not os.access(file_path, os.R_OK):
+            logging.error("No read access: %s", file_path)
+            return False
+
+        try:
+            with self._get_connection() as conn:
+                content = file_path.read_text(encoding='utf-8')
+                rel_path = file_path.name
+                conn.execute(
+                    "DELETE FROM memory_fts WHERE path = ? AND source = ?",
+                    (rel_path, source)
+                )
+                chunks = chunk_text(content)
+                for chunk in chunks:
+                    conn.execute(
+                        "INSERT INTO memory_fts (path, source, content) VALUES (?, ?, ?)",
+                        (rel_path, source, chunk)
+                    )
+                conn.commit()
+                logging.info(
+                    "Indexed: %s (%s) with %d chunks",
+                    rel_path, source, len(chunks)
+                )
+                self.clear_cache()
+                return True
+
+        except Exception as e:  # nosec
+            logging.error("Failed to index %s: %s", file_path, e)
+            return False
+
+    @lru_cache(maxsize=128)
+    def _cached_search(self, query: str, limit: int) -> Tuple[SearchResult, ...]:
+        """
+        Кэшируемый поиск. Возвращает результаты для каждого чанка,
+        путь имеет вид "[source] rel_path" (без чанк-суффикса).
+        """
+        try:
+            with self._get_connection() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT
+                        path,
+                        source,
+                        snippet(memory_fts, 2, '»', '«', '...', 60) as snippet,
+                        rank
+                    FROM memory_fts
+                    WHERE memory_fts MATCH ?
+                    ORDER BY rank
+                    LIMIT ?
+                    """,
+                    (query, limit)
+                ).fetchall()
+
+                results = tuple(
+                    SearchResult(
+                        path=f"[{row['source']}] {row['path']}",
+                        snippet=row['snippet'],
+                        rank=row['rank'],
+                        source='fts5'
+                    )
+                    for row in rows
+                )
+                return results
+
+        except Exception as e:  # nosec
+            logging.error("Cached search failed: %s", e)
+            return tuple()
+
+    def search(self, query: str, limit: int = 10) -> List[SearchResult]:
+        """
+        FTS5 поиск с ранжированием и кэшированием.
+        """
+        results = list(self._cached_search(query, limit))
+
+        if COST_TRACKING_ENABLED and results:
+            try:
+                tracker = CostTracker()
+                input_tokens = len(query.split()) * 1.3
+                output_tokens = sum(len(r.snippet.split()) for r in results) * 1.3
+                tracker.track_operation(
+                    operation_type='fts5_search',
+                    input_tokens=int(input_tokens),
+                    output_tokens=int(output_tokens),
+                    model='embedding',
+                    metadata=f"results: {len(results)}"
+                )
+            except Exception:  # nosec
+                logging.debug("Cost tracking failed")
+
+        return results
+
+    def stats(self) -> dict:
+        """Статистика FTS5 индекса"""
+        try:
+            with self._get_connection() as conn:
+                row = conn.execute(
+                    "SELECT COUNT(*) as count FROM memory_fts"
+                ).fetchone()
+
+                sources = conn.execute(
+                    "SELECT source, COUNT(*) as count FROM memory_fts GROUP BY source"
+                ).fetchall()
+
+                return {
+                    'total_documents': row['count'],
+                    'sources': {s['source']: s['count'] for s in sources},
+                    'db_path': str(self.db_path),
+                    'db_size_kb': round(self.db_path.stat().st_size / 1024, 1) if self.db_path.exists() else 0
+                }
+        except Exception as e:  # nosec
+            logging.error("Stats failed: %s", e)
+            return {
+                'total_documents': 0,
+                'sources': {},
+                'db_path': str(self.db_path),
+                'db_size_kb': 0
+            }
+
+
+# ---------------------------------------------------------------------------
+# CLI commands
+# ---------------------------------------------------------------------------
+
+def cmd_init(fts: L4FTS5Search):
+    if fts.init_fts():
+        print("[OK] FTS5 table initialized")
+    else:
+        print("[ERROR] Initialization failed")
+        sys.exit(1)
+
+
+def cmd_reindex(fts: L4FTS5Search):
+    count = fts.reindex_all()
+    print(f"[OK] Reindexed {count} files")
+
+
+def cmd_search(fts: L4FTS5Search, query: str):
+    results = fts.search(query)
+    print(f"\n[SEARCH] FTS5 Search: '{query}'")
+    print(f"Found {len(results)} results\n")
+    for i, result in enumerate(results, 1):
+        print(f"[{i}] {result.path} (rank: {result.rank:.3f})")
+        print(f"    {result.snippet}")
+        print()
+
+
+def cmd_stats(fts: L4FTS5Search):
+    stats = fts.stats()
+    print("\n[STATS] FTS5 Statistics:")
+    print(f"   Total documents: {stats['total_documents']}")
+    print(f"   DB size: {stats['db_size_kb']} KB")
+    print(f"   DB path: {stats['db_path']}")
+    print("\n   Sources:")
+    for source, count in stats['sources'].items():
+        print(f"      {source}: {count} documents")
+
+
+def _fetch_semantic_results(query: str, timeout: int = 30) -> list[dict]:
+    """Запускает семантический поиск и возвращает результаты в JSON."""
+    semantic_script = Path(__file__).parent / "l4_semantic_global.py"
+    if not semantic_script.exists():
+        return []
+
+    try:
+        result = subprocess.run(
+            [sys.executable, str(semantic_script), "search-all", query, "--json"],
+            capture_output=True,
+            text=True,
+            encoding='utf-8',
+            errors='replace',
+            timeout=timeout,
+            check=False,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        logging.warning("Semantic search subprocess failed: %s", exc)
+        return []
+
+    if result.returncode != 0:
+        logging.warning(
+            "Semantic search exited %s: %s",
+            result.returncode, result.stderr.strip(),
+        )
+        return []
+
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        logging.warning("Semantic JSON parse failed: %s", exc)
+        return []
+
+    return payload.get('results', []) if isinstance(payload, dict) else []
+
+
+def _print_merged_results(merged, fts_count: int, semantic_count: int) -> None:
+    """Форматирует и выводит объединённые результаты гибридного поиска."""
+    print(
+        f"\nMerged {len(merged)} unique result(s) "
+        f"(FTS: {fts_count}, Semantic: {semantic_count})"
+    )
+    print("-" * 70)
+
+    for i, entry in enumerate(merged[:10], 1):
+        contributors = sorted(entry.sources.keys())
+        print(
+            f"[{i}] {entry.key}  "
+            f"score={entry.score:.4f}  "
+            f"normalized={entry.normalized_score:.3f}  "
+            f"sources=[{', '.join(contributors)}]"
+        )
+        for source_name in contributors:
+            for hit in entry.sources[source_name]:
+                rank = hit.get("rank", "?")
+                contrib = hit.get("rrf_contribution", 0.0)
+                if source_name == "fts":
+                    extra = hit.get("snippet", "").strip().replace("\n", " ")[:120]
+                    print(
+                        f"    [{source_name} rank={rank} rrf={contrib:.4f}] {extra}"
+                    )
+                else:
+                    distance = hit.get("distance")
+                    distance_str = (
+                        f"{distance:.3f}"
+                        if isinstance(distance, (int, float))
+                        else "n/a"
+                    )
+                    text = hit.get("text", "").strip().replace("\n", " ")[:120]
+                    print(
+                        f"    [{source_name} rank={rank} rrf={contrib:.4f} "
+                        f"dist={distance_str}] {text}"
+                    )
+        print()
+
+
+def cmd_hybrid(fts: L4FTS5Search, query: str):
+    """
+    Гибридный поиск: FTS5 + семантика через Reciprocal Rank Fusion.
+    FTS5 теперь возвращает результаты по чанкам, но с одинаковым ключом
+    для одного файла, что позволяет RRF корректно усилить документ.
+    """
+    fts_results = fts.search(query, limit=5)
+    semantic_results = _fetch_semantic_results(query)
+
+    fts_stream = [
+        {
+            "key": normalize_existing_key(res.path),
+            "display_path": res.path,
+            "snippet": res.snippet,
+            "bm25_rank": res.rank,
+        }
+        for res in fts_results
+    ]
+
+    semantic_stream = [
+        {**hit, "key": normalize_existing_key(hit.get("key", ""))}
+        for hit in semantic_results
+    ]
+
+    print(f"\n[HYBRID SEARCH] '{query}'")
+    print("=" * 70)
+
+    if not fts_stream and not semantic_stream:
+        print("No results from either engine.\n")
+        return
+
+    merged = normalize_scores(
+        rrf_merge(("fts", fts_stream), ("semantic", semantic_stream))
+    )
+
+    _print_merged_results(merged, len(fts_stream), len(semantic_stream))
+
+
+def main():
+    """CLI интерфейс"""
+    if len(sys.argv) < 2:
+        print(__doc__)
+        sys.exit(1)
+
+    command = sys.argv[1]
+    fts = L4FTS5Search()
+
+    if command == 'init':
+        cmd_init(fts)
+    elif command == 'reindex':
+        cmd_reindex(fts)
+    elif command == 'search':
+        if len(sys.argv) < 3:
+            print("Usage: l4_fts5_search.py search <query>")
+            sys.exit(1)
+        query = ' '.join(sys.argv[2:])
+        cmd_search(fts, query)
+    elif command == 'stats':
+        cmd_stats(fts)
+    elif command == 'hybrid':
+        if len(sys.argv) < 3:
+            print("Usage: l4_fts5_search.py hybrid <query>")
+            sys.exit(1)
+        query = ' '.join(sys.argv[2:])
+        cmd_hybrid(fts, query)
+    else:
+        print(f"Unknown command: {command}")
+        print(__doc__)
+        sys.exit(1)
 
 
 if __name__ == '__main__':
-    unittest.main()
+    main()

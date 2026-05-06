@@ -15,9 +15,10 @@ L4 BM25 Search – независимый лексический источни�
 """
 
 import logging
-from typing import Any, Dict, List
-
-from l4_fts5_search import L4FTS5Search
+import sqlite3
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Any, Dict, Iterator, List
 
 # Параметры snippet() функции FTS5
 SNIPPET_COLUMN = 2  # Индекс колонки content в FTS таблице
@@ -25,6 +26,24 @@ SNIPPET_START_MARKER = '»'
 SNIPPET_END_MARKER = '«'
 SNIPPET_ELLIPSIS = '...'
 SNIPPET_MAX_TOKENS = 60  # Максимум токенов в snippet
+
+
+@contextmanager
+def _get_fts5_connection() -> Iterator[sqlite3.Connection]:
+    """Получить подключение к FTS5 БД (без зависимости от L4FTS5Search)."""
+    db_path = Path.home() / ".claude" / "memory_fts5.db"
+    conn = sqlite3.connect(str(db_path), timeout=30)
+    conn.row_factory = sqlite3.Row
+    try:
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA busy_timeout=30000")
+            conn.execute("PRAGMA synchronous=NORMAL")
+        except sqlite3.OperationalError:  # nosec
+            pass
+        yield conn
+    finally:
+        conn.close()
 
 
 def fetch_bm25_results(query: str, limit: int = 20) -> List[Dict[str, Any]]:
@@ -49,11 +68,10 @@ def fetch_bm25_results(query: str, limit: int = 20) -> List[Dict[str, Any]]:
         >>> results[0]["source_type"]
         'bm25'
     """
-    fts = L4FTS5Search()
     results = []
 
     try:
-        with fts._get_connection() as conn:
+        with _get_fts5_connection() as conn:
             rows = conn.execute(
                 """
                 SELECT
