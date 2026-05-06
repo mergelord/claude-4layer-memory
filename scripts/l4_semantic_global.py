@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
 """
 L4 Semantic Global Memory Layer (Hybrid-ready)
 
@@ -11,6 +10,7 @@ L4 Semantic Global Memory Layer (Hybrid-ready)
 - Stable chunk-level dedup
 - Embedding caching (LRU)
 - Embedding Gateway (P1) – все поисковые запросы проходят через _encode_query
+- Chunking contract: retrieval is chunk-level, fusion is document-level
 """
 
 import os
@@ -25,12 +25,16 @@ import chromadb
 from chromadb.config import Settings
 from sentence_transformers import SentenceTransformer
 
+# Common chunker (shared with FTS5 and future BM25)
+# pylint: disable=import-error
+from chunking import chunk_text  # noqa: E402
 
 # ----------------------------
 # CONFIG
 # ----------------------------
 
 DEFAULT_MODEL = "paraphrase-multilingual-MiniLM-L12-v2"
+MAX_CHUNKS_PER_DOC = 3      # for future aggregation if needed
 
 
 # ----------------------------
@@ -65,8 +69,6 @@ class GlobalSemanticMemory:
 
     # =====================================================
     # EMBEDDING GATEWAY (P1)
-    # All search queries MUST use this method.
-    # Direct calls to self.model.encode() are forbidden.
     # =====================================================
     @lru_cache(maxsize=128)
     def _encode_query(self, query: str):
@@ -82,7 +84,7 @@ class GlobalSemanticMemory:
         """Безопасное получение коллекции с логированием ошибок."""
         try:
             return self.client.get_collection(name)
-        except Exception as e:
+        except Exception as e:  # nosec
             logging.error("Failed to get collection %s: %s", name, e)
             return None
 
@@ -98,7 +100,7 @@ class GlobalSemanticMemory:
         limit: int,
         source: str
     ) -> List[Dict[str, Any]]:
-        """Поиск по одной коллекции."""
+        """Поиск по одной коллекции. Возвращает чанки с метаданными."""
 
         if not collection:
             return []
@@ -119,15 +121,30 @@ class GlobalSemanticMemory:
         dists = res.get("distances", [[]])[0]
 
         for i, id_val in enumerate(ids):
+            metadata = metas[i] if i < len(metas) else {}
             out.append({
-                "id": id_val,
+                "id": id_val,               # chunk-level unique id
                 "text": docs[i],
-                "metadata": metas[i],
+                "metadata": metadata,
                 "distance": dists[i] if i < len(dists) else 999,
                 "source": source
             })
 
         return out
+
+    # ----------------------------
+    # ADAPTER: chunk -> document key (для RRF)
+    # ----------------------------
+
+    def _make_document_key(self, source: str, metadata: Dict[str, Any]) -> str:
+        """
+        Формирует document-level ключ для RRF на основе метаданных чанка.
+
+        Использует source и имя файла из metadata.
+        """
+        file = metadata.get("file", "unknown")
+        normalized_source = source.replace('-', '_')
+        return f"[{normalized_source}] {file}"
 
     # ----------------------------
     # MAIN SEARCH
@@ -137,6 +154,8 @@ class GlobalSemanticMemory:
     def search_all(self, query: str, n_results: int = 10) -> List[Dict[str, Any]]:
         """
         Semantic cross-project search (hybrid-ready).
+        Возвращает список результатов, каждый с ключом 'key' для RRF
+        (document-level) и метаинформацией.
         """
         start_time = time.time()
         embedding = self._encode_query(query)
@@ -149,7 +168,6 @@ class GlobalSemanticMemory:
         # GLOBAL MEMORY
         # ------------------------
 
-        # pylint: disable=broad-except
         try:
             global_col = self._get_collection(self.global_collection)
 
@@ -161,7 +179,7 @@ class GlobalSemanticMemory:
                     "global"
                 )
             )
-        except Exception:  # nosec B110
+        except Exception:  # nosec
             pass
 
         # ------------------------
@@ -176,7 +194,6 @@ class GlobalSemanticMemory:
             if c.name.startswith(prefix) and c.name != self.global_collection
         ]
 
-        # oversample (important for recall)
         per_col = max(n_results, 10)
 
         for c in project_cols:
@@ -192,11 +209,11 @@ class GlobalSemanticMemory:
                         project_name
                     )
                 )
-            except Exception:  # nosec B112
+            except Exception:  # nosec
                 continue
 
         # ------------------------
-        # LOCAL RANKING
+        # LOCAL RANKING (within semantic)
         # ------------------------
 
         for _, results in results_by_source.items():
@@ -205,110 +222,109 @@ class GlobalSemanticMemory:
                 r["_rank"] = i + 1
 
         # ------------------------
-        # HYBRID HOOK (future BM25)
+        # ADAPTER LAYER: chunk -> document для RRF
         # ------------------------
 
-        active_sources = {
-            k: v for k, v in results_by_source.items() if v
-        }
-
-        if len(active_sources) > 1:
-            # future:
-            # return rrf_merge(active_sources, k=60)
-            merged = self._rrf_stub(active_sources)
-        else:
-            merged = sorted(
-                results_by_source["semantic"],
-                key=lambda x: x["_rank"]
-            )
-
-        # ------------------------
-        # DEDUP (chunk-level safe)
-        # ------------------------
-
-        best = {}
-
-        for r in merged:
-            key = r["id"]
-
-            if key not in best:
-                best[key] = r
+        semantic_docs: Dict[str, Dict[str, Any]] = {}
+        for chunk in results_by_source["semantic"]:
+            doc_key = self._make_document_key(chunk["source"], chunk["metadata"])
+            if doc_key not in semantic_docs:
+                semantic_docs[doc_key] = {
+                    "key": doc_key,
+                    "best_chunk": chunk,
+                    "distance": chunk["distance"],
+                    "chunks": [chunk]
+                }
             else:
-                # prefer better semantic rank
-                if r["_rank"] < best[key]["_rank"]:
-                    best[key] = r
+                if chunk["distance"] < semantic_docs[doc_key]["distance"]:
+                    semantic_docs[doc_key]["best_chunk"] = chunk
+                    semantic_docs[doc_key]["distance"] = chunk["distance"]
+                semantic_docs[doc_key]["chunks"].append(chunk)
 
-        final = list(best.values())
+        sorted_docs = sorted(semantic_docs.values(),
+                             key=lambda x: x["distance"])[:n_results]
 
-        # cleanup
-        for r in final:
-            r.pop("_rank", None)
+        final = []
+        for doc in sorted_docs:
+            best = doc["best_chunk"]
+            final.append({
+                "id": best["id"],
+                "key": doc["key"],
+                "text": best["text"],
+                "distance": doc["distance"],
+                "metadata": best["metadata"],
+                "source": best["source"],
+                "_chunks": doc["chunks"]
+            })
 
         elapsed = time.time() - start_time
         logging.info("Search completed in %.2f seconds, %d results",
                      elapsed, len(final))
 
-        return final[:n_results]
+        return final
 
     # ----------------------------
     # RRF STUB (future BM25)
     # ----------------------------
 
     def _rrf_stub(self, sources: Dict[str, List[Dict[str, Any]]]):
-        """
-        Placeholder for real RRF fusion.
-        Пока просто объединяет отсортированные списки без повторной сортировки.
-        """
+        """Placeholder for real RRF fusion."""
         merged = []
-
         for _, items in sources.items():
             merged.extend(items)
-
-        # Уже отсортированы по рангу внутри каждого источника,
-        # поэтому просто возвращаем как есть.
         return merged
 
     # ----------------------------
-    # INDEXING (minimal version)
+    # INDEXING (with chunking)
     # ----------------------------
 
     def index_directory(self, path: Path, collection_name: str):
+        """
+        Индексирует все markdown файлы в директории, разбивая их на чанки.
+
+        Для каждого файла создаётся несколько чанков с одинаковым `file` и `source`,
+        но уникальным `chunk_id`. Идентификатор в ChromaDB: ``<file_path>:<chunk_id>``.
+        """
         if not path.exists():
             return
 
         collection = self.client.get_or_create_collection(collection_name)
 
-        files = list(path.rglob("*.md"))
-
-        texts = []
-        ids = []
-        metas = []
-
-        for f in files:
+        for md_file in path.rglob("*.md"):
             try:
-                text = f.read_text(encoding="utf-8")
-            except Exception:  # nosec B112
+                text = md_file.read_text(encoding="utf-8")
+            except Exception:  # nosec
                 continue
 
-            texts.append(text)
-            ids.append(str(f))
+            chunks = chunk_text(text)
+            total = len(chunks)
+            if total == 0:
+                continue
 
-            metas.append({
-                "file": f.name,
-                "path": str(f)
-            })
+            ids = []
+            documents = []
+            embeddings = []
+            metadatas = []
 
-        if not texts:
-            return
+            for i, chunk in enumerate(chunks):
+                chunk_id = f"{md_file}:{i}"
+                ids.append(chunk_id)
+                documents.append(chunk)
+                embeddings.append(self.model.encode([chunk])[0].tolist())
+                metadatas.append({
+                    "file": md_file.name,
+                    "path": str(md_file),
+                    "source": collection_name.replace(self.collection_prefix, ""),
+                    "chunk_id": i,
+                    "chunk_total": total
+                })
 
-        embeddings = self.model.encode(texts).tolist()
-
-        collection.add(
-            ids=ids,
-            documents=texts,
-            embeddings=embeddings,
-            metadatas=metas
-        )
+            collection.add(
+                ids=ids,
+                documents=documents,
+                embeddings=embeddings,
+                metadatas=metadatas
+            )
 
 
 # ----------------------------
@@ -316,22 +332,48 @@ class GlobalSemanticMemory:
 # ----------------------------
 
 def main():
+    import json
+
     mem = GlobalSemanticMemory()
 
     if len(sys.argv) < 3:
-        print("Usage: search_all <query>")
+        print("Usage: l4_semantic_global.py <command> <query> [--json]")
+        print("Commands: search, search-all")
         return
 
     cmd = sys.argv[1]
+
+    # Проверка флага --json
+    json_output = "--json" in sys.argv
+    if json_output:
+        sys.argv.remove("--json")
+
     query = " ".join(sys.argv[2:])
 
-    if cmd == "search":
+    if cmd in ("search", "search-all"):
         results = mem.search_all(query)
 
-        for i, r in enumerate(results, 1):
-            print(f"[{i}] {r['source']} | {r['metadata'].get('file')}")
-            print(r["text"][:200])
-            print("-" * 40)
+        if json_output:
+            # JSON формат для RRF интеграции
+            output = {
+                "results": [
+                    {
+                        "key": r["key"],
+                        "text": r["text"],
+                        "distance": r["distance"],
+                        "metadata": r["metadata"],
+                        "source": r["source"]
+                    }
+                    for r in results
+                ]
+            }
+            print(json.dumps(output, ensure_ascii=False))
+        else:
+            # Человекочитаемый формат
+            for i, r in enumerate(results, 1):
+                print(f"[{i}] {r['source']} | {r['metadata'].get('file')}")
+                print(r["text"][:200])
+                print("-" * 40)
 
 
 if __name__ == "__main__":

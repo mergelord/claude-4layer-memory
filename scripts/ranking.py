@@ -12,6 +12,39 @@ key (lexicographic). Multiple hits from the same source for the same
 key (e.g. two FTS chunks of the same file) are *both* recorded under
 that source — they are not silently overwritten.
 
+-----------------------------------------------------------------------
+KEY CONTRACT (CRITICAL FOR HYBRID SEARCH)
+-----------------------------------------------------------------------
+The ``key`` field MUST represent a **document-level** identifier.
+
+Required format:
+    ``"[normalized_source] filename"``
+
+Examples:
+    ``"[global] architecture.md"``
+    ``"[my_project] handoff.md"``
+
+Rationale:
+- RRF merges results across independent sources (semantic, BM25, etc.).
+- If chunk-level identifiers are used (e.g. ``"file.md#chunk_3"``),
+  multiple chunks of the same document will artificially boost its
+  score by appearing multiple times in the same ranking stream.
+
+This leads to:
+    - bias toward long documents
+    - unstable ranking
+    - broken cross-source fusion
+
+Correct behaviour:
+- All chunks of the same document MUST share the same key.
+- Chunk-level details should be stored in ``sources[...]``
+  (for explainability), NOT in the key.
+
+Enforcement:
+- Callers are responsible for constructing correct keys.
+- Use :func:`make_join_key` to guarantee consistency.
+-----------------------------------------------------------------------
+
 Public API
 ----------
 - :class:`RankedResult` — frozen dataclass returned to consumers.
@@ -57,6 +90,7 @@ original empirical retrieval benchmarks.
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass, field
 from typing import Any, Iterable, List, Mapping, Tuple
@@ -74,6 +108,9 @@ that fix this contract.
 _KEY_PATTERN = re.compile(r'^\[([^\]]+)\]\s+(.+)$')
 _SOURCE_NON_ALNUM = re.compile(r'[^a-zA-Z0-9_]')
 _SOURCE_REPEATED_UNDERSCORE = re.compile(r'_+')
+
+_CHUNK_PATTERN = re.compile(r'(#\w+|[?&]chunk=)')
+_SEEN_BAD_KEYS: set[str] = set()
 
 
 def _normalize_source(source: str) -> str:
@@ -128,6 +165,21 @@ def normalize_existing_key(key: str) -> str:
     return make_join_key(match.group(1), match.group(2))
 
 
+def _validate_key_shape(key: str) -> None:
+    """Soft validation: warn if key contains chunk-like patterns.
+
+    Deduplicates warnings per key to avoid log spam when the same
+    bad key appears across multiple chunks.
+    """
+    if _CHUNK_PATTERN.search(key) and key not in _SEEN_BAD_KEYS:
+        _SEEN_BAD_KEYS.add(key)
+        logging.warning(
+            "RRF key looks like chunk-level (%s). "
+            "This may cause ranking bias. Expected document-level key.",
+            key,
+        )
+
+
 @dataclass
 class RankedResult:
     """A single merged ranking entry with source-attribution.
@@ -171,7 +223,14 @@ def rrf_merge(
         the same input always produces the same output.
 
     Raises:
-        ValueError: If ``k`` is negative or any item lacks a ``"key"``.
+        ValueError: If ``k`` is negative, any item lacks a ``"key"``,
+            an item has an empty key, or duplicate source names are
+            provided.
+
+    .. important::
+       The ``key`` must be a **document-level** identifier
+       (see module-level KEY CONTRACT). Use :func:`make_join_key`
+       or :func:`normalize_existing_key` to ensure correct format.
 
     Examples:
         >>> fts = [{"key": "a.md", "rank": 0.9}, {"key": "b.md", "rank": 0.5}]
@@ -183,31 +242,42 @@ def rrf_merge(
     if k < 0:
         raise ValueError(f"rrf k must be non-negative, got {k}")
 
+    seen_sources: set[str] = set()
     accumulator: dict[str, RankedResult] = {}
 
     for source_name, items in streams:
-        # ``enumerate`` from 1 because RRF rank is 1-based.
+        if source_name in seen_sources:
+            raise ValueError(f"Duplicate source_name: {source_name!r}")
+        seen_sources.add(source_name)
+
         for rank, item in enumerate(items, start=1):
             if "key" not in item:
                 raise ValueError(
                     f"stream {source_name!r}: item at rank {rank} is "
                     f"missing required 'key' field: {item!r}"
                 )
-            key = str(item["key"])
+            key = str(item["key"]).strip()
+            if not key:
+                raise ValueError(
+                    f"stream {source_name!r}: item at rank {rank} has "
+                    f"empty 'key'"
+                )
+
+            _validate_key_shape(key)
+
             contribution = 1.0 / (k + rank)
 
             entry = accumulator.setdefault(key, RankedResult(key=key))
             entry.score += contribution
 
-            # Strip 'key' from the per-source payload so it's not
-            # duplicated, but keep everything else for explainability.
             payload = {field_: value for field_, value in item.items() if field_ != "key"}
+            if "rank" in payload:
+                payload["original_rank"] = payload.pop("rank")
             payload["rank"] = rank
             payload["rrf_contribution"] = contribution
 
             entry.sources.setdefault(source_name, []).append(payload)
 
-    # Stable tie-break: descending score, then ascending key.
     return sorted(accumulator.values(), key=lambda r: (-r.score, r.key))
 
 
@@ -232,7 +302,7 @@ def normalize_scores(results: List[RankedResult]) -> List[RankedResult]:
         return results
 
     max_score = max(r.score for r in results)
-    if max_score <= 0:
+    if not (max_score > 0 and max_score != float('inf')):
         for r in results:
             r.normalized_score = 0.0
         return results

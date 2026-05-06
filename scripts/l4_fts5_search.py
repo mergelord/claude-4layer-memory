@@ -4,13 +4,14 @@
 L4 FTS5 Search - Fast keyword search for memory system
 
 Дополняет семантический поиск ChromaDB быстрым keyword-поиском через SQLite FTS5.
-Вдохновлено CliClaw (https://github.com/a-prs/CliClaw)
+Поддерживает чанковую индексацию, collapse до одного лучшего чанка на документ,
+и трёх-сигнальный гибридный поиск (FTS, semantic, BM25).
 
 Использование:
     python l4_fts5_search.py init          # Инициализация FTS5 таблицы
     python l4_fts5_search.py reindex       # Полная переиндексация
     python l4_fts5_search.py search "query" # Поиск
-    python l4_fts5_search.py hybrid "query" # Гибридный поиск (FTS5 + ChromaDB)
+    python l4_fts5_search.py hybrid "query" # Гибридный поиск (FTS + semantic + BM25)
 """
 
 import json
@@ -19,6 +20,7 @@ import os
 import sqlite3
 import subprocess
 import sys
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -38,6 +40,10 @@ except ImportError:
 # pylint: disable-next=wrong-import-position,import-error
 from ranking import normalize_existing_key, normalize_scores, rrf_merge  # noqa: E402
 
+# Common chunker (shared with semantic module)
+# pylint: disable-next=wrong-import-position,import-error
+from chunking import chunk_text  # noqa: E402
+
 # Настройка UTF-8 для Windows
 if sys.platform == 'win32':
     import codecs
@@ -52,25 +58,23 @@ logging.basicConfig(
 )
 
 
+# ---------------------------------------------------------------------------
+# Data model
+# ---------------------------------------------------------------------------
+
 @dataclass
 class SearchResult:
     """Результат поиска"""
     path: str
     snippet: str
     rank: float
-    source: str  # 'fts5' или 'semantic'
+    source: str  # 'fts5' или 'semantic' или 'bm25'
 
 
 class L4FTS5Search:
     """FTS5 поиск для системы памяти"""
 
     def __init__(self, db_path: Optional[Path] = None):
-        """
-        Инициализация FTS5 поиска
-
-        Args:
-            db_path: Путь к SQLite БД (по умолчанию ~/.claude/memory_fts5.db)
-        """
         self.home = Path.home()
         if db_path is None:
             db_path = self.home / ".claude" / "memory_fts5.db"
@@ -78,7 +82,6 @@ class L4FTS5Search:
         self.db_path = db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Директории памяти
         self.global_memory = self.home / ".claude" / "memory"
         self.projects_base = self.home / ".claude" / "projects"
 
@@ -88,19 +91,6 @@ class L4FTS5Search:
 
     @contextmanager
     def _get_connection(self) -> Iterator[sqlite3.Connection]:
-        """Получить подключение к БД.
-
-        Включает WAL mode и busy_timeout для устойчивости при параллельной
-        индексации (reindex_all использует ThreadPoolExecutor): WAL допускает
-        одновременные читатели без блокировки писателя, busy_timeout даёт
-        писателю шанс дождаться лока.
-
-        Важно: возвращается через @contextmanager, не напрямую Connection.
-        Стандартный sqlite3.Connection.__exit__ только коммитит/ролл-бекит,
-        но НЕ закрывает соединение; параллельный reindex_all (max_workers=4) и
-        долгоживущий MCP-процесс (вызывает search/stats постоянно) без этого
-        накапливают ликнутые коннекты. Сравни с cost_tracker._get_connection.
-        """
         conn = sqlite3.connect(str(self.db_path), timeout=30)
         conn.row_factory = sqlite3.Row
         try:
@@ -108,9 +98,7 @@ class L4FTS5Search:
                 conn.execute("PRAGMA journal_mode=WAL")
                 conn.execute("PRAGMA busy_timeout=30000")
                 conn.execute("PRAGMA synchronous=NORMAL")
-            except sqlite3.OperationalError:
-                # Some environments (read-only mounts, exotic FSes) reject PRAGMA;
-                # fall back to defaults rather than crash hard.
+            except sqlite3.OperationalError:  # nosec
                 pass
             yield conn
         finally:
@@ -131,26 +119,19 @@ class L4FTS5Search:
                 conn.commit()
                 logging.info("FTS5 table initialized")
                 return True
-        except Exception as e:
+        except Exception as e:  # nosec
             logging.error("FTS5 initialization failed: %s", e)
             return False
 
     def _index_single_file(self, md_file: Path, base_path: Path, source: str) -> bool:
         """
-        Индексировать один файл (helper для параллельной обработки)
-
-        Args:
-            md_file: Путь к файлу
-            base_path: Базовый путь для относительного пути
-            source: Источник (global или имя проекта)
-
-        Returns:
-            True если успешно
+        Индексировать один файл, разбивая его на чанки.
+        Все чанки получают одинаковый path (для группировки в RRF),
+        но разное содержимое (content).
         """
         if md_file.name.startswith('.'):
             return False
 
-        # Проверка прав доступа
         if not os.access(md_file, os.R_OK):
             logging.warning("No read access: %s", md_file)
             return False
@@ -158,85 +139,70 @@ class L4FTS5Search:
         try:
             content = md_file.read_text(encoding='utf-8')
             rel_path = str(md_file.relative_to(base_path))
+            chunks = chunk_text(content)
 
             with self._get_connection() as conn:
-                conn.execute(
-                    "INSERT INTO memory_fts (path, source, content) VALUES (?, ?, ?)",
-                    (rel_path, source, content)
-                )
+                for chunk in chunks:
+                    conn.execute(
+                        "INSERT INTO memory_fts (path, source, content) VALUES (?, ?, ?)",
+                        (rel_path, source, chunk)
+                    )
                 conn.commit()
             return True
-        except Exception as e:
+        except Exception as e:  # nosec
             logging.warning("Failed to index %s: %s", md_file.name, e)
             return False
 
     def reindex_all(self) -> int:
         """
-        Полная переиндексация всех файлов памяти с параллельной обработкой
-
-        Returns:
-            Количество проиндексированных файлов
+        Полная переиндексация всех файлов памяти с параллельной обработкой.
+        Каждый файл разбивается на чанки и индексируется.
         """
         indexed_count = 0
 
         try:
             with self._get_connection() as conn:
-                # Очистка старых данных
                 conn.execute("DELETE FROM memory_fts")
                 conn.commit()
 
-            # Собираем все файлы для индексации
             files_to_index = []
 
-            # Глобальная память
             if self.global_memory.exists():
                 for md_file in self.global_memory.rglob("*.md"):
                     files_to_index.append((md_file, self.global_memory, "global"))
 
-            # Проектная память
             if self.projects_base.exists():
                 for project_dir in self.projects_base.iterdir():
                     if not project_dir.is_dir():
                         continue
-
                     memory_path = project_dir / "memory"
                     if not memory_path.exists():
                         continue
-
                     for md_file in memory_path.rglob("*.md"):
                         files_to_index.append((md_file, memory_path, project_dir.name))
 
-            # Параллельная индексация
             with ThreadPoolExecutor(max_workers=4) as executor:
                 futures = {
                     executor.submit(self._index_single_file, md_file, base_path, source): md_file
                     for md_file, base_path, source in files_to_index
                 }
-
                 for future in as_completed(futures):
                     if future.result():
                         indexed_count += 1
 
             logging.info("Reindexed %s files", indexed_count)
-            self.clear_cache()  # Инвалидация кэша после переиндексации
+            self.clear_cache()
             return indexed_count
 
-        except Exception as e:
+        except Exception as e:  # nosec
             logging.error("Reindex failed: %s", e)
             return 0
 
     def index_file(self, file_path: Path, source: str) -> bool:
         """
-        Индексировать один файл
-
-        Args:
-            file_path: Путь к файлу
-            source: Источник (global или имя проекта)
-
-        Returns:
-            True если успешно
+        Индексировать один файл (с разбивкой на чанки).
+        Удаляет все предыдущие записи для этого файла и вставляет чанки.
         """
-        # Проверка прав доступа
         if not os.access(file_path, os.R_OK):
             logging.error("No read access: %s", file_path)
             return False
@@ -245,38 +211,33 @@ class L4FTS5Search:
             with self._get_connection() as conn:
                 content = file_path.read_text(encoding='utf-8')
                 rel_path = file_path.name
-
-                # Удалить старую запись
                 conn.execute(
                     "DELETE FROM memory_fts WHERE path = ? AND source = ?",
                     (rel_path, source)
                 )
-
-                # Добавить новую
-                conn.execute(
-                    "INSERT INTO memory_fts (path, source, content) VALUES (?, ?, ?)",
-                    (rel_path, source, content)
-                )
+                chunks = chunk_text(content)
+                for chunk in chunks:
+                    conn.execute(
+                        "INSERT INTO memory_fts (path, source, content) VALUES (?, ?, ?)",
+                        (rel_path, source, chunk)
+                    )
                 conn.commit()
-                logging.info("Indexed: %s (%s)", rel_path, source)
-                self.clear_cache()  # Инвалидация кэша после индексации
+                logging.info(
+                    "Indexed: %s (%s) with %d chunks",
+                    rel_path, source, len(chunks)
+                )
+                self.clear_cache()
                 return True
 
-        except Exception as e:
+        except Exception as e:  # nosec
             logging.error("Failed to index %s: %s", file_path, e)
             return False
 
     @lru_cache(maxsize=128)
     def _cached_search(self, query: str, limit: int) -> Tuple[SearchResult, ...]:
         """
-        Кэшируемая версия поиска (внутренний метод)
-
-        Args:
-            query: Поисковый запрос
-            limit: Максимум результатов
-
-        Returns:
-            Tuple результатов (immutable для кэширования)
+        Кэшируемый поиск. Возвращает результаты для каждого чанка,
+        путь имеет вид "[source] rel_path" (без чанк-суффикса).
         """
         try:
             with self._get_connection() as conn:
@@ -304,32 +265,21 @@ class L4FTS5Search:
                     )
                     for row in rows
                 )
-
                 return results
 
-        except Exception as e:
+        except Exception as e:  # nosec
             logging.error("Cached search failed: %s", e)
             return tuple()
 
     def search(self, query: str, limit: int = 10) -> List[SearchResult]:
         """
-        FTS5 поиск с ранжированием и кэшированием
-
-        Args:
-            query: Поисковый запрос
-            limit: Максимум результатов
-
-        Returns:
-            Список результатов поиска
+        FTS5 поиск с ранжированием и кэшированием.
         """
-        # Используем кэшируемую версию
         results = list(self._cached_search(query, limit))
 
-        # Отслеживаем стоимость операции
         if COST_TRACKING_ENABLED and results:
             try:
                 tracker = CostTracker()
-                # FTS5 - локальный поиск, минимальная стоимость
                 input_tokens = len(query.split()) * 1.3
                 output_tokens = sum(len(r.snippet.split()) for r in results) * 1.3
                 tracker.track_operation(
@@ -339,8 +289,8 @@ class L4FTS5Search:
                     model='embedding',
                     metadata=f"results: {len(results)}"
                 )
-            except Exception as e:  # nosec B110
-                logging.debug("Cost tracking failed: %s", e)
+            except Exception:  # nosec
+                logging.debug("Cost tracking failed")
 
         return results
 
@@ -362,7 +312,7 @@ class L4FTS5Search:
                     'db_path': str(self.db_path),
                     'db_size_kb': round(self.db_path.stat().st_size / 1024, 1) if self.db_path.exists() else 0
                 }
-        except Exception as e:
+        except Exception as e:  # nosec
             logging.error("Stats failed: %s", e)
             return {
                 'total_documents': 0,
@@ -372,9 +322,11 @@ class L4FTS5Search:
             }
 
 
+# ---------------------------------------------------------------------------
+# CLI commands (basic)
+# ---------------------------------------------------------------------------
 
 def cmd_init(fts: L4FTS5Search):
-    """Обработчик команды init"""
     if fts.init_fts():
         print("[OK] FTS5 table initialized")
     else:
@@ -383,17 +335,14 @@ def cmd_init(fts: L4FTS5Search):
 
 
 def cmd_reindex(fts: L4FTS5Search):
-    """Обработчик команды reindex"""
     count = fts.reindex_all()
     print(f"[OK] Reindexed {count} files")
 
 
 def cmd_search(fts: L4FTS5Search, query: str):
-    """Обработчик команды search"""
     results = fts.search(query)
     print(f"\n[SEARCH] FTS5 Search: '{query}'")
     print(f"Found {len(results)} results\n")
-
     for i, result in enumerate(results, 1):
         print(f"[{i}] {result.path} (rank: {result.rank:.3f})")
         print(f"    {result.snippet}")
@@ -401,7 +350,6 @@ def cmd_search(fts: L4FTS5Search, query: str):
 
 
 def cmd_stats(fts: L4FTS5Search):
-    """Обработчик команды stats"""
     stats = fts.stats()
     print("\n[STATS] FTS5 Statistics:")
     print(f"   Total documents: {stats['total_documents']}")
@@ -412,13 +360,12 @@ def cmd_stats(fts: L4FTS5Search):
         print(f"      {source}: {count} documents")
 
 
-def _fetch_semantic_results(query: str, timeout: int = 30) -> list[dict]:
-    """Run the semantic search subprocess in JSON mode and return its hits.
+# ---------------------------------------------------------------------------
+# Helper: fetch semantic results via subprocess
+# ---------------------------------------------------------------------------
 
-    Returns an empty list if the semantic engine is unavailable, fails,
-    or its stdout is unparseable. Hybrid search degrades gracefully
-    rather than blocking the caller — FTS-only is still useful.
-    """
+def _fetch_semantic_results(query: str, timeout: int = 30) -> list[dict]:
+    """Запускает семантический поиск и возвращает результаты в JSON."""
     semantic_script = Path(__file__).parent / "l4_semantic_global.py"
     if not semantic_script.exists():
         return []
@@ -453,56 +400,65 @@ def _fetch_semantic_results(query: str, timeout: int = 30) -> list[dict]:
     return payload.get('results', []) if isinstance(payload, dict) else []
 
 
-def cmd_hybrid(fts: L4FTS5Search, query: str):
-    """Hybrid search: merge FTS5 + semantic via Reciprocal Rank Fusion.
+# ---------------------------------------------------------------------------
+# Chunk / source management helpers
+# ---------------------------------------------------------------------------
 
-    Replaces the previous side-by-side display (which printed two
-    independent lists and made the caller eyeball-merge) with a
-    single ranked output where each result carries:
-    - a ``final_score`` summed across contributing engines,
-    - a ``normalized_score`` ∈ [0, 1] for UI display,
-    - a per-source breakdown (``fts``, ``semantic``) explaining why
-      each result was selected.
+def limit_chunks(stream: list[dict], max_chunks: int) -> list[dict]:
+    """Ограничить количество чанков на документ (debug tool)."""
+    grouped: dict[str, list[dict]] = defaultdict(list)
+    for item in stream:
+        grouped[item["key"]].append(item)
+    limited: list[dict] = []
+    for items in grouped.values():
+        if "distance" in items[0]:
+            items_sorted = sorted(items, key=lambda x: x.get("distance", 999))
+        else:
+            items_sorted = sorted(items, key=lambda x: x.get("rank", 999))
+        limited.extend(items_sorted[:max_chunks])
+    return limited
 
-    Falls back to FTS5-only output if the semantic engine is missing
-    or fails — hybrid is best-effort, never blocking.
+
+def collapse_to_best_per_doc(stream: list[dict]) -> list[dict]:
     """
-    fts_results = fts.search(query, limit=5)
-    semantic_results = _fetch_semantic_results(query)
+    Оставляет ОДИН лучший чанк на каждый документ.
 
-    # Both engines emit "[source] filename" but the source bracket
-    # differs: FTS5 stores the raw directory name (``my-app``) while
-    # the semantic engine reports the ChromaDB collection name
-    # (``my_app``). Re-canonicalise both sides through one helper so
-    # RRF actually merges the same logical document.
-    fts_stream = [
-        {
-            "key": normalize_existing_key(res.path),
-            "display_path": res.path,
-            "snippet": res.snippet,
-            "bm25_rank": res.rank,
-        }
-        for res in fts_results
-    ]
-    semantic_stream = [
-        {**hit, "key": normalize_existing_key(hit.get("key", ""))}
-        for hit in semantic_results
-    ]
+    Правило выбора лучшего зависит от source_type:
+    - 'semantic' → минимальное distance
+    - 'bm25'    → минимальный rank (порядок в выдаче)
+    - 'fts'     → минимальный rank
+    """
+    grouped: dict[str, list[dict]] = defaultdict(list)
+    for item in stream:
+        grouped[item["key"]].append(item)
 
-    print(f"\n[HYBRID SEARCH] '{query}'")
-    print("=" * 70)
+    collapsed: list[dict] = []
+    for key, items in grouped.items():
+        source_type = items[0].get("source_type")
+        if not source_type:
+            logging.warning("Missing source_type for key=%s, defaulting to 'fts'", key)
+            source_type = "fts"
 
-    if not fts_stream and not semantic_stream:
-        print("No results from either engine.\n")
-        return
+        if source_type == "semantic":
+            best = min(items, key=lambda x: x.get("distance", 999))
+        elif source_type == "bm25":
+            best = min(items, key=lambda x: x.get("rank", 999))
+        else:  # fts
+            best = min(items, key=lambda x: x.get("rank", 999))
 
-    merged = normalize_scores(
-        rrf_merge(("fts", fts_stream), ("semantic", semantic_stream))
-    )
+        collapsed.append(best)
+    return collapsed
 
+
+# ---------------------------------------------------------------------------
+# Hybrid search (FTS + semantic + BM25)
+# ---------------------------------------------------------------------------
+
+def _print_merged_results(merged, fts_count: int, semantic_count: int, bm25_count: int = 0) -> None:
+    """Форматирует и выводит объединённые результаты гибридного поиска."""
     print(
         f"\nMerged {len(merged)} unique result(s) "
-        f"(FTS: {len(fts_stream)}, Semantic: {len(semantic_stream)})"
+        f"(FTS: {fts_count}, Semantic: {semantic_count}, BM25: {bm25_count})"
     )
     print("-" * 70)
 
@@ -523,6 +479,17 @@ def cmd_hybrid(fts: L4FTS5Search, query: str):
                     print(
                         f"    [{source_name} rank={rank} rrf={contrib:.4f}] {extra}"
                     )
+                elif source_name == "bm25":
+                    score = hit.get("bm25_score", None)
+                    extra = hit.get("snippet", "").strip().replace("\n", " ")[:120]
+                    if score is not None:
+                        print(
+                            f"    [{source_name} rank={rank} rrf={contrib:.4f} score={score:.4f}] {extra}"
+                        )
+                    else:
+                        print(
+                            f"    [{source_name} rank={rank} rrf={contrib:.4f}] {extra}"
+                        )
                 else:
                     distance = hit.get("distance")
                     distance_str = (
@@ -538,6 +505,90 @@ def cmd_hybrid(fts: L4FTS5Search, query: str):
         print()
 
 
+def _validate_stream_source_type(stream: list[dict], expected: str, stream_name: str) -> None:
+    """Validate that all items in stream have correct source_type."""
+    for i, item in enumerate(stream):
+        if item.get("source_type") != expected:
+            raise ValueError(
+                f"{stream_name} stream item [{i}] has source_type="
+                f"{item.get('source_type')!r}, expected {expected!r}"
+            )
+
+
+def cmd_hybrid(fts: L4FTS5Search, query: str):
+    """
+    Гибридный поиск: FTS5 + семантика + BM25 через Reciprocal Rank Fusion.
+    Все источники независимы, каждый даёт ровно 1 сигнал на документ.
+    """
+    fts_results = fts.search(query, limit=20)
+    semantic_results = _fetch_semantic_results(query)
+
+    # BM25 (optional module)
+    bm25_results: list[dict] = []
+    try:
+        from l4_bm25_search import fetch_bm25_results  # noqa: E402
+        bm25_results = fetch_bm25_results(query)
+    except ImportError:
+        pass
+    except Exception as exc:
+        logging.warning("BM25 search failed: %s", exc)
+
+    # Формируем потоки с явным source_type
+    fts_stream = [
+        {
+            "key": normalize_existing_key(res.path),
+            "display_path": res.path,
+            "snippet": res.snippet,
+            "rank": res.rank,
+            "source_type": "fts",
+        }
+        for res in fts_results
+    ]
+
+    semantic_stream = [
+        {**hit, "key": normalize_existing_key(hit.get("key", "")),
+         "source_type": "semantic"}
+        for hit in semantic_results
+    ]
+
+    bm25_stream = [
+        {
+            "key": normalize_existing_key(item["key"]),
+            "snippet": item["snippet"],
+            "rank": item.get("rank", 0),
+            "bm25_score": item.get("bm25_score"),
+            "source_type": "bm25",
+        }
+        for item in bm25_results
+    ]
+
+    # Инварианты (fail-fast вместо assert)
+    _validate_stream_source_type(fts_stream, "fts", "FTS")
+    _validate_stream_source_type(semantic_stream, "semantic", "Semantic")
+    _validate_stream_source_type(bm25_stream, "bm25", "BM25")
+
+    # 1 документ = 1 сигнал
+    fts_stream = collapse_to_best_per_doc(fts_stream)
+    semantic_stream = collapse_to_best_per_doc(semantic_stream)
+    bm25_stream = collapse_to_best_per_doc(bm25_stream)
+
+    print(f"\n[HYBRID SEARCH] '{query}'")
+    print("=" * 70)
+
+    if not fts_stream and not semantic_stream and not bm25_stream:
+        print("No results from any engine.\n")
+        return
+
+    merged = normalize_scores(
+        rrf_merge(
+            ("fts", fts_stream),
+            ("semantic", semantic_stream),
+            ("bm25", bm25_stream)
+        )
+    )
+    _print_merged_results(merged, len(fts_stream), len(semantic_stream), len(bm25_stream))
+
+
 def main():
     """CLI интерфейс"""
     if len(sys.argv) < 2:
@@ -549,27 +600,22 @@ def main():
 
     if command == 'init':
         cmd_init(fts)
-
     elif command == 'reindex':
         cmd_reindex(fts)
-
     elif command == 'search':
         if len(sys.argv) < 3:
             print("Usage: l4_fts5_search.py search <query>")
             sys.exit(1)
         query = ' '.join(sys.argv[2:])
         cmd_search(fts, query)
-
     elif command == 'stats':
         cmd_stats(fts)
-
     elif command == 'hybrid':
         if len(sys.argv) < 3:
             print("Usage: l4_fts5_search.py hybrid <query>")
             sys.exit(1)
         query = ' '.join(sys.argv[2:])
         cmd_hybrid(fts, query)
-
     else:
         print(f"Unknown command: {command}")
         print(__doc__)
