@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-L4 FTS5 Search - Fast keyword search for memory system
+L4 FTS5 Search – Fast keyword search for memory system
 
 Дополняет семантический поиск ChromaDB быстрым keyword-поиском через SQLite FTS5.
 Поддерживает чанковую индексацию, collapse до одного лучшего чанка на документ,
-и трёх-сигнальный гибридный поиск (FTS, semantic, BM25).
+трёх-сигнальный гибридный поиск (FTS, semantic, BM25) и финальный cross‑encoder
+реранкинг для повышения точности верхних результатов.
 
 Использование:
     python l4_fts5_search.py init          # Инициализация FTS5 таблицы
@@ -20,6 +21,7 @@ import os
 import sqlite3
 import subprocess
 import sys
+import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
@@ -32,39 +34,52 @@ from typing import Iterator, List, Optional, Tuple
 sys.path.insert(0, str(Path(__file__).parent))
 try:
     from cost_tracker import CostTracker
+
     COST_TRACKING_ENABLED = True
 except ImportError:
     COST_TRACKING_ENABLED = False
-
-# RRF ranker is local + stdlib-only, safe to import eagerly.
-# pylint: disable-next=wrong-import-position,import-error
-from ranking import normalize_existing_key, normalize_scores, rrf_merge  # noqa: E402
 
 # Common chunker (shared with semantic module)
 # pylint: disable-next=wrong-import-position,import-error
 from chunking import chunk_text  # noqa: E402
 
+# RRF ranker is local + stdlib-only, safe to import eagerly.
+# pylint: disable-next=wrong-import-position,import-error
+from ranking import normalize_existing_key, normalize_scores, rrf_merge  # noqa: E402
+
+# BM25 search (optional module)
+try:
+    from l4_bm25_search import fetch_bm25_results  # noqa: E402
+except ImportError:
+    fetch_bm25_results = None
+
+# Cross-encoder reranker (optional module)
+try:
+    from l4_rerank import rerank as l4_rerank  # noqa: E402
+except ImportError:
+    l4_rerank = None
+
 # Настройка UTF-8 для Windows
-if sys.platform == 'win32':
+if sys.platform == "win32":
     import codecs
-    if hasattr(sys.stdout, 'buffer'):
-        sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
-        sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'strict')
+
+    if hasattr(sys.stdout, "buffer"):
+        sys.stdout = codecs.getwriter("utf-8")(sys.stdout.buffer, "strict")
+        sys.stderr = codecs.getwriter("utf-8")(sys.stderr.buffer, "strict")
 
 # Настройка логирования
-logging.basicConfig(
-    level=logging.INFO,
-    format='[%(levelname)s] %(message)s'
-)
+logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 
 
 # ---------------------------------------------------------------------------
 # Data model
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class SearchResult:
     """Результат поиска"""
+
     path: str
     snippet: str
     rank: float
@@ -74,7 +89,7 @@ class SearchResult:
 class L4FTS5Search:
     """FTS5 поиск для системы памяти"""
 
-    def __init__(self, db_path: Optional[Path] = None):
+    def __init__(self, db_path: Optional[Path] = None) -> None:
         self.home = Path.home()
         if db_path is None:
             db_path = self.home / ".claude" / "memory_fts5.db"
@@ -85,7 +100,7 @@ class L4FTS5Search:
         self.global_memory = self.home / ".claude" / "memory"
         self.projects_base = self.home / ".claude" / "projects"
 
-    def clear_cache(self):
+    def clear_cache(self) -> None:
         """Очистить кэш поиска (вызывать после reindex/index_file)"""
         self._cached_search.cache_clear()
 
@@ -129,7 +144,7 @@ class L4FTS5Search:
         Все чанки получают одинаковый path (для группировки в RRF),
         но разное содержимое (content).
         """
-        if md_file.name.startswith('.'):
+        if md_file.name.startswith("."):
             return False
 
         if not os.access(md_file, os.R_OK):
@@ -137,7 +152,7 @@ class L4FTS5Search:
             return False
 
         try:
-            content = md_file.read_text(encoding='utf-8')
+            content = md_file.read_text(encoding="utf-8")
             rel_path = str(md_file.relative_to(base_path))
             chunks = chunk_text(content)
 
@@ -145,7 +160,7 @@ class L4FTS5Search:
                 for chunk in chunks:
                     conn.execute(
                         "INSERT INTO memory_fts (path, source, content) VALUES (?, ?, ?)",
-                        (rel_path, source, chunk)
+                        (rel_path, source, chunk),
                     )
                 conn.commit()
             return True
@@ -183,7 +198,9 @@ class L4FTS5Search:
 
             with ThreadPoolExecutor(max_workers=4) as executor:
                 futures = {
-                    executor.submit(self._index_single_file, md_file, base_path, source): md_file
+                    executor.submit(
+                        self._index_single_file, md_file, base_path, source
+                    ): md_file
                     for md_file, base_path, source in files_to_index
                 }
                 for future in as_completed(futures):
@@ -209,22 +226,21 @@ class L4FTS5Search:
 
         try:
             with self._get_connection() as conn:
-                content = file_path.read_text(encoding='utf-8')
+                content = file_path.read_text(encoding="utf-8")
                 rel_path = file_path.name
                 conn.execute(
                     "DELETE FROM memory_fts WHERE path = ? AND source = ?",
-                    (rel_path, source)
+                    (rel_path, source),
                 )
                 chunks = chunk_text(content)
                 for chunk in chunks:
                     conn.execute(
                         "INSERT INTO memory_fts (path, source, content) VALUES (?, ?, ?)",
-                        (rel_path, source, chunk)
+                        (rel_path, source, chunk),
                     )
                 conn.commit()
                 logging.info(
-                    "Indexed: %s (%s) with %d chunks",
-                    rel_path, source, len(chunks)
+                    "Indexed: %s (%s) with %d chunks", rel_path, source, len(chunks)
                 )
                 self.clear_cache()
                 return True
@@ -253,15 +269,15 @@ class L4FTS5Search:
                     ORDER BY rank
                     LIMIT ?
                     """,
-                    (query, limit)
+                    (query, limit),
                 ).fetchall()
 
                 results = tuple(
                     SearchResult(
                         path=f"[{row['source']}] {row['path']}",
-                        snippet=row['snippet'],
-                        rank=row['rank'],
-                        source='fts5'
+                        snippet=row["snippet"],
+                        rank=row["rank"],
+                        source="fts5",
                     )
                     for row in rows
                 )
@@ -283,11 +299,11 @@ class L4FTS5Search:
                 input_tokens = len(query.split()) * 1.3
                 output_tokens = sum(len(r.snippet.split()) for r in results) * 1.3
                 tracker.track_operation(
-                    operation_type='fts5_search',
+                    operation_type="fts5_search",
                     input_tokens=int(input_tokens),
                     output_tokens=int(output_tokens),
-                    model='embedding',
-                    metadata=f"results: {len(results)}"
+                    model="embedding",
+                    metadata=f"results: {len(results)}",
                 )
             except Exception:  # nosec
                 logging.debug("Cost tracking failed")
@@ -307,18 +323,22 @@ class L4FTS5Search:
                 ).fetchall()
 
                 return {
-                    'total_documents': row['count'],
-                    'sources': {s['source']: s['count'] for s in sources},
-                    'db_path': str(self.db_path),
-                    'db_size_kb': round(self.db_path.stat().st_size / 1024, 1) if self.db_path.exists() else 0
+                    "total_documents": row["count"],
+                    "sources": {s["source"]: s["count"] for s in sources},
+                    "db_path": str(self.db_path),
+                    "db_size_kb": (
+                        round(self.db_path.stat().st_size / 1024, 1)
+                        if self.db_path.exists()
+                        else 0
+                    ),
                 }
         except Exception as e:  # nosec
             logging.error("Stats failed: %s", e)
             return {
-                'total_documents': 0,
-                'sources': {},
-                'db_path': str(self.db_path),
-                'db_size_kb': 0
+                "total_documents": 0,
+                "sources": {},
+                "db_path": str(self.db_path),
+                "db_size_kb": 0,
             }
 
 
@@ -326,7 +346,8 @@ class L4FTS5Search:
 # CLI commands (basic)
 # ---------------------------------------------------------------------------
 
-def cmd_init(fts: L4FTS5Search):
+
+def cmd_init(fts: L4FTS5Search) -> None:
     if fts.init_fts():
         print("[OK] FTS5 table initialized")
     else:
@@ -334,12 +355,12 @@ def cmd_init(fts: L4FTS5Search):
         sys.exit(1)
 
 
-def cmd_reindex(fts: L4FTS5Search):
+def cmd_reindex(fts: L4FTS5Search) -> None:
     count = fts.reindex_all()
     print(f"[OK] Reindexed {count} files")
 
 
-def cmd_search(fts: L4FTS5Search, query: str):
+def cmd_search(fts: L4FTS5Search, query: str) -> None:
     results = fts.search(query)
     print(f"\n[SEARCH] FTS5 Search: '{query}'")
     print(f"Found {len(results)} results\n")
@@ -349,20 +370,21 @@ def cmd_search(fts: L4FTS5Search, query: str):
         print()
 
 
-def cmd_stats(fts: L4FTS5Search):
+def cmd_stats(fts: L4FTS5Search) -> None:
     stats = fts.stats()
     print("\n[STATS] FTS5 Statistics:")
     print(f"   Total documents: {stats['total_documents']}")
     print(f"   DB size: {stats['db_size_kb']} KB")
     print(f"   DB path: {stats['db_path']}")
     print("\n   Sources:")
-    for source, count in stats['sources'].items():
+    for source, count in stats["sources"].items():
         print(f"      {source}: {count} documents")
 
 
 # ---------------------------------------------------------------------------
 # Helper: fetch semantic results via subprocess
 # ---------------------------------------------------------------------------
+
 
 def _fetch_semantic_results(query: str, timeout: int = 30) -> list[dict]:
     """Запускает семантический поиск и возвращает результаты в JSON."""
@@ -375,8 +397,8 @@ def _fetch_semantic_results(query: str, timeout: int = 30) -> list[dict]:
             [sys.executable, str(semantic_script), "search-all", query, "--json"],
             capture_output=True,
             text=True,
-            encoding='utf-8',
-            errors='replace',
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
             check=False,
         )
@@ -387,7 +409,8 @@ def _fetch_semantic_results(query: str, timeout: int = 30) -> list[dict]:
     if result.returncode != 0:
         logging.warning(
             "Semantic search exited %s: %s",
-            result.returncode, result.stderr.strip(),
+            result.returncode,
+            result.stderr.strip(),
         )
         return []
 
@@ -397,12 +420,13 @@ def _fetch_semantic_results(query: str, timeout: int = 30) -> list[dict]:
         logging.warning("Semantic JSON parse failed: %s", exc)
         return []
 
-    return payload.get('results', []) if isinstance(payload, dict) else []
+    return payload.get("results", []) if isinstance(payload, dict) else []
 
 
 # ---------------------------------------------------------------------------
 # Chunk / source management helpers
 # ---------------------------------------------------------------------------
+
 
 def limit_chunks(stream: list[dict], max_chunks: int) -> list[dict]:
     """Ограничить количество чанков на документ (debug tool)."""
@@ -454,58 +478,60 @@ def collapse_to_best_per_doc(stream: list[dict]) -> list[dict]:
 # Hybrid search (FTS + semantic + BM25)
 # ---------------------------------------------------------------------------
 
-def _print_merged_results(merged, fts_count: int, semantic_count: int, bm25_count: int = 0) -> None:
+
+def _print_source_hit(source_name: str, hit: dict) -> None:
+    """Print a single hit from a source in hybrid output."""
+    rank = hit.get("rank", "?")
+    contrib = hit.get("rrf_contribution", 0.0)
+    if source_name == "fts":
+        extra = hit.get("snippet", "").strip().replace("\n", " ")[:120]
+        print(f"    [{source_name} rank={rank} rrf={contrib:.4f}] {extra}")
+    elif source_name == "bm25":
+        score = hit.get("bm25_score", None)
+        extra = hit.get("snippet", "").strip().replace("\n", " ")[:120]
+        if score is not None:
+            print(
+                f"    [{source_name} rank={rank} rrf={contrib:.4f} score={score:.4f}] {extra}"
+            )
+        else:
+            print(f"    [{source_name} rank={rank} rrf={contrib:.4f}] {extra}")
+    else:
+        distance = hit.get("distance")
+        distance_str = (
+            f"{distance:.3f}" if isinstance(distance, (int, float)) else "n/a"
+        )
+        text = hit.get("text", "").strip().replace("\n", " ")[:120]
+        print(
+            f"    [{source_name} rank={rank} rrf={contrib:.4f} dist={distance_str}] {text}"
+        )
+
+
+def _print_merged_results(merged) -> None:
     """Форматирует и выводит объединённые результаты гибридного поиска."""
-    print(
-        f"\nMerged {len(merged)} unique result(s) "
-        f"(FTS: {fts_count}, Semantic: {semantic_count}, BM25: {bm25_count})"
-    )
+    print(f"\nMerged {len(merged)} unique result(s)")
     print("-" * 70)
 
     for i, entry in enumerate(merged[:10], 1):
         contributors = sorted(entry.sources.keys())
+        rerank_str = ""
+        if hasattr(entry, "rerank_score") and entry.rerank_score is not None:
+            rerank_str = f"  rerank={entry.rerank_score:.4f}"
         print(
             f"[{i}] {entry.key}  "
             f"score={entry.score:.4f}  "
-            f"normalized={entry.normalized_score:.3f}  "
+            f"normalized={entry.normalized_score:.3f}"
+            f"{rerank_str}  "
             f"sources=[{', '.join(contributors)}]"
         )
         for source_name in contributors:
             for hit in entry.sources[source_name]:
-                rank = hit.get("rank", "?")
-                contrib = hit.get("rrf_contribution", 0.0)
-                if source_name == "fts":
-                    extra = hit.get("snippet", "").strip().replace("\n", " ")[:120]
-                    print(
-                        f"    [{source_name} rank={rank} rrf={contrib:.4f}] {extra}"
-                    )
-                elif source_name == "bm25":
-                    score = hit.get("bm25_score", None)
-                    extra = hit.get("snippet", "").strip().replace("\n", " ")[:120]
-                    if score is not None:
-                        print(
-                            f"    [{source_name} rank={rank} rrf={contrib:.4f} score={score:.4f}] {extra}"
-                        )
-                    else:
-                        print(
-                            f"    [{source_name} rank={rank} rrf={contrib:.4f}] {extra}"
-                        )
-                else:
-                    distance = hit.get("distance")
-                    distance_str = (
-                        f"{distance:.3f}"
-                        if isinstance(distance, (int, float))
-                        else "n/a"
-                    )
-                    text = hit.get("text", "").strip().replace("\n", " ")[:120]
-                    print(
-                        f"    [{source_name} rank={rank} rrf={contrib:.4f} "
-                        f"dist={distance_str}] {text}"
-                    )
+                _print_source_hit(source_name, hit)
         print()
 
 
-def _validate_stream_source_type(stream: list[dict], expected: str, stream_name: str) -> None:
+def _validate_stream_source_type(
+    stream: list[dict], expected: str, stream_name: str
+) -> None:
     """Validate that all items in stream have correct source_type."""
     for i, item in enumerate(stream):
         if item.get("source_type") != expected:
@@ -515,23 +541,27 @@ def _validate_stream_source_type(stream: list[dict], expected: str, stream_name:
             )
 
 
-def cmd_hybrid(fts: L4FTS5Search, query: str):
+def cmd_hybrid(fts: L4FTS5Search, query: str, enable_rerank: bool = True) -> None:
     """
     Гибридный поиск: FTS5 + семантика + BM25 через Reciprocal Rank Fusion.
     Все источники независимы, каждый даёт ровно 1 сигнал на документ.
+    После слияния применяется опциональный cross-encoder реранкинг.
+
+    Args:
+        fts: L4FTS5Search instance
+        query: Search query
+        enable_rerank: Enable cross-encoder reranking (default: True)
     """
     fts_results = fts.search(query, limit=20)
     semantic_results = _fetch_semantic_results(query)
 
     # BM25 (optional module)
     bm25_results: list[dict] = []
-    try:
-        from l4_bm25_search import fetch_bm25_results  # noqa: E402
-        bm25_results = fetch_bm25_results(query)
-    except ImportError:
-        pass
-    except Exception as exc:
-        logging.warning("BM25 search failed: %s", exc)
+    if fetch_bm25_results is not None:
+        try:
+            bm25_results = fetch_bm25_results(query)
+        except Exception as exc:
+            logging.warning("BM25 search failed: %s", exc)
 
     # Формируем потоки с явным source_type
     fts_stream = [
@@ -546,8 +576,11 @@ def cmd_hybrid(fts: L4FTS5Search, query: str):
     ]
 
     semantic_stream = [
-        {**hit, "key": normalize_existing_key(hit.get("key", "")),
-         "source_type": "semantic"}
+        {
+            **hit,
+            "key": normalize_existing_key(hit.get("key", "")),
+            "source_type": "semantic",
+        }
         for hit in semantic_results
     ]
 
@@ -581,16 +614,34 @@ def cmd_hybrid(fts: L4FTS5Search, query: str):
 
     merged = normalize_scores(
         rrf_merge(
-            ("fts", fts_stream),
-            ("semantic", semantic_stream),
-            ("bm25", bm25_stream)
+            ("fts", fts_stream), ("semantic", semantic_stream), ("bm25", bm25_stream)
         )
     )
-    _print_merged_results(merged, len(fts_stream), len(semantic_stream), len(bm25_stream))
+
+    # Опциональный cross‑encoder реранкинг
+    if enable_rerank and l4_rerank is not None and merged:
+        print(f"\n[RERANKING] Applying cross-encoder to top-{min(20, len(merged))} results...")
+        rerank_start = time.time()
+
+        # Сохраняем порядок до reranking для сравнения
+        keys_before = [r.key for r in merged[:10]]
+
+        merged = l4_rerank(query, merged[:20])
+
+        rerank_time = time.time() - rerank_start
+        keys_after = [r.key for r in merged[:10]]
+
+        # Подсчёт изменений в топ-10
+        changes = sum(1 for i in range(min(len(keys_before), len(keys_after)))
+                     if keys_before[i] != keys_after[i])
+
+        print(f"[RERANKING] Completed in {rerank_time:.3f}s, {changes}/{len(keys_before)} positions changed in top-10")
+
+    _print_merged_results(merged)
 
 
-def main():
-    """CLI интерфейс"""
+def main() -> None:
+    """CLI интерфейс."""
     if len(sys.argv) < 2:
         print(__doc__)
         sys.exit(1)
@@ -598,29 +649,41 @@ def main():
     command = sys.argv[1]
     fts = L4FTS5Search()
 
-    if command == 'init':
+    if command == "init":
         cmd_init(fts)
-    elif command == 'reindex':
+    elif command == "reindex":
         cmd_reindex(fts)
-    elif command == 'search':
+    elif command == "search":
         if len(sys.argv) < 3:
             print("Usage: l4_fts5_search.py search <query>")
             sys.exit(1)
-        query = ' '.join(sys.argv[2:])
+        query = " ".join(sys.argv[2:])
         cmd_search(fts, query)
-    elif command == 'stats':
+    elif command == "stats":
         cmd_stats(fts)
-    elif command == 'hybrid':
+    elif command == "hybrid":
         if len(sys.argv) < 3:
-            print("Usage: l4_fts5_search.py hybrid <query>")
+            print("Usage: l4_fts5_search.py hybrid [--no-rerank] <query>")
             sys.exit(1)
-        query = ' '.join(sys.argv[2:])
-        cmd_hybrid(fts, query)
+
+        # Parse flags
+        enable_rerank = True
+        args = sys.argv[2:]
+        if "--no-rerank" in args:
+            enable_rerank = False
+            args.remove("--no-rerank")
+
+        if not args:
+            print("Usage: l4_fts5_search.py hybrid [--no-rerank] <query>")
+            sys.exit(1)
+
+        query = " ".join(args)
+        cmd_hybrid(fts, query, enable_rerank=enable_rerank)
     else:
         print(f"Unknown command: {command}")
         print(__doc__)
         sys.exit(1)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

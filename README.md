@@ -15,6 +15,8 @@
 
 - **4-Layer Memory Architecture** - HOT (24h) в†’ WARM (14d) в†’ COLD (permanent) в†’ SEMANTIC (indexed)
 - **Dual-Level System** - Global memory (cross-project) + Project memory (project-specific)
+- **Hybrid Search** - Multi-signal retrieval combining FTS5, semantic search, and BM25 via Reciprocal Rank Fusion (RRF)
+- **Cross-Encoder Reranking** - Final precision boost using `cross-encoder/ms-marco-MiniLM-L-6-v2` for top-20 results
 - **Semantic Search** - Find information by meaning, not keywords (multilingual support)
 - **Linguistic Triggers** - Automatic context retrieval on natural language signals (inspired by Claude Opus 4.7)
   - Possessive pronouns: "my project", "our code"
