@@ -26,8 +26,8 @@ with open('handoff.md', 'ab') as f:
 ```
 
 The result is **mojibake** - corrupted text that looks like:
-- `РџСЂРѕРµРєС‚` instead of `Проект`
-- `РёСЃС‚РѕСЂРёСЏ` instead of `история`
+- `Проект` instead of `Проект`
+- `история` instead of `история`
 
 ### User-Visible Symptoms
 
@@ -135,7 +135,7 @@ Attempts to invert cp1251-as-utf8 mojibake via round-trip decoding.
 
 **Usage:**
 ```python
-corrupted = "РџСЂРѕРµРєС‚"  # mojibake
+corrupted = "Проект"  # mojibake
 repaired, fixed = EncodingGate.repair_mojibake(corrupted)
 # repaired = "Проект", fixed = True
 ```

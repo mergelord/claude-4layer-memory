@@ -328,3 +328,92 @@ def test_rrf_merges_after_cross_source_normalisation():
     assert len(merged) == 1
     assert merged[0].key == "[my_app] handoff.md"
     assert set(merged[0].sources.keys()) == {"fts", "semantic"}
+
+
+# ---------------------------------------------------------------------------
+# New guards: empty key, duplicate source, original_rank preservation
+# ---------------------------------------------------------------------------
+
+
+def test_empty_key_raises():
+    """Empty string key is a programming error — fail loud."""
+    with pytest.raises(ValueError, match="empty 'key'"):
+        rrf_merge(("fts", [{"key": ""}]))
+
+
+def test_whitespace_only_key_raises():
+    """Whitespace-only key is effectively empty after strip."""
+    with pytest.raises(ValueError, match="empty 'key'"):
+        rrf_merge(("fts", [{"key": "   "}]))
+
+
+def test_duplicate_source_name_raises():
+    """Two streams with the same name is ambiguous — fail loud."""
+    with pytest.raises(ValueError, match="Duplicate source_name"):
+        rrf_merge(("fts", [{"key": "a.md"}]), ("fts", [{"key": "b.md"}]))
+
+
+def test_original_rank_preserved_when_item_has_rank_field():
+    """If input item already has 'rank', it must be saved as 'original_rank'."""
+    items = [{"key": "doc.md", "rank": 42, "bm25": 0.8}]
+    merged = rrf_merge(("fts", items))
+
+    payload = merged[0].sources["fts"][0]
+    assert payload["original_rank"] == 42
+    assert payload["rank"] == 1
+    assert payload["bm25"] == 0.8
+
+
+def test_no_original_rank_when_item_lacks_rank_field():
+    """If input item has no 'rank' field, 'original_rank' must not appear."""
+    items = [{"key": "doc.md", "bm25": 0.8}]
+    merged = rrf_merge(("fts", items))
+
+    payload = merged[0].sources["fts"][0]
+    assert "original_rank" not in payload
+    assert payload["rank"] == 1
+
+
+# ---------------------------------------------------------------------------
+# _validate_key_shape — chunk-level key detection
+# ---------------------------------------------------------------------------
+
+
+def test_validate_key_shape_warns_on_chunk_pattern(caplog):
+    """Chunk-like keys trigger a warning (once per unique key)."""
+    import logging
+
+    items = [
+        {"key": "file.md#chunk_3"},
+        {"key": "file.md#chunk_3"},
+    ]
+    with caplog.at_level(logging.WARNING):
+        rrf_merge(("fts", items))
+
+    warnings = [r for r in caplog.records if "chunk-level" in r.message]
+    assert len(warnings) == 1
+
+
+def test_validate_key_shape_no_warning_on_normal_key(caplog):
+    """Normal document-level keys must not trigger warnings."""
+    import logging
+
+    items = [{"key": "[global] handoff.md"}]
+    with caplog.at_level(logging.WARNING):
+        rrf_merge(("fts", items))
+
+    warnings = [r for r in caplog.records if "chunk-level" in r.message]
+    assert len(warnings) == 0
+
+
+# ---------------------------------------------------------------------------
+# normalize_scores — inf protection
+# ---------------------------------------------------------------------------
+
+
+def test_normalize_scores_handles_inf_score():
+    """If a score is somehow inf, normalization must not produce nan."""
+    results = [RankedResult(key="a", score=float('inf')), RankedResult(key="b", score=1.0)]
+    out = normalize_scores(results)
+
+    assert all(r.normalized_score == 0.0 for r in out)

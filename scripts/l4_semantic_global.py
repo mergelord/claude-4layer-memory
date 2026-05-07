@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# pylint: disable=wrong-import-position, import-outside-toplevel
 # -*- coding: utf-8 -*-
 """
 L4 Semantic Global Memory Layer (Hybrid-ready)
@@ -23,13 +24,12 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 # Force UTF-8 output on Windows to prevent UnicodeEncodeError with emojis
-if sys.platform == 'win32':
-    sys.stdout.reconfigure(encoding='utf-8')
-    sys.stderr.reconfigure(encoding='utf-8')
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
 
 import chromadb
 from chromadb.config import Settings
-
 # Common chunker (shared with FTS5 and future BM25)
 # pylint: disable=import-error
 from chunking import chunk_text  # noqa: E402
@@ -157,8 +157,10 @@ class GlobalSemanticMemory:
     # MAIN SEARCH
     # ----------------------------
 
-    # pylint: disable=too-many-locals
-    def search_all(self, query: str, n_results: int = 10, enable_rerank: bool = False) -> List[Dict[str, Any]]:
+    # pylint: disable=too-many-branches, too-many-statements, too-many-locals
+    def search_all(
+        self, query: str, n_results: int = 10, enable_rerank: bool = False
+    ) -> List[Dict[str, Any]]:
         """
         Semantic cross-project search (hybrid-ready).
         Возвращает список результатов, каждый с ключом 'key' для RRF
@@ -270,7 +272,10 @@ class GlobalSemanticMemory:
         # OPTIONAL RERANKING
         # ------------------------
         if enable_rerank and l4_rerank is not None and final:
-            logging.info("[RERANKING] Applying cross-encoder to %d semantic results...", len(final))
+            logging.info(
+                "[RERANKING] Applying cross-encoder to %d semantic results...",
+                len(final),
+            )
             rerank_start = time.time()
 
             # Convert to RankedResult format for reranking
@@ -281,8 +286,16 @@ class GlobalSemanticMemory:
                 candidates.append(
                     RankedResult(
                         key=result["key"],
-                        score=1.0 / (1.0 + result["distance"]),  # Convert distance to score
-                        sources={"semantic": [{"snippet": result["text"], "distance": result["distance"]}]}
+                        score=1.0
+                        / (1.0 + result["distance"]),  # Convert distance to score
+                        sources={
+                            "semantic": [
+                                {
+                                    "snippet": result["text"],
+                                    "distance": result["distance"],
+                                }
+                            ]
+                        },
                     )
                 )
 

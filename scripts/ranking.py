@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """Reciprocal Rank Fusion (RRF) ranking for hybrid memory search.
 
 Combines two or more independent ranking streams (e.g. FTS5 BM25 and
@@ -51,7 +50,7 @@ Public API
 - :func:`rrf_merge` — variadic merge over named streams.
 - :func:`normalize_scores` — adds ``normalized_score`` field in [0, 1].
 
-References
+References:
 ----------
 Cormack et al., "Reciprocal Rank Fusion outperforms Condorcet and
 Individual Rank Learning Methods", SIGIR 2009.
@@ -86,6 +85,7 @@ If ``DEFAULT_K`` is ever changed, the calibration tests must be
 re-run against representative real memory data — the ``k=60`` choice
 is anchored on the consensus-vs-dominance trade-off, not on Cormack's
 original empirical retrieval benchmarks.
+
 """
 
 from __future__ import annotations
@@ -93,7 +93,10 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Any, Iterable, List, Mapping, Tuple
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Mapping
 
 DEFAULT_K = 60
 """Standard RRF damping constant (Cormack 2009).
@@ -105,11 +108,11 @@ operator. See the module docstring's "Why k=60" section and
 that fix this contract.
 """
 
-_KEY_PATTERN = re.compile(r'^\[([^\]]+)\]\s+(.+)$')
-_SOURCE_NON_ALNUM = re.compile(r'[^a-zA-Z0-9_]')
-_SOURCE_REPEATED_UNDERSCORE = re.compile(r'_+')
+_KEY_PATTERN = re.compile(r"^\[([^\]]+)\]\s+(.+)$")
+_SOURCE_NON_ALNUM = re.compile(r"[^a-zA-Z0-9_]")
+_SOURCE_REPEATED_UNDERSCORE = re.compile(r"_+")
 
-_CHUNK_PATTERN = re.compile(r'(#\w+|[?&]chunk=)')
+_CHUNK_PATTERN = re.compile(r"(#\w+|[?&]chunk=)")
 _SEEN_BAD_KEYS: set[str] = set()
 
 
@@ -126,9 +129,8 @@ def _normalize_source(source: str) -> str:
     """
     if not source:
         return ""
-    normalised = _SOURCE_NON_ALNUM.sub('_', source)
-    normalised = _SOURCE_REPEATED_UNDERSCORE.sub('_', normalised).strip('_')
-    return normalised
+    normalised = _SOURCE_NON_ALNUM.sub("_", source)
+    return _SOURCE_REPEATED_UNDERSCORE.sub("_", normalised).strip("_")
 
 
 def make_join_key(source: str, filename: str) -> str:
@@ -144,6 +146,7 @@ def make_join_key(source: str, filename: str) -> str:
 
     Returns:
         A string of the form ``"[normalised_source] filename"``.
+
     """
     return f"[{_normalize_source(source)}] {filename}"
 
@@ -193,18 +196,20 @@ class RankedResult:
         sources: Mapping of source-name → list of per-hit explanations.
             Stored as a list (not dict) so multiple chunks from the
             same source for the same key are preserved.
+
     """
 
     key: str
     score: float = 0.0
     normalized_score: float = 0.0
-    sources: dict[str, List[dict[str, Any]]] = field(default_factory=dict)
+    sources: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    rerank_score: float | None = None
 
 
 def rrf_merge(
-    *streams: Tuple[str, Iterable[Mapping[str, Any]]],
+    *streams: tuple[str, Iterable[Mapping[str, Any]]],
     k: int = DEFAULT_K,
-) -> List[RankedResult]:
+) -> list[RankedResult]:
     """Merge two or more ranking streams via Reciprocal Rank Fusion.
 
     Args:
@@ -238,29 +243,35 @@ def rrf_merge(
         >>> merged = rrf_merge(("fts", fts), ("semantic", sem))
         >>> [r.key for r in merged]
         ['a.md', 'b.md', 'c.md']
+
     """
     if k < 0:
-        raise ValueError(f"rrf k must be non-negative, got {k}")
+        msg = f"rrf k must be non-negative, got {k}"
+        raise ValueError(msg)
 
     seen_sources: set[str] = set()
     accumulator: dict[str, RankedResult] = {}
 
     for source_name, items in streams:
         if source_name in seen_sources:
-            raise ValueError(f"Duplicate source_name: {source_name!r}")
+            msg = f"Duplicate source_name: {source_name!r}"
+            raise ValueError(msg)
         seen_sources.add(source_name)
 
         for rank, item in enumerate(items, start=1):
             if "key" not in item:
-                raise ValueError(
+                msg = (
                     f"stream {source_name!r}: item at rank {rank} is "
                     f"missing required 'key' field: {item!r}"
                 )
+                raise ValueError(
+                    msg,
+                )
             key = str(item["key"]).strip()
             if not key:
+                msg = f"stream {source_name!r}: item at rank {rank} has empty 'key'"
                 raise ValueError(
-                    f"stream {source_name!r}: item at rank {rank} has "
-                    f"empty 'key'"
+                    msg,
                 )
 
             _validate_key_shape(key)
@@ -270,7 +281,9 @@ def rrf_merge(
             entry = accumulator.setdefault(key, RankedResult(key=key))
             entry.score += contribution
 
-            payload = {field_: value for field_, value in item.items() if field_ != "key"}
+            payload = {
+                field_: value for field_, value in item.items() if field_ != "key"
+            }
             if "rank" in payload:
                 payload["original_rank"] = payload.pop("rank")
             payload["rank"] = rank
@@ -281,7 +294,7 @@ def rrf_merge(
     return sorted(accumulator.values(), key=lambda r: (-r.score, r.key))
 
 
-def normalize_scores(results: List[RankedResult]) -> List[RankedResult]:
+def normalize_scores(results: list[RankedResult]) -> list[RankedResult]:
     """Set ``normalized_score`` on every result in-place and return it.
 
     Normalises against the maximum score in ``results`` so the top hit
@@ -297,12 +310,13 @@ def normalize_scores(results: List[RankedResult]) -> List[RankedResult]:
 
     Returns:
         The same list, returned for chaining.
+
     """
     if not results:
         return results
 
     max_score = max(r.score for r in results)
-    if not (max_score > 0 and max_score != float('inf')):
+    if not (max_score > 0 and max_score != float("inf")):
         for r in results:
             r.normalized_score = 0.0
         return results

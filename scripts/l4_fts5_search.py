@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# pylint: disable=wrong-import-position, import-outside-toplevel
 # -*- coding: utf-8 -*-
 """
 L4 FTS5 Search – Fast keyword search for memory system
@@ -30,9 +31,9 @@ from functools import lru_cache
 from pathlib import Path
 
 # Force UTF-8 output on Windows to prevent UnicodeEncodeError
-if sys.platform == 'win32':
-    sys.stdout.reconfigure(encoding='utf-8')
-    sys.stderr.reconfigure(encoding='utf-8')
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
 from typing import Iterator, List, Optional, Tuple
 
 # Импорт cost tracker
@@ -47,10 +48,10 @@ except ImportError:
 # Common chunker (shared with semantic module)
 # pylint: disable-next=wrong-import-position,import-error
 from chunking import chunk_text  # noqa: E402
-
 # RRF ranker is local + stdlib-only, safe to import eagerly.
 # pylint: disable-next=wrong-import-position,import-error
-from ranking import normalize_existing_key, normalize_scores, rrf_merge  # noqa: E402
+from ranking import (normalize_existing_key, normalize_scores,  # noqa: E402
+                     rrf_merge)
 
 # BM25 search (optional module)
 try:
@@ -510,6 +511,8 @@ def _print_source_hit(source_name: str, hit: dict) -> None:
             f"    [{source_name} rank={rank} rrf={contrib:.4f} dist={distance_str}] {text}"
         )
 
+    # pylint: disable=too-many-locals
+
 
 def _print_merged_results(merged) -> None:
     """Форматирует и выводит объединённые результаты гибридного поиска."""
@@ -625,7 +628,9 @@ def cmd_hybrid(fts: L4FTS5Search, query: str, enable_rerank: bool = True) -> Non
 
     # Опциональный cross‑encoder реранкинг
     if enable_rerank and l4_rerank is not None and merged:
-        print(f"\n[RERANKING] Applying cross-encoder to top-{min(20, len(merged))} results...")
+        print(
+            f"\n[RERANKING] Applying cross-encoder to top-{min(20, len(merged))} results..."
+        )
         rerank_start = time.time()
 
         # Сохраняем порядок до reranking для сравнения
@@ -637,10 +642,15 @@ def cmd_hybrid(fts: L4FTS5Search, query: str, enable_rerank: bool = True) -> Non
         keys_after = [r.key for r in merged[:10]]
 
         # Подсчёт изменений в топ-10
-        changes = sum(1 for i in range(min(len(keys_before), len(keys_after)))
-                     if keys_before[i] != keys_after[i])
+        changes = sum(
+            1
+            for i in range(min(len(keys_before), len(keys_after)))
+            if keys_before[i] != keys_after[i]
+        )
 
-        print(f"[RERANKING] Completed in {rerank_time:.3f}s, {changes}/{len(keys_before)} positions changed in top-10")
+        print(
+            f"[RERANKING] Completed in {rerank_time:.3f}s, {changes}/{len(keys_before)} positions changed in top-10"
+        )
 
     _print_merged_results(merged)
 

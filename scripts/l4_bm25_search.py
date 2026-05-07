@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-L4 BM25 Search – независимый лексический источник для гибридного поиска.
+"""L4 BM25 Search – независимый лексический источник для гибридного поиска.
 
 Использует функцию bm25() встроенного FTS5-движка SQLite.
 Возвращает результаты в контракте, ожидаемом RRF-слиянием.
@@ -16,15 +14,16 @@ L4 BM25 Search – независимый лексический источни�
 
 import logging
 import sqlite3
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, Iterator, List
+from typing import Any
 
 # Параметры snippet() функции FTS5
 SNIPPET_COLUMN = 2  # Индекс колонки content в FTS таблице
-SNIPPET_START_MARKER = '»'
-SNIPPET_END_MARKER = '«'
-SNIPPET_ELLIPSIS = '...'
+SNIPPET_START_MARKER = "»"
+SNIPPET_END_MARKER = "«"
+SNIPPET_ELLIPSIS = "..."
 SNIPPET_MAX_TOKENS = 60  # Максимум токенов в snippet
 
 
@@ -46,9 +45,8 @@ def _get_fts5_connection() -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
-def fetch_bm25_results(query: str, limit: int = 20) -> List[Dict[str, Any]]:
-    """
-    Возвращает список результатов BM25-поиска, готовых для подачи в RRF.
+def fetch_bm25_results(query: str, limit: int = 20) -> list[dict[str, Any]]:
+    """Возвращает список результатов BM25-поиска, готовых для подачи в RRF.
 
     Использует встроенную функцию bm25() в SQLite FTS5 для ранжирования.
     BM25 scores отрицательные — чем ближе к 0, тем релевантнее документ.
@@ -67,6 +65,7 @@ def fetch_bm25_results(query: str, limit: int = 20) -> List[Dict[str, Any]]:
         '[global] architecture.md'
         >>> results[0]["source_type"]
         'bm25'
+
     """
     results = []
 
@@ -91,23 +90,27 @@ def fetch_bm25_results(query: str, limit: int = 20) -> List[Dict[str, Any]]:
                     SNIPPET_ELLIPSIS,
                     SNIPPET_MAX_TOKENS,
                     query,
-                    limit
-                )
+                    limit,
+                ),
             ).fetchall()
 
         for i, row in enumerate(rows, start=1):
-            results.append({
-                "key": f"[{row['source']}] {row['path']}",
-                "rank": i,
-                "bm25_score": row['bm25_score'],
-                "snippet": row['snippet'],
-                "source_type": "bm25",
-            })
+            results.append(
+                {
+                    "key": f"[{row['source']}] {row['path']}",
+                    "rank": i,
+                    "bm25_score": row["bm25_score"],
+                    "snippet": row["snippet"],
+                    "source_type": "bm25",
+                },
+            )
 
     except Exception as exc:
         logging.warning(
             "BM25 search failed (query=%r, limit=%d): %s",
-            query, limit, exc
+            query,
+            limit,
+            exc,
         )
         return []
 

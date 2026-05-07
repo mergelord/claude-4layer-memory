@@ -111,7 +111,7 @@ def test_update_handoff_rejects_cp1251_mojibake(
     # mojibake pattern from sub-shell output).
     poisoned_summary = (
         "## 2025-01-15 - Session completed\n\n"
-        "Р\u00a0РµС„Р°РєС‚РѕСЂРёРЅРі 6 РјРѕРґСѓР»РµР№\n---\n"
+        "Р\u00a0ефакторинг 6 модулей\n---\n"
     )
 
     with pytest.raises(stop_hook.EncodingError):
@@ -167,7 +167,7 @@ def test_update_memory_rejects_cp1251_mojibake(
     memory = tmp_path / "handoff.md"
     poisoned_entry = (
         "## 2025-01-15 - Git\n\n"
-        "Р\u00a0РµС„Р°РєС‚РѕСЂРёРЅРі 6 РјРѕРґСѓР»РµР№\n---\n"
+        "Р\u00a0ефакторинг 6 модулей\n---\n"
     )
 
     with pytest.raises(git_hook.EncodingError):
@@ -195,7 +195,7 @@ def test_update_memory_preserves_existing_legacy_mojibake(
         "**Последнее обновление:** 2024-01-01 00:00\n\n"
         "---\n\n"
         "## 2024-01-01 - Old session\n\n"
-        "Р\u00a0РµС„Р°РєС‚РѕСЂРёРЅРі (legacy mojibake)\n\n---\n"
+        "Р\u00a0ефакторинг (legacy mojibake)\n\n---\n"
     )
     memory.write_text(legacy_content, encoding="utf-8")
 
@@ -207,4 +207,4 @@ def test_update_memory_preserves_existing_legacy_mojibake(
     final = memory.read_text(encoding="utf-8")
     assert "Ключевая правка" in final
     # Legacy mojibake remains on disk: hook is non-destructive.
-    assert "Р\u00a0РµС„Р°РєС‚РѕСЂРёРЅРі" in final
+    assert "Р\u00a0ефакторинг" in final

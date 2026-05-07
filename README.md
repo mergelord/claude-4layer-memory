@@ -1,4 +1,4 @@
-﻿# Claude 4-Layer Memory System
+# Claude 4-Layer Memory System
 
 **Version 1.3.1**
 

@@ -43,22 +43,22 @@ class RegexPatterns:
     """Compiled regex patterns for better performance"""
 
     # Frontmatter extraction
-    FRONTMATTER = re.compile(r'^---\s*\n(.*?)\n---\s*\n', re.DOTALL)
+    FRONTMATTER = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 
     # Link patterns
-    LINK_PATTERN = re.compile(r'\[([^\]]+)\]\(([^\)]+)\)')
-    MARKDOWN_LINK = re.compile(r'\[([^\]]+)\]\(([^\)]+\.md)\)')
+    LINK_PATTERN = re.compile(r"\[([^\]]+)\]\(([^\)]+)\)")
+    MARKDOWN_LINK = re.compile(r"\[([^\]]+)\]\(([^\)]+\.md)\)")
 
     # Frontmatter field patterns
-    FIELD_NAME = re.compile(r'^name:\s*(.+)$', re.MULTILINE)
-    FIELD_DESCRIPTION = re.compile(r'^description:\s*(.+)$', re.MULTILINE)
-    FIELD_TYPE = re.compile(r'^type:\s*(.+)$', re.MULTILINE)
+    FIELD_NAME = re.compile(r"^name:\s*(.+)$", re.MULTILINE)
+    FIELD_DESCRIPTION = re.compile(r"^description:\s*(.+)$", re.MULTILINE)
+    FIELD_TYPE = re.compile(r"^type:\s*(.+)$", re.MULTILINE)
 
     # Date patterns
-    DATE_PATTERN = re.compile(r'\b(20\d{2}[-/]\d{2}[-/]\d{2})\b')
+    DATE_PATTERN = re.compile(r"\b(20\d{2}[-/]\d{2}[-/]\d{2})\b")
 
     # Special characters for sanitization
-    SPECIAL_CHARS = re.compile(r'[^\w\s\-.,!?]')
+    SPECIAL_CHARS = re.compile(r"[^\w\s\-.,!?]")
 
 
 class CheckResultHandler:
@@ -74,10 +74,7 @@ class CheckResultHandler:
         self.reporter = reporter
 
     def handle_check_result(
-        self,
-        results: List[Any],
-        check_name: str,
-        show_details: bool = True
+        self, results: List[Any], check_name: str, show_details: bool = True
     ) -> List[Any]:
         """
         Handle check results with consistent formatting
@@ -103,10 +100,7 @@ class CheckResultHandler:
         return results
 
     def handle_check_dict_result(
-        self,
-        results: List[dict],
-        check_name: str,
-        key_field: str = 'file'
+        self, results: List[dict], check_name: str, key_field: str = "file"
     ) -> List[dict]:
         """
         Handle dictionary check results
@@ -124,8 +118,8 @@ class CheckResultHandler:
         if results:
             self.reporter.print_warn(f"Found {len(results)} issue(s)")
             for result in results:
-                key = result.get(key_field, 'unknown')
-                message = result.get('message', str(result))
+                key = result.get(key_field, "unknown")
+                message = result.get("message", str(result))
                 self.reporter.print_info(f"  {key}: {message}")
         else:
             self.reporter.print_ok("No issues found")
@@ -146,10 +140,7 @@ class SafeFileOperations:
         self.reporter = reporter
 
     def safe_file_operation(
-        self,
-        file_path: Path,
-        operation: Callable[[Path], Any],
-        default: Any = None
+        self, file_path: Path, operation: Callable[[Path], Any], default: Any = None
     ) -> Any:
         """
         Execute file operation with error handling
@@ -174,7 +165,7 @@ class SafeFileOperations:
             self.reporter.print_warn(f"Error processing {file_path}: {exc}")
             return default
 
-    def safe_read_text(self, file_path: Path, encoding: str = 'utf-8') -> str:
+    def safe_read_text(self, file_path: Path, encoding: str = "utf-8") -> str:
         """
         Safely read file text
 
@@ -186,9 +177,7 @@ class SafeFileOperations:
             File content or empty string on error
         """
         return self.safe_file_operation(
-            file_path,
-            lambda p: p.read_text(encoding=encoding),
-            default=""
+            file_path, lambda p: p.read_text(encoding=encoding), default=""
         )
 
     def safe_read_bytes(self, file_path: Path) -> bytes:
@@ -202,9 +191,7 @@ class SafeFileOperations:
             File content or empty bytes on error
         """
         return self.safe_file_operation(
-            file_path,
-            lambda p: p.read_bytes(),
-            default=b""
+            file_path, lambda p: p.read_bytes(), default=b""
         )
 
     def safe_stat(self, file_path: Path) -> Optional[Any]:
@@ -217,11 +204,7 @@ class SafeFileOperations:
         Returns:
             File stats or None on error
         """
-        return self.safe_file_operation(
-            file_path,
-            lambda p: p.stat(),
-            default=None
-        )
+        return self.safe_file_operation(file_path, lambda p: p.stat(), default=None)
 
 
 class FrontmatterExtractor:
@@ -247,13 +230,13 @@ class FrontmatterExtractor:
 
         # Extract common fields
         if name_match := RegexPatterns.FIELD_NAME.search(frontmatter_text):
-            result['name'] = name_match.group(1).strip()
+            result["name"] = name_match.group(1).strip()
 
         if desc_match := RegexPatterns.FIELD_DESCRIPTION.search(frontmatter_text):
-            result['description'] = desc_match.group(1).strip()
+            result["description"] = desc_match.group(1).strip()
 
         if type_match := RegexPatterns.FIELD_TYPE.search(frontmatter_text):
-            result['type'] = type_match.group(1).strip()
+            result["type"] = type_match.group(1).strip()
 
         return result
 
@@ -272,7 +255,7 @@ class FrontmatterExtractor:
         for match in RegexPatterns.LINK_PATTERN.finditer(content):
             link = match.group(2)
             # Skip external links and anchors
-            if not link.startswith(('http://', 'https://', '#')):
+            if not link.startswith(("http://", "https://", "#")):
                 links.append(link)
         return links
 
@@ -291,7 +274,7 @@ class ValidationHelpers:
         Returns:
             True if valid type
         """
-        valid_types = {'user', 'feedback', 'project', 'reference'}
+        valid_types = {"user", "feedback", "project", "reference"}
         return memory_type.lower() in valid_types
 
     @staticmethod
@@ -305,7 +288,7 @@ class ValidationHelpers:
         Returns:
             Sanitized text
         """
-        return RegexPatterns.SPECIAL_CHARS.sub('', text)
+        return RegexPatterns.SPECIAL_CHARS.sub("", text)
 
     @staticmethod
     def extract_dates(content: str) -> List[str]:
@@ -319,6 +302,7 @@ class ValidationHelpers:
             List of date strings
         """
         return RegexPatterns.DATE_PATTERN.findall(content)
+
 
 class EncodingError(ValueError):
     """Raised when text written to a memory file would corrupt it.
@@ -384,7 +368,7 @@ class EncodingGate:
         ...     print(f"Fixed: {', '.join(changes)}")
     """
 
-    REPLACEMENT_CHAR = '\ufffd'
+    REPLACEMENT_CHAR = "\ufffd"
 
     # cp1251-as-utf8 mojibake signature.
     #
@@ -399,7 +383,7 @@ class EncodingGate:
     # U+0080..U+00BF. Normal Russian text never produces this pair,
     # because a Cyrillic ``Р`` / ``С`` is followed by another
     # Cyrillic letter, never by a Latin-1 punctuation glyph.
-    _MOJIBAKE_RE = re.compile(r'[\u0420\u0421][\u0080-\u00bf]')
+    _MOJIBAKE_RE = re.compile(r"[\u0420\u0421][\u0080-\u00bf]")
 
     @classmethod
     def assert_clean(cls, text: str, *, source: str = "<unknown>") -> None:
@@ -482,7 +466,7 @@ class EncodingGate:
                 decoded string fails ``assert_clean``.
         """
         try:
-            text = data.decode('utf-8')
+            text = data.decode("utf-8")
         except UnicodeDecodeError as exc:
             raise EncodingError(
                 f"Bytes from {source} are not valid UTF-8 "
@@ -504,13 +488,17 @@ class EncodingGate:
     # and the General Punctuation block (e.g. ``„`` = U+201E from
     # cp1251 0x84). We compute the set programmatically once at
     # class-load time so it stays in sync with Python's cp1251 codec.
-    _CP1251_HIGH_GLYPHS = ''.join(sorted({
-        bytes([b]).decode('cp1251')
-        for b in range(0x80, 0x100)
-        if b != 0x98  # cp1251 0x98 has no defined mapping
-    }))
+    _CP1251_HIGH_GLYPHS = "".join(
+        sorted(
+            {
+                bytes([b]).decode("cp1251")
+                for b in range(0x80, 0x100)
+                if b != 0x98  # cp1251 0x98 has no defined mapping
+            }
+        )
+    )
     _MOJIBAKE_RUN_RE = re.compile(
-        r'(?:[\u0420\u0421][' + re.escape(_CP1251_HIGH_GLYPHS) + r']){2,}'
+        r"(?:[\u0420\u0421][" + re.escape(_CP1251_HIGH_GLYPHS) + r"]){2,}"
     )
 
     @classmethod
@@ -534,7 +522,7 @@ class EncodingGate:
         they're not flagged.
         """
         try:
-            recovered = chunk.encode('cp1251').decode('utf-8')
+            recovered = chunk.encode("cp1251").decode("utf-8")
         except (UnicodeEncodeError, UnicodeDecodeError):
             return False
         if cls.REPLACEMENT_CHAR in recovered:
@@ -591,7 +579,7 @@ class EncodingGate:
             nonlocal any_changed
             chunk = match.group(0)
             try:
-                recovered = chunk.encode('cp1251').decode('utf-8')
+                recovered = chunk.encode("cp1251").decode("utf-8")
             except (UnicodeEncodeError, UnicodeDecodeError):
                 return chunk
             if cls.REPLACEMENT_CHAR in recovered:
@@ -626,11 +614,10 @@ class EncodingGate:
         except OSError:
             return None
         try:
-            text = data.decode('utf-8')
+            text = data.decode("utf-8")
         except UnicodeDecodeError as exc:
             return (
-                f"not valid UTF-8 (byte {exc.start} of {len(data)}: "
-                f"{exc.reason})"
+                f"not valid UTF-8 (byte {exc.start} of {len(data)}: " f"{exc.reason})"
             )
         if cls.REPLACEMENT_CHAR in text:
             return "contains Unicode replacement character (U+FFFD)"
@@ -672,11 +659,11 @@ class EncodingGate:
             >>> bom
             'UTF-8'
         """
-        if data.startswith(b'\xef\xbb\xbf'):
+        if data.startswith(b"\xef\xbb\xbf"):
             return (data[3:], "UTF-8")
-        if data.startswith(b'\xff\xfe'):
+        if data.startswith(b"\xff\xfe"):
             return (data[2:], "UTF-16-LE")
-        if data.startswith(b'\xfe\xff'):
+        if data.startswith(b"\xfe\xff"):
             return (data[2:], "UTF-16-BE")
         return (data, None)
 
@@ -765,7 +752,7 @@ class EncodingGate:
 
         # Read raw bytes
         data = path.read_bytes()
-        original_size = len(data)
+        len(data)
 
         # 1. Strip BOM
         if strip_bom:
@@ -777,16 +764,14 @@ class EncodingGate:
         if strip_control:
             data, removed_count = cls.strip_control_chars(data)
             if removed_count > 0:
-                changes.append(
-                    f"Control chars removed ({removed_count} bytes)"
-                )
+                changes.append(f"Control chars removed ({removed_count} bytes)")
 
         # 3. Decode as UTF-8 (with fallback)
         try:
-            text = data.decode('utf-8')
+            text = data.decode("utf-8")
         except UnicodeDecodeError:
             # Fallback: replace invalid sequences
-            text = data.decode('utf-8', errors='replace')
+            text = data.decode("utf-8", errors="replace")
             changes.append("Invalid UTF-8 replaced with U+FFFD")
 
         # 4. Repair mojibake
@@ -798,6 +783,6 @@ class EncodingGate:
 
         # 5. Write back if changed
         if changes:
-            path.write_bytes(text.encode('utf-8'))
+            path.write_bytes(text.encode("utf-8"))
 
         return (bool(changes), changes)
