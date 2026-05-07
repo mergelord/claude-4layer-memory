@@ -19,11 +19,6 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Dict, List, Set, Tuple
 
-# Force UTF-8 output on Windows to prevent UnicodeEncodeError
-if sys.platform == 'win32':
-    sys.stdout.reconfigure(encoding='utf-8')
-    sys.stderr.reconfigure(encoding='utf-8')
-
 import yaml
 
 # Add scripts/ for sibling-module imports and repo root for utils package
@@ -35,8 +30,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from antipattern_checkers import AntiPatternRegistry  # noqa: E402
 from consistency_checkers import ConsistencyRegistry  # noqa: E402
 from memory_lint_helpers import EncodingGate  # noqa: E402
+
 from utils.base_reporter import BaseReporter  # noqa: E402
 from utils.colors import Colors  # noqa: E402
+
 # pylint: enable=wrong-import-position,import-error
 
 
@@ -56,16 +53,20 @@ class MemoryLint(BaseReporter):
     def _read_file_safe(self, file_path: Path) -> str:
         """Safely read file content with error handling"""
         try:
-            return file_path.read_text(encoding='utf-8')
+            return file_path.read_text(encoding="utf-8")
         except Exception as exc:
             self.print_warn(f"Could not read {file_path.name}: {exc}")
             return ""
 
-    def _read_files_parallel(self, files: List[Path], max_workers: int = 4) -> Dict[Path, str]:
+    def _read_files_parallel(
+        self, files: List[Path], max_workers: int = 4
+    ) -> Dict[Path, str]:
         """Read multiple files in parallel"""
         results = {}
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_file = {executor.submit(self._read_file_safe, f): f for f in files}
+            future_to_file = {
+                executor.submit(self._read_file_safe, f): f for f in files
+            }
             for future in as_completed(future_to_file):
                 file_path = future_to_file[future]
                 content = future.result()
@@ -75,31 +76,31 @@ class MemoryLint(BaseReporter):
 
     def _load_config(self) -> dict:
         """Load configuration from config/memory_lint_config.yml"""
-        config_path = Path(__file__).parent.parent / 'config' / 'memory_lint_config.yml'
+        config_path = Path(__file__).parent.parent / "config" / "memory_lint_config.yml"
 
         if not config_path.exists():
             # Fallback to default values
             return {
-                'file_sizes': {'max_size': 102400},
-                'age_thresholds': {
-                    'hot_max_hours': 24,
-                    'warm_max_days': 14,
-                    'cold_max_days': 30
-                }
+                "file_sizes": {"max_size": 102400},
+                "age_thresholds": {
+                    "hot_max_hours": 24,
+                    "warm_max_days": 14,
+                    "cold_max_days": 30,
+                },
             }
 
         try:
-            with open(config_path, 'r', encoding='utf-8') as f:
+            with open(config_path, "r", encoding="utf-8") as f:
                 return yaml.safe_load(f)
         except Exception as exc:
             self.print_warn(f"Could not load config: {exc}")
             return {
-                'file_sizes': {'max_size': 102400},
-                'age_thresholds': {
-                    'hot_max_hours': 24,
-                    'warm_max_days': 14,
-                    'cold_max_days': 30
-                }
+                "file_sizes": {"max_size": 102400},
+                "age_thresholds": {
+                    "hot_max_hours": 24,
+                    "warm_max_days": 14,
+                    "cold_max_days": 30,
+                },
             }
 
     def find_all_md_files(self) -> List[Path]:
@@ -132,12 +133,12 @@ class MemoryLint(BaseReporter):
     def extract_links(self, content: str) -> Set[str]:
         """Extract all markdown links from content (cached)"""
         # Match [text](link) and [text](link.md)
-        pattern = r'\[([^\]]+)\]\(([^\)]+)\)'
+        pattern = r"\[([^\]]+)\]\(([^\)]+)\)"
         links = set()
         for match in re.finditer(pattern, content):
             link = match.group(2)
             # Skip external links
-            if not link.startswith(('http://', 'https://', '#')):
+            if not link.startswith(("http://", "https://", "#")):
                 links.add(link)
         return links
 
@@ -195,7 +196,7 @@ class MemoryLint(BaseReporter):
 
         # Find orphans (exclude index files)
         orphans = []
-        exclude_names = {'MEMORY.md', 'handoff.md', 'decisions.md', 'README.md'}
+        exclude_names = {"MEMORY.md", "handoff.md", "decisions.md", "README.md"}
 
         for md_file in md_files:
             if md_file.name not in exclude_names:
@@ -222,7 +223,7 @@ class MemoryLint(BaseReporter):
 
         for md_file, content in file_contents.items():
             # Extract first heading
-            match = re.search(r'^#\s+(.+)$', content, re.MULTILINE)
+            match = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
             if match:
                 title = match.group(1).strip().lower()
                 if title not in titles:
@@ -254,9 +255,9 @@ class MemoryLint(BaseReporter):
             return []
 
         try:
-            content = handoff.read_text(encoding='utf-8')
+            content = handoff.read_text(encoding="utf-8")
             # Extract timestamps (format: 2026-04-18 02:10)
-            pattern = r'(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})'
+            pattern = r"(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2})"
             timestamps = re.findall(pattern, content)
 
             now = datetime.now()
@@ -264,9 +265,9 @@ class MemoryLint(BaseReporter):
 
             for ts_str in timestamps:
                 try:
-                    ts = datetime.strptime(ts_str, '%Y-%m-%d %H:%M')
+                    ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M")
                     age_hours = (now - ts).total_seconds() / 3600
-                    max_hours = self.config['age_thresholds']['hot_max_hours']
+                    max_hours = self.config["age_thresholds"]["hot_max_hours"]
                     if age_hours > max_hours:
                         old_entries.append((ts_str, int(age_hours)))
                 except ValueError:
@@ -294,9 +295,9 @@ class MemoryLint(BaseReporter):
             return []
 
         try:
-            content = decisions.read_text(encoding='utf-8')
+            content = decisions.read_text(encoding="utf-8")
             # Extract dates (format: 2026-04-18)
-            pattern = r'(\d{4}-\d{2}-\d{2})'
+            pattern = r"(\d{4}-\d{2}-\d{2})"
             dates = re.findall(pattern, content)
 
             now = datetime.now()
@@ -304,9 +305,9 @@ class MemoryLint(BaseReporter):
 
             for date_str in dates:
                 try:
-                    date = datetime.strptime(date_str, '%Y-%m-%d')
+                    date = datetime.strptime(date_str, "%Y-%m-%d")
                     age_days = (now - date).days
-                    max_days = self.config['age_thresholds']['warm_max_days']
+                    max_days = self.config["age_thresholds"]["warm_max_days"]
                     if age_days > max_days:
                         old_entries.append((date_str, age_days))
                 except ValueError:
@@ -330,7 +331,7 @@ class MemoryLint(BaseReporter):
 
         md_files = self.find_all_md_files()
         large_files = {}
-        threshold = self.config['file_sizes']['max_size']
+        threshold = self.config["file_sizes"]["max_size"]
 
         for md_file in md_files:
             size = md_file.stat().st_size
@@ -347,15 +348,15 @@ class MemoryLint(BaseReporter):
         return large_files
 
     # Publication status keywords (extracted as constants per Alisa's recommendation)
-    PROJECT_KEYWORDS = ['project_status', 'publication', 'github', 'git']
-    GIT_KEYWORDS = ['git', 'github', 'gitlab', 'remote', 'repository']
-    PUBLICATION_KEYWORDS = ['публичн', 'приватн', 'public', 'private', 'опубликован']
+    PROJECT_KEYWORDS = ["project_status", "publication", "github", "git"]
+    GIT_KEYWORDS = ["git", "github", "gitlab", "remote", "repository"]
+    PUBLICATION_KEYWORDS = ["публичн", "приватн", "public", "private", "опубликован"]
 
     @lru_cache(maxsize=128)
     def _read_file_cached(self, file_path: Path) -> str:
         """Cached file reading with error handling (per Alisa's recommendation)"""
         try:
-            return file_path.read_text(encoding='utf-8').lower()
+            return file_path.read_text(encoding="utf-8").lower()
         except Exception as exc:
             self.print_warn(f"Error reading {file_path.name}: {exc}")
             return ""
@@ -377,9 +378,9 @@ class MemoryLint(BaseReporter):
         self.print_section("Layer 1: Project Publication Status Check")
 
         status = {
-            'has_project_status': False,
-            'has_git_info': False,
-            'has_publication_info': False
+            "has_project_status": False,
+            "has_git_info": False,
+            "has_publication_info": False,
         }
 
         md_files = self.find_all_md_files()
@@ -391,13 +392,13 @@ class MemoryLint(BaseReporter):
 
             # Check for project status indicators
             if self._has_project_status_in_filename(md_file):
-                status['has_project_status'] = True
+                status["has_project_status"] = True
 
             if self._has_git_info_in_content(content):
-                status['has_git_info'] = True
+                status["has_git_info"] = True
 
             if self._has_publication_info_in_content(content):
-                status['has_publication_info'] = True
+                status["has_publication_info"] = True
 
         # Report results
         self._report_publication_status(status)
@@ -406,9 +407,9 @@ class MemoryLint(BaseReporter):
 
     def _report_publication_status(self, status: Dict[str, bool]) -> None:
         """Report publication status findings"""
-        if status['has_project_status'] and status['has_publication_info']:
+        if status["has_project_status"] and status["has_publication_info"]:
             self.print_ok("Project publication status documented")
-        elif status['has_git_info']:
+        elif status["has_git_info"]:
             self.print_warn("Git info found, but publication status unclear")
             self.print_info("Consider creating project_publication_status.md")
         else:
@@ -417,16 +418,16 @@ class MemoryLint(BaseReporter):
     def generate_report(self) -> Dict:
         """Generate lint report"""
         return {
-            'timestamp': datetime.now().isoformat(),
-            'memory_path': str(self.memory_path),
-            'errors': len(self.errors),
-            'warnings': len(self.warnings),
-            'info': len(self.info),
-            'details': {
-                'errors': self.errors,
-                'warnings': self.warnings,
-                'info': self.info
-            }
+            "timestamp": datetime.now().isoformat(),
+            "memory_path": str(self.memory_path),
+            "errors": len(self.errors),
+            "warnings": len(self.warnings),
+            "info": len(self.info),
+            "details": {
+                "errors": self.errors,
+                "warnings": self.warnings,
+                "info": self.info,
+            },
         }
 
     def run_layer1(self) -> bool:
@@ -478,16 +479,19 @@ class MemoryLint(BaseReporter):
         statements = []
         for md_file in md_files:
             try:
-                content = md_file.read_text(encoding='utf-8')
+                content = md_file.read_text(encoding="utf-8")
                 # Split into paragraphs
-                paragraphs = [p.strip() for p in content.split('\n\n') if p.strip() and not p.startswith('#')]
+                paragraphs = [
+                    p.strip()
+                    for p in content.split("\n\n")
+                    if p.strip() and not p.startswith("#")
+                ]
 
                 for para in paragraphs:
                     if len(para) > 50:  # Skip very short paragraphs
-                        statements.append({
-                            'file': md_file,
-                            'text': para[:500]  # Limit length
-                        })
+                        statements.append(
+                            {"file": md_file, "text": para[:500]}  # Limit length
+                        )
             except Exception as exc:
                 self.print_warn(f"Error reading {md_file.name}: {exc}")
 
@@ -546,10 +550,10 @@ Format as JSON:
         dated_claims = []
         for md_file in md_files:
             try:
-                content = md_file.read_text(encoding='utf-8')
+                content = md_file.read_text(encoding="utf-8")
 
                 # Find dates and surrounding context
-                pattern = r'(\d{4}-\d{2}-\d{2})[^\n]*([^\n]+)'
+                pattern = r"(\d{4}-\d{2}-\d{2})[^\n]*([^\n]+)"
                 matches = re.finditer(pattern, content)
 
                 for match in matches:
@@ -557,17 +561,21 @@ Format as JSON:
                     context = match.group(2)
 
                     try:
-                        date = datetime.strptime(date_str, '%Y-%m-%d')
+                        date = datetime.strptime(date_str, "%Y-%m-%d")
                         age_days = (now - date).days
-                        max_days = self.config['age_thresholds']['cold_max_days']
+                        max_days = self.config["age_thresholds"]["cold_max_days"]
 
-                        if age_days > max_days:  # Claims older than configured threshold
-                            dated_claims.append({
-                                'file': md_file,
-                                'date': date_str,
-                                'age_days': age_days,
-                                'context': context[:200]
-                            })
+                        if (
+                            age_days > max_days
+                        ):  # Claims older than configured threshold
+                            dated_claims.append(
+                                {
+                                    "file": md_file,
+                                    "date": date_str,
+                                    "age_days": age_days,
+                                    "context": context[:200],
+                                }
+                            )
                     except ValueError:
                         continue
             except Exception as exc:
@@ -579,12 +587,14 @@ Format as JSON:
 
             # Show sample
             for claim in dated_claims[:3]:
-                claim_file = claim['file']
+                claim_file = claim["file"]
                 if isinstance(claim_file, Path):
                     file_name = claim_file.name
                 else:
                     file_name = str(claim_file)
-                self.print_warn(f"{file_name}: {claim['date']} ({claim['age_days']}d old)")
+                self.print_warn(
+                    f"{file_name}: {claim['date']} ({claim['age_days']}d old)"
+                )
         else:
             self.print_ok("No old claims found")
 
@@ -600,7 +610,7 @@ Format as JSON:
         registry = ConsistencyRegistry()
         results = registry.check_all(md_files)
 
-        inconsistencies = results.get('terminology', [])
+        inconsistencies = results.get("terminology", [])
 
         # Report findings
         self._report_inconsistencies(inconsistencies)
@@ -615,7 +625,7 @@ Format as JSON:
 
         for incon in inconsistencies:
             self.print_warn(f"Inconsistent terminology: {incon['base_term']}")
-            variants_dict = incon['variants']
+            variants_dict = incon["variants"]
             if isinstance(variants_dict, dict):
                 for variant, count in variants_dict.items():
                     print(f"    - '{variant}' ({count} occurrences)")
@@ -631,27 +641,37 @@ Format as JSON:
 
         # Check for common incompleteness markers
         markers = [
-            'TODO', 'FIXME', 'XXX', 'HACK', 'NOTE:',
-            'not yet', 'coming soon', 'to be added',
-            'placeholder', 'stub', 'incomplete'
+            "TODO",
+            "FIXME",
+            "XXX",
+            "HACK",
+            "NOTE:",
+            "not yet",
+            "coming soon",
+            "to be added",
+            "placeholder",
+            "stub",
+            "incomplete",
         ]
 
         for md_file in md_files:
             try:
-                content = md_file.read_text(encoding='utf-8')
+                content = md_file.read_text(encoding="utf-8")
 
                 for marker in markers:
                     if marker.lower() in content.lower():
                         # Find context
-                        lines = content.split('\n')
+                        lines = content.split("\n")
                         for i, line in enumerate(lines):
                             if marker.lower() in line.lower():
-                                incomplete.append({
-                                    'file': md_file,
-                                    'marker': marker,
-                                    'line': i + 1,
-                                    'context': line.strip()[:100]
-                                })
+                                incomplete.append(
+                                    {
+                                        "file": md_file,
+                                        "marker": marker,
+                                        "line": i + 1,
+                                        "context": line.strip()[:100],
+                                    }
+                                )
                                 break
             except Exception as exc:
                 self.print_warn(f"Error reading {md_file.name}: {exc}")
@@ -659,7 +679,7 @@ Format as JSON:
         if incomplete:
             self.print_warn(f"Found {len(incomplete)} incomplete sections")
             for item in incomplete[:5]:  # Show first 5
-                item_file = item['file']
+                item_file = item["file"]
                 if isinstance(item_file, Path):
                     file_name = item_file.name
                 else:
@@ -682,7 +702,7 @@ Format as JSON:
 
         for md_file in md_files:
             try:
-                content = md_file.read_text(encoding='utf-8')
+                content = md_file.read_text(encoding="utf-8")
                 frontmatter = self._extract_frontmatter(content)
 
                 # Run all checkers
@@ -703,32 +723,38 @@ Format as JSON:
             self.print_ok("No anti-patterns detected")
             return
 
-        severity_counts: Dict[str, int] = {'high': 0, 'medium': 0, 'low': 0}
+        severity_counts: Dict[str, int] = {"high": 0, "medium": 0, "low": 0}
         for ap in antipatterns:
-            severity = str(ap['severity'])
+            severity = str(ap["severity"])
             severity_counts[severity] += 1
 
         self.print_warn(f"Found {len(antipatterns)} anti-pattern(s)")
-        print(f"    High: {severity_counts['high']}, "
-              f"Medium: {severity_counts['medium']}, Low: {severity_counts['low']}")
+        print(
+            f"    High: {severity_counts['high']}, "
+            f"Medium: {severity_counts['medium']}, Low: {severity_counts['low']}"
+        )
 
         # Show high severity first
-        for ap in sorted(antipatterns,
-                       key=lambda x: {'high': 0, 'medium': 1, 'low': 2}[str(x['severity'])]):
-            ap_file = ap['file']
+        for ap in sorted(
+            antipatterns,
+            key=lambda x: {"high": 0, "medium": 1, "low": 2}[str(x["severity"])],
+        ):
+            ap_file = ap["file"]
             if isinstance(ap_file, Path):
                 file_name = ap_file.name
             else:
                 file_name = str(ap_file)
 
             severity_color = {
-                'high': Colors.RED,
-                'medium': Colors.YELLOW,
-                'low': Colors.BLUE
-            }.get(str(ap['severity']), '')
+                "high": Colors.RED,
+                "medium": Colors.YELLOW,
+                "low": Colors.BLUE,
+            }.get(str(ap["severity"]), "")
 
-            print(f"    {severity_color}[{ap['severity'].upper()}]{Colors.RESET} "
-                  f"{file_name}: {ap['message']}")
+            print(
+                f"    {severity_color}[{ap['severity'].upper()}]{Colors.RESET} "
+                f"{file_name}: {ap['message']}"
+            )
 
     @lru_cache(maxsize=256)
     def _extract_frontmatter(self, content: str) -> Dict[str, str]:
@@ -736,13 +762,13 @@ Format as JSON:
         frontmatter = {}
 
         # Match frontmatter between --- markers
-        match = re.match(r'^---\s*\n(.*?)\n---\s*\n', content, re.DOTALL)
+        match = re.match(r"^---\s*\n(.*?)\n---\s*\n", content, re.DOTALL)
         if match:
             yaml_content = match.group(1)
             # Simple YAML parsing (key: value)
-            for line in yaml_content.split('\n'):
-                if ':' in line:
-                    key, value = line.split(':', 1)
+            for line in yaml_content.split("\n"):
+                if ":" in line:
+                    key, value = line.split(":", 1)
                     frontmatter[key.strip()] = value.strip()
 
         return frontmatter
@@ -774,14 +800,18 @@ Format as JSON:
         incomplete_frontmatter = []
 
         for md_file in md_files:
-            if md_file.name in ['MEMORY.md', 'handoff.md', 'decisions.md', 'README.md']:
+            if md_file.name in ["MEMORY.md", "handoff.md", "decisions.md", "README.md"]:
                 continue
 
             try:
-                content = md_file.read_text(encoding='utf-8')
+                content = md_file.read_text(encoding="utf-8")
                 frontmatter = self._extract_frontmatter(content)
-                required_fields = ['name', 'description', 'type']
-                missing = [f for f in required_fields if f not in frontmatter or not frontmatter[f]]
+                required_fields = ["name", "description", "type"]
+                missing = [
+                    f
+                    for f in required_fields
+                    if f not in frontmatter or not frontmatter[f]
+                ]
 
                 if missing:
                     incomplete_frontmatter.append((md_file, missing))
@@ -789,7 +819,9 @@ Format as JSON:
                 self.print_warn(f"Error checking {md_file.name}: {exc}")
 
         if incomplete_frontmatter:
-            self.print_error(f"[X] {len(incomplete_frontmatter)} file(s) with incomplete frontmatter")
+            self.print_error(
+                f"[X] {len(incomplete_frontmatter)} file(s) with incomplete frontmatter"
+            )
             for file, missing in incomplete_frontmatter[:3]:
                 print(f"    {file.name}: missing {', '.join(missing)}")
             return False
@@ -834,18 +866,20 @@ Format as JSON:
 
         for md_file in md_files:
             try:
-                content = md_file.read_text(encoding='utf-8')
+                content = md_file.read_text(encoding="utf-8")
                 frontmatter = self._extract_frontmatter(content)
-                memory_type = frontmatter.get('type', '')
+                memory_type = frontmatter.get("type", "")
 
-                if memory_type in ['feedback', 'project']:
-                    if '**Why:**' not in content or '**How to apply:**' not in content:
+                if memory_type in ["feedback", "project"]:
+                    if "**Why:**" not in content or "**How to apply:**" not in content:
                         missing_why_how.append(md_file)
             except Exception as exc:
                 self.print_warn(f"Error checking {md_file.name}: {exc}")
 
         if missing_why_how:
-            self.print_error(f"[X] {len(missing_why_how)} file(s) missing Why:/How to apply:")
+            self.print_error(
+                f"[X] {len(missing_why_how)} file(s) missing Why:/How to apply:"
+            )
             for file in missing_why_how[:3]:
                 print(f"    {file.name}")
             return False
@@ -860,13 +894,13 @@ Format as JSON:
         self.print_header("Pre-Delivery Checklist")
 
         checklist = {
-            'no_duplicate_memories': self._check_duplicate_memories(),
-            'all_links_valid': self._check_all_links_valid(),
-            'frontmatter_complete': self._check_frontmatter_complete(),
-            'hot_memory_fresh': self._check_hot_memory_fresh(),
-            'warm_memory_fresh': self._check_warm_memory_fresh(),
-            'file_sizes_ok': self._check_file_sizes_ok(),
-            'why_how_present': self._check_why_how_present()
+            "no_duplicate_memories": self._check_duplicate_memories(),
+            "all_links_valid": self._check_all_links_valid(),
+            "frontmatter_complete": self._check_frontmatter_complete(),
+            "hot_memory_fresh": self._check_hot_memory_fresh(),
+            "warm_memory_fresh": self._check_warm_memory_fresh(),
+            "file_sizes_ok": self._check_file_sizes_ok(),
+            "why_how_present": self._check_why_how_present(),
         }
 
         # Final summary
@@ -909,6 +943,7 @@ Format as JSON:
 
         return True
 
+
 def _safe_rglob_md(memory_path: Path) -> List[Path]:
     """Sorted ``*.md`` walk of ``memory_path`` that tolerates unreadable subtrees.
 
@@ -918,7 +953,7 @@ def _safe_rglob_md(memory_path: Path) -> List[Path]:
     still proceed.
     """
     try:
-        return sorted(memory_path.rglob('*.md'))
+        return sorted(memory_path.rglob("*.md"))
     except (PermissionError, OSError) as exc:
         print(
             f"Warning: could not fully walk {memory_path}: {exc}",
@@ -993,7 +1028,7 @@ def _run_encoding_repair(memory_path: Path, *, apply: bool) -> int:
             skipped_clean.append(md_file)
             continue
         try:
-            text = md_file.read_text(encoding='utf-8')
+            text = md_file.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as exc:
             failed.append((md_file, f"unreadable: {exc}"))
             continue
@@ -1002,12 +1037,12 @@ def _run_encoding_repair(memory_path: Path, *, apply: bool) -> int:
             failed.append((md_file, f"could not repair: {issue}"))
             continue
         if apply:
-            backup = md_file.with_suffix(md_file.suffix + '.bak')
+            backup = md_file.with_suffix(md_file.suffix + ".bak")
             md_file.replace(backup)
-            md_file.write_text(recovered, encoding='utf-8')
+            md_file.write_text(recovered, encoding="utf-8")
         else:
-            preview = md_file.with_suffix(md_file.suffix + '.fixed')
-            preview.write_text(recovered, encoding='utf-8')
+            preview = md_file.with_suffix(md_file.suffix + ".fixed")
+            preview.write_text(recovered, encoding="utf-8")
         repaired_paths.append(md_file)
     print(
         f"Encoding repair scan complete in {memory_path}:\n"
@@ -1036,64 +1071,61 @@ def _run_encoding_repair(memory_path: Path, *, apply: bool) -> int:
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Memory Lint System - Two-Layer Validation'
+        description="Memory Lint System - Two-Layer Validation"
     )
     parser.add_argument(
-        'memory_path',
-        nargs='?',
-        help='Path to memory directory (default: ~/.claude/memory)'
+        "memory_path",
+        nargs="?",
+        help="Path to memory directory (default: ~/.claude/memory)",
     )
     parser.add_argument(
-        '--layer',
-        choices=['1', '2', 'all'],
-        default='all',
-        help='Which layer to run (default: all)'
+        "--layer",
+        choices=["1", "2", "all"],
+        default="all",
+        help="Which layer to run (default: all)",
+    )
+    parser.add_argument("--report", help="Save report to JSON file")
+    parser.add_argument(
+        "--quick",
+        action="store_true",
+        help="Quick mode: only critical checks (ghost links, errors)",
     )
     parser.add_argument(
-        '--report',
-        help='Save report to JSON file'
+        "--checklist",
+        action="store_true",
+        help="Run pre-delivery checklist (all critical checks before commit)",
     )
     parser.add_argument(
-        '--quick',
-        action='store_true',
-        help='Quick mode: only critical checks (ghost links, errors)'
-    )
-    parser.add_argument(
-        '--checklist',
-        action='store_true',
-        help='Run pre-delivery checklist (all critical checks before commit)'
-    )
-    parser.add_argument(
-        '--validate-encoding',
-        action='store_true',
+        "--validate-encoding",
+        action="store_true",
         help=(
-            'Scan every markdown file for cp1251-as-utf8 mojibake or '
-            'replacement characters and exit non-zero if any are found. '
-            'Use this on the existing tree before / after deploys to '
-            'catch corruption introduced by Windows write hooks.'
-        )
+            "Scan every markdown file for cp1251-as-utf8 mojibake or "
+            "replacement characters and exit non-zero if any are found. "
+            "Use this on the existing tree before / after deploys to "
+            "catch corruption introduced by Windows write hooks."
+        ),
     )
     parser.add_argument(
-        '--repair-mojibake',
-        action='store_true',
+        "--repair-mojibake",
+        action="store_true",
         help=(
-            'Walk the memory tree and try to invert cp1251-as-utf8 '
-            'mojibake on every corrupted markdown file. By default '
-            'writes recovered text to ``<file>.fixed`` next to the '
-            'original; pass --apply to overwrite the original (with '
-            'a ``<file>.bak`` rescue copy). Always lists files that '
-            'could NOT be repaired automatically and require manual '
-            'review.'
-        )
+            "Walk the memory tree and try to invert cp1251-as-utf8 "
+            "mojibake on every corrupted markdown file. By default "
+            "writes recovered text to ``<file>.fixed`` next to the "
+            "original; pass --apply to overwrite the original (with "
+            "a ``<file>.bak`` rescue copy). Always lists files that "
+            "could NOT be repaired automatically and require manual "
+            "review."
+        ),
     )
     parser.add_argument(
-        '--apply',
-        action='store_true',
+        "--apply",
+        action="store_true",
         help=(
-            'Modifier for --repair-mojibake: actually overwrite the '
-            'original file (after saving ``<file>.bak``) instead of '
-            'producing a side-by-side ``<file>.fixed`` for review.'
-        )
+            "Modifier for --repair-mojibake: actually overwrite the "
+            "original file (after saving ``<file>.bak``) instead of "
+            "producing a side-by-side ``<file>.fixed`` for review."
+        ),
     )
 
     args = parser.parse_args()
@@ -1130,17 +1162,18 @@ def main():
         all_passed = all(checklist.values())
         sys.exit(0 if all_passed else 1)
 
-    if args.layer in ['1', 'all']:
+    if args.layer in ["1", "all"]:
         lint.run_layer1()
 
-    if args.layer in ['2', 'all'] and not args.quick:
+    if args.layer in ["2", "all"] and not args.quick:
         lint.run_layer2()
 
     # Save report
     if args.report:
         import json  # pylint: disable=import-outside-toplevel
+
         report = lint.generate_report()
-        with open(args.report, 'w', encoding='utf-8') as f:
+        with open(args.report, "w", encoding="utf-8") as f:
             json.dump(report, f, indent=2)
         print(f"\nReport saved: {args.report}")
 
@@ -1148,5 +1181,5 @@ def main():
     sys.exit(0 if len(lint.errors) == 0 else 1)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

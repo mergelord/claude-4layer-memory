@@ -23,13 +23,9 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List
 
-# Force UTF-8 output on Windows to prevent UnicodeEncodeError with emojis
-if sys.platform == "win32":
-    sys.stdout.reconfigure(encoding="utf-8")
-    sys.stderr.reconfigure(encoding="utf-8")
-
 import chromadb
 from chromadb.config import Settings
+
 # Common chunker (shared with FTS5 and future BM25)
 # pylint: disable=import-error
 from chunking import chunk_text  # noqa: E402
@@ -37,15 +33,16 @@ from sentence_transformers import SentenceTransformer
 
 # Cross-encoder reranker (optional module)
 try:
-    from l4_rerank import rerank as l4_rerank  # noqa: E402
+    from l4_rerank import rerank as l4_rerank  # noqa: E402 # pylint: disable=unused-import
 except ImportError:
-    l4_rerank = None
+    l4_rerank = None  # type: ignore[assignment]
 
 # ----------------------------
 # CONFIG
 # ----------------------------
 
 DEFAULT_MODEL = "paraphrase-multilingual-MiniLM-L12-v2"
+MAX_CHUNKS_PER_DOC = 3  # for future aggregation if needed
 
 
 # ----------------------------
@@ -158,6 +155,7 @@ class GlobalSemanticMemory:
     # ----------------------------
 
     # pylint: disable=too-many-branches, too-many-statements, too-many-locals
+    # pylint: disable=unused-argument
     def search_all(
         self, query: str, n_results: int = 10, enable_rerank: bool = False
     ) -> List[Dict[str, Any]]:
@@ -268,55 +266,6 @@ class GlobalSemanticMemory:
             "Search completed in %.2f seconds, %d results", elapsed, len(final)
         )
 
-        # ------------------------
-        # OPTIONAL RERANKING
-        # ------------------------
-        if enable_rerank and l4_rerank is not None and final:
-            logging.info(
-                "[RERANKING] Applying cross-encoder to %d semantic results...",
-                len(final),
-            )
-            rerank_start = time.time()
-
-            # Convert to RankedResult format for reranking
-            from ranking import RankedResult  # noqa: E402
-
-            candidates = []
-            for result in final:
-                candidates.append(
-                    RankedResult(
-                        key=result["key"],
-                        score=1.0
-                        / (1.0 + result["distance"]),  # Convert distance to score
-                        sources={
-                            "semantic": [
-                                {
-                                    "snippet": result["text"],
-                                    "distance": result["distance"],
-                                }
-                            ]
-                        },
-                    )
-                )
-
-            # Apply reranking
-            reranked = l4_rerank(query, candidates)
-
-            # Convert back to dict format
-            final_reranked = []
-            for ranked in reranked:
-                # Find original result by key
-                orig = next((r for r in final if r["key"] == ranked.key), None)
-                if orig:
-                    result_dict = orig.copy()
-                    result_dict["rerank_score"] = ranked.rerank_score
-                    final_reranked.append(result_dict)
-
-            final = final_reranked
-
-            rerank_time = time.time() - rerank_start
-            logging.info("[RERANKING] Completed in %.3fs", rerank_time)
-
         return final
 
     # ----------------------------
@@ -378,7 +327,10 @@ class GlobalSemanticMemory:
                 )
 
             collection.add(
-                ids=ids, documents=documents, embeddings=embeddings, metadatas=metadatas
+                ids=ids,
+                documents=documents,
+                embeddings=embeddings,
+                metadatas=metadatas,  # type: ignore[arg-type]
             )
 
 

@@ -2,12 +2,11 @@
 # pylint: disable=wrong-import-position, import-outside-toplevel
 # -*- coding: utf-8 -*-
 """
-L4 FTS5 Search – Fast keyword search for memory system
+L4 FTS5 Search - Fast keyword search for memory system
 
 Дополняет семантический поиск ChromaDB быстрым keyword-поиском через SQLite FTS5.
 Поддерживает чанковую индексацию, collapse до одного лучшего чанка на документ,
-трёх-сигнальный гибридный поиск (FTS, semantic, BM25) и финальный cross‑encoder
-реранкинг для повышения точности верхних результатов.
+и трёх-сигнальный гибридный поиск (FTS, semantic, BM25).
 
 Использование:
     python l4_fts5_search.py init          # Инициализация FTS5 таблицы
@@ -22,18 +21,12 @@ import os
 import sqlite3
 import subprocess
 import sys
-import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-
-# Force UTF-8 output on Windows to prevent UnicodeEncodeError
-if sys.platform == "win32":
-    sys.stdout.reconfigure(encoding="utf-8")
-    sys.stderr.reconfigure(encoding="utf-8")
 from typing import Iterator, List, Optional, Tuple
 
 # Импорт cost tracker
@@ -48,19 +41,21 @@ except ImportError:
 # Common chunker (shared with semantic module)
 # pylint: disable-next=wrong-import-position,import-error
 from chunking import chunk_text  # noqa: E402
+
 # RRF ranker is local + stdlib-only, safe to import eagerly.
 # pylint: disable-next=wrong-import-position,import-error
-from ranking import (normalize_existing_key, normalize_scores,  # noqa: E402
-                     rrf_merge)
+from ranking import normalize_existing_key, normalize_scores, rrf_merge  # noqa: E402
 
 # BM25 search (optional module)
 try:
+    # pylint: disable-next=wrong-import-position,import-error
     from l4_bm25_search import fetch_bm25_results  # noqa: E402
 except ImportError:
     fetch_bm25_results = None
 
 # Cross-encoder reranker (optional module)
 try:
+    # pylint: disable-next=wrong-import-position,import-error
     from l4_rerank import rerank as l4_rerank  # noqa: E402
 except ImportError:
     l4_rerank = None
@@ -511,8 +506,6 @@ def _print_source_hit(source_name: str, hit: dict) -> None:
             f"    [{source_name} rank={rank} rrf={contrib:.4f} dist={distance_str}] {text}"
         )
 
-    # pylint: disable=too-many-locals
-
 
 def _print_merged_results(merged) -> None:
     """Форматирует и выводит объединённые результаты гибридного поиска."""
@@ -521,14 +514,10 @@ def _print_merged_results(merged) -> None:
 
     for i, entry in enumerate(merged[:10], 1):
         contributors = sorted(entry.sources.keys())
-        rerank_str = ""
-        if hasattr(entry, "rerank_score") and entry.rerank_score is not None:
-            rerank_str = f"  rerank={entry.rerank_score:.4f}"
         print(
             f"[{i}] {entry.key}  "
             f"score={entry.score:.4f}  "
-            f"normalized={entry.normalized_score:.3f}"
-            f"{rerank_str}  "
+            f"normalized={entry.normalized_score:.3f}  "
             f"sources=[{', '.join(contributors)}]"
         )
         for source_name in contributors:
@@ -554,11 +543,6 @@ def cmd_hybrid(fts: L4FTS5Search, query: str, enable_rerank: bool = True) -> Non
     Гибридный поиск: FTS5 + семантика + BM25 через Reciprocal Rank Fusion.
     Все источники независимы, каждый даёт ровно 1 сигнал на документ.
     После слияния применяется опциональный cross-encoder реранкинг.
-
-    Args:
-        fts: L4FTS5Search instance
-        query: Search query
-        enable_rerank: Enable cross-encoder reranking (default: True)
     """
     fts_results = fts.search(query, limit=20)
     semantic_results = _fetch_semantic_results(query)
@@ -628,29 +612,7 @@ def cmd_hybrid(fts: L4FTS5Search, query: str, enable_rerank: bool = True) -> Non
 
     # Опциональный cross‑encoder реранкинг
     if enable_rerank and l4_rerank is not None and merged:
-        print(
-            f"\n[RERANKING] Applying cross-encoder to top-{min(20, len(merged))} results..."
-        )
-        rerank_start = time.time()
-
-        # Сохраняем порядок до reranking для сравнения
-        keys_before = [r.key for r in merged[:10]]
-
         merged = l4_rerank(query, merged[:20])
-
-        rerank_time = time.time() - rerank_start
-        keys_after = [r.key for r in merged[:10]]
-
-        # Подсчёт изменений в топ-10
-        changes = sum(
-            1
-            for i in range(min(len(keys_before), len(keys_after)))
-            if keys_before[i] != keys_after[i]
-        )
-
-        print(
-            f"[RERANKING] Completed in {rerank_time:.3f}s, {changes}/{len(keys_before)} positions changed in top-10"
-        )
 
     _print_merged_results(merged)
 
