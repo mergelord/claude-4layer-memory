@@ -57,6 +57,9 @@ REM Copy scripts
 echo.
 echo Copying scripts...
 copy /Y "scripts\l4_semantic_global.py" "%USERPROFILE%\.claude\hooks\" >nul
+copy /Y "scripts\l4_fts5_search.py" "%USERPROFILE%\.claude\hooks\" >nul
+copy /Y "scripts\l4_rerank.py" "%USERPROFILE%\.claude\hooks\" >nul
+copy /Y "scripts\ranking.py" "%USERPROFILE%\.claude\hooks\" >nul
 copy /Y "scripts\windows\*.bat" "%USERPROFILE%\.claude\hooks\" >nul
 copy /Y "hooks\git-activity-detector.py" "%USERPROFILE%\.claude\hooks\" >nul
 copy /Y "hooks\stop_handoff_universal.py" "%USERPROFILE%\.claude\hooks\" >nul
