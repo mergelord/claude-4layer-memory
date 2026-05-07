@@ -377,6 +377,82 @@ pytest tests/ -v --tb=short
 export PYTHONPATH="${PYTHONPATH}:$(pwd)/scripts"
 ```
 
+## Encoding-Critical Data Protection
+
+### ⚠️ Test Fixtures with Mojibake — DO NOT TOUCH
+
+**File:** `tests/test_memory_lint_helpers.py`
+
+This file contains **intentionally encoded mojibake strings** for testing:
+- `MOJIBAKE_FRAGMENT` — real cp1251-as-utf8 byte sequence
+- `CYRILLIC_BLOCK_MOJIBAKE_SAMPLES` — list of (mojibake, restored_text) pairs
+
+**These strings look like garbage (кракозябры) but ARE TEST DATA.**
+
+❌ **DO NOT:**
+- "Fix" or "repair" the encoding
+- "Restore" Cyrillic characters
+- "Clean up" the strings
+- Modify them in any way
+
+✅ **Only way to restore if broken:**
+```bash
+git checkout HEAD -- tests/test_memory_lint_helpers.py
+```
+
+### 🔒 Files That Cannot Be Deleted
+
+- `scripts/__init__.py` — **required by architecture test** (`tests/test_architecture.py`)
+- Any file referenced by `tests/test_architecture.py`
+- Test fixtures in `tests/test_memory_lint_helpers.py`
+
+### 📝 When Editing `scripts/memory_lint_helpers.py`
+
+**DO NOT delete or modify:**
+- Regex patterns: `_MOJIBAKE_RUN_RE`, `_MOJIBAKE_RE`, `_CHUNK_PATTERN`
+- Method signatures: `assert_clean()`, `repair_mojibake()`, `scan_file()`
+- EncodingGate class interface
+
+**DO NOT add:**
+- Unused variables (pylint/ruff will catch them)
+- Dead code or commented-out blocks
+
+### ✅ Pre-commit Checklist (MANDATORY)
+
+Before every commit, run these checks:
+
+```bash
+# 1. Run all tests (must pass 279/279)
+python -m pytest tests/ -x --tb=short
+
+# 2. Run pylint on critical modules (errors only)
+python -m pylint scripts/ranking.py scripts/l4_semantic_global.py \
+  scripts/l4_fts5_search.py scripts/l4_bm25_search.py \
+  scripts/chunking.py scripts/l4_rerank.py \
+  --disable=C0114,C0115,C0116,W0718,R0911,R0902,R0913,R0917,R0914 -E
+
+# 3. Scan for encoding issues
+python scripts/scan_repo_encoding.py
+```
+
+**If any check fails:**
+- ❌ DO NOT use `git commit --no-verify` to bypass
+- ✅ Fix the underlying issue
+- ✅ Re-run checks until all pass
+
+### 🛡️ Philosophy
+
+These checks exist because **these regressions have already happened**:
+- Mojibake corruption broke memory files
+- Missing `__init__.py` broke imports
+- Encoding issues leaked into commits
+
+**A failing test is a signal that you broke a contract. Fix the code, not the test.**
+
+The pre-commit hook runs fast checks (<35s). CI runs the full suite (279 tests × 9 matrices + 6 linters). Both layers are necessary:
+- **Pre-commit:** Catches critical invariants before commit
+- **CI/CD:** Catches everything else before merge
+
 ## Contributing
 
 We welcome contributions! Please:
