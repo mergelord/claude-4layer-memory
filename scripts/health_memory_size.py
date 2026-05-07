@@ -139,6 +139,13 @@ def check_chromadb() -> None:
 
 def main() -> int:
     print("🏥 Memory Health Check\n")
+
+    # Check if Claude directory exists
+    if not CLAUDE_DIR.exists():
+        print(f"⏭️  Claude directory not found: {CLAUDE_DIR}")
+        print("✅ Skipping health checks (not a Claude environment)")
+        return 0
+
     check_hot_layer()
     check_project_hot_layers()
     check_memory_md()
