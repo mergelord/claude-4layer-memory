@@ -237,7 +237,7 @@ class TestCleanFile:
         result = test_file.read_text(encoding='utf-8')
         assert "Hello" in result
         assert "World" in result
-        assert "?" in result  # Replacement character
+        assert "\ufffd" in result  # Replacement character
 
 
 class TestIntegration:
