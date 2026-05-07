@@ -331,7 +331,7 @@ class EncodingError(ValueError):
 
 
 class EncodingGate:
-    """Reject text that would silently corrupt a UTF-8 memory file.
+    """Comprehensive encoding validation and cleanup for UTF-8 memory files.
 
     Hot-memory hooks (``auto-remember.py``, ``autosave-context.py``,
     ``precompact-flush-l4.py``) collect output from sub-processes
@@ -343,22 +343,45 @@ class EncodingGate:
     Claude session reads the file. The user-visible symptom is
     "the agent forgets what we did".
 
-    This class provides a single ``assert_clean`` entry point that:
+    This class provides two categories of functionality:
 
-    1. Refuses any text containing the Unicode replacement
-       character ``U+FFFD`` (definitive evidence of a prior decode
-       failure).
+    **Validation (for hooks writing to memory files):**
+
+    1. ``assert_clean(text)`` — Refuses any text containing the Unicode
+       replacement character ``U+FFFD`` (definitive evidence of a prior
+       decode failure).
     2. Heuristically flags cp1251-encoded Cyrillic that has been
        round-tripped through ``latin-1.encode -> utf-8.decode``
        — the canonical mojibake pattern from Windows shells.
-    3. Refuses bytes that don't decode as UTF-8 at all when
-       ``assert_clean_bytes`` is used.
+    3. ``assert_clean_bytes(data)`` — Refuses bytes that don't decode
+       as UTF-8 at all.
+
+    **Cleanup (for repairing corrupted files):**
+
+    4. ``strip_bom(data)`` — Removes Byte Order Mark (UTF-8, UTF-16 LE/BE).
+    5. ``strip_control_chars(data)`` — Removes null bytes and control
+       characters (except newline/CR).
+    6. ``repair_mojibake(text)`` — Attempts to invert cp1251-as-utf8
+       mojibake via round-trip decoding.
+    7. ``clean_file(path)`` — Comprehensive file cleanup combining all
+       of the above operations.
 
     The gate is deliberately conservative: it false-positives on
     pathological-but-legitimate Latin-1 content (e.g. raw German /
     French quoted-printable inside markdown). Hooks should call it
     on text *they* produced from sub-shells, not on user-authored
     free text.
+
+    Examples:
+        >>> # Validation in hooks
+        >>> text = subprocess.check_output(['git', 'log']).decode('utf-8')
+        >>> EncodingGate.assert_clean(text, source="git log")
+
+        >>> # Cleanup corrupted file
+        >>> from pathlib import Path
+        >>> changed, changes = EncodingGate.clean_file(Path("handoff.md"))
+        >>> if changed:
+        ...     print(f"Fixed: {', '.join(changes)}")
     """
 
     REPLACEMENT_CHAR = '\ufffd'
@@ -625,3 +648,156 @@ class EncodingGate:
         if run_match is not None and cls._is_repairable_run(run_match.group(0)):
             return f"contains cp1251-as-utf8 mojibake run {run_match.group(0)!r}"
         return None
+
+    @classmethod
+    def strip_bom(cls, data: bytes) -> tuple[bytes, Optional[str]]:
+        """Remove Byte Order Mark (BOM) from bytes.
+
+        Args:
+            data: Raw bytes that may contain a BOM prefix.
+
+        Returns:
+            A tuple ``(cleaned_data, bom_type)``:
+
+            * ``cleaned_data``: bytes with BOM removed if present,
+              otherwise original data.
+            * ``bom_type``: "UTF-8", "UTF-16-LE", "UTF-16-BE", or
+              ``None`` if no BOM was found.
+
+        Examples:
+            >>> data = b'\\xef\\xbb\\xbfHello'
+            >>> cleaned, bom = EncodingGate.strip_bom(data)
+            >>> cleaned
+            b'Hello'
+            >>> bom
+            'UTF-8'
+        """
+        if data.startswith(b'\xef\xbb\xbf'):
+            return (data[3:], "UTF-8")
+        if data.startswith(b'\xff\xfe'):
+            return (data[2:], "UTF-16-LE")
+        if data.startswith(b'\xfe\xff'):
+            return (data[2:], "UTF-16-BE")
+        return (data, None)
+
+    @classmethod
+    def strip_control_chars(cls, data: bytes) -> tuple[bytes, int]:
+        """Remove null bytes and control characters from bytes.
+
+        Removes:
+        - Null bytes (0x00)
+        - Control characters (0x01-0x1F) except newline (0x0A) and
+          carriage return (0x0D)
+
+        Args:
+            data: Raw bytes to clean.
+
+        Returns:
+            A tuple ``(cleaned_data, removed_count)``:
+
+            * ``cleaned_data``: bytes with control chars removed.
+            * ``removed_count``: number of bytes removed.
+
+        Examples:
+            >>> data = b'Hello\\x00World\\x01'
+            >>> cleaned, count = EncodingGate.strip_control_chars(data)
+            >>> cleaned
+            b'HelloWorld'
+            >>> count
+            2
+        """
+        cleaned = bytearray()
+        removed = 0
+        for byte in data:
+            if byte == 0x00:  # null byte
+                removed += 1
+                continue
+            if byte < 0x20 and byte not in (0x0A, 0x0D):  # control chars
+                removed += 1
+                continue
+            cleaned.append(byte)
+        return (bytes(cleaned), removed)
+
+    @classmethod
+    def clean_file(
+        cls,
+        path: Path,
+        *,
+        repair_mojibake: bool = True,
+        strip_bom: bool = True,
+        strip_control: bool = True,
+    ) -> tuple[bool, list[str]]:
+        """Comprehensive file cleanup: BOM + control chars + mojibake.
+
+        Performs a multi-stage cleanup:
+
+        1. Strip BOM if present (UTF-8, UTF-16 LE/BE).
+        2. Remove null bytes and control characters.
+        3. Decode as UTF-8 (with ``errors='replace'`` fallback).
+        4. Repair cp1251-as-utf8 mojibake if requested.
+        5. Write cleaned content back to disk.
+
+        Args:
+            path: Path to the file to clean.
+            repair_mojibake: Whether to attempt mojibake repair
+                (default: True).
+            strip_bom: Whether to remove BOM (default: True).
+            strip_control: Whether to remove control chars
+                (default: True).
+
+        Returns:
+            A tuple ``(changed, changes)``:
+
+            * ``changed``: ``True`` if any modifications were made.
+            * ``changes``: List of human-readable change descriptions
+              (e.g. ``["BOM (UTF-8) removed", "Mojibake repaired"]``).
+
+        Raises:
+            OSError: If the file cannot be read or written.
+
+        Examples:
+            >>> path = Path("corrupted.md")
+            >>> changed, changes = EncodingGate.clean_file(path)
+            >>> if changed:
+            ...     print(f"Fixed: {', '.join(changes)}")
+        """
+        changes: list[str] = []
+
+        # Read raw bytes
+        data = path.read_bytes()
+        original_size = len(data)
+
+        # 1. Strip BOM
+        if strip_bom:
+            data, bom_type = cls.strip_bom(data)
+            if bom_type is not None:
+                changes.append(f"BOM ({bom_type}) removed")
+
+        # 2. Strip control chars
+        if strip_control:
+            data, removed_count = cls.strip_control_chars(data)
+            if removed_count > 0:
+                changes.append(
+                    f"Control chars removed ({removed_count} bytes)"
+                )
+
+        # 3. Decode as UTF-8 (with fallback)
+        try:
+            text = data.decode('utf-8')
+        except UnicodeDecodeError:
+            # Fallback: replace invalid sequences
+            text = data.decode('utf-8', errors='replace')
+            changes.append("Invalid UTF-8 replaced with U+FFFD")
+
+        # 4. Repair mojibake
+        mojibake_repaired = False
+        if repair_mojibake:
+            text, mojibake_repaired = cls.repair_mojibake(text)
+            if mojibake_repaired:
+                changes.append("Mojibake repaired")
+
+        # 5. Write back if changed
+        if changes:
+            path.write_bytes(text.encode('utf-8'))
+
+        return (bool(changes), changes)

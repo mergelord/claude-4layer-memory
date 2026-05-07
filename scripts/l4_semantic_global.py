@@ -22,6 +22,11 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List
 
+# Force UTF-8 output on Windows to prevent UnicodeEncodeError with emojis
+if sys.platform == 'win32':
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
+
 import chromadb
 from chromadb.config import Settings
 

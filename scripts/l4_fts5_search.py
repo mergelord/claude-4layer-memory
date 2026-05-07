@@ -28,6 +28,11 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+
+# Force UTF-8 output on Windows to prevent UnicodeEncodeError
+if sys.platform == 'win32':
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
 from typing import Iterator, List, Optional, Tuple
 
 # Импорт cost tracker

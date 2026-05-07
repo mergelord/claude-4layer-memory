@@ -299,6 +299,7 @@ See [examples/](examples/) directory for more.
 - **[Usage Guide](docs/guides/USAGE.md)** - Commands and workflows
 - **[Configuration Guide](docs/guides/CONFIGURATION.md)** - Customization options
 - **[Memory Lint](docs/MEMORY_LINT.md)** - Memory validation and health checks
+- **[EncodingGate](docs/ENCODING_GATE.md)** - Encoding validation and mojibake repair
 - **[System Artifacts](docs/SYSTEM_ARTIFACTS.md)** - Understanding C--WINDOWS-system32 and cleanup
 - **[API Reference](docs/api/API.md)** - Python API documentation
 - **[FAQ](docs/FAQ.md)** - Frequently asked questions
