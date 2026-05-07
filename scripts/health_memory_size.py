@@ -149,9 +149,9 @@ def main() -> int:
         for alert in ALERTS:
             print(f"   - {alert}")
         return 1
-    else:
-        print("\n✅ All health checks passed")
-        return 0
+
+    print("\n✅ All health checks passed")
+    return 0
 
 
 if __name__ == "__main__":
