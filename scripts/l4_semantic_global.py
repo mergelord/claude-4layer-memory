@@ -13,41 +13,49 @@ L4 Semantic Global Memory Layer (Hybrid-ready)
 - Chunking contract: retrieval is chunk-level, fusion is document-level
 """
 
+import json
+import logging
 import os
 import sys
 import time
-import logging
-from pathlib import Path
-from typing import List, Dict, Any
 from functools import lru_cache
+from pathlib import Path
+from typing import Any, Dict, List
 
 import chromadb
 from chromadb.config import Settings
-from sentence_transformers import SentenceTransformer
 
 # Common chunker (shared with FTS5 and future BM25)
 # pylint: disable=import-error
 from chunking import chunk_text  # noqa: E402
+from sentence_transformers import SentenceTransformer
+
+# Cross-encoder reranker (optional module)
+try:
+    from l4_rerank import rerank as l4_rerank  # noqa: E402
+except ImportError:
+    l4_rerank = None
 
 # ----------------------------
 # CONFIG
 # ----------------------------
 
 DEFAULT_MODEL = "paraphrase-multilingual-MiniLM-L12-v2"
-MAX_CHUNKS_PER_DOC = 3      # for future aggregation if needed
 
 
 # ----------------------------
 # CORE CLASS
 # ----------------------------
 
+
 class GlobalSemanticMemory:
     """
     L4 semantic memory with hybrid-ready design.
     """
+
     # pylint: disable=too-many-instance-attributes
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.home = Path.home()
 
         self.global_memory = self.home / ".claude" / "memory"
@@ -57,8 +65,7 @@ class GlobalSemanticMemory:
         self.db_path.mkdir(parents=True, exist_ok=True)
 
         self.client = chromadb.PersistentClient(
-            path=str(self.db_path),
-            settings=Settings(anonymized_telemetry=False)
+            path=str(self.db_path), settings=Settings(anonymized_telemetry=False)
         )
 
         model_name = os.getenv("L4_MODEL", DEFAULT_MODEL)
@@ -74,7 +81,7 @@ class GlobalSemanticMemory:
     def _encode_query(self, query: str):
         """Возвращает embedding для запроса. Результат кэшируется."""
         result = self.model.encode([query])[0]
-        return result.tolist() if hasattr(result, 'tolist') else result
+        return result.tolist() if hasattr(result, "tolist") else result
 
     # ----------------------------
     # COLLECTIONS
@@ -94,21 +101,14 @@ class GlobalSemanticMemory:
 
     # pylint: disable=too-many-arguments,too-many-positional-arguments
     def _search_collection(
-        self,
-        collection,
-        embedding: List[float],
-        limit: int,
-        source: str
+        self, collection, embedding: List[float], limit: int, source: str
     ) -> List[Dict[str, Any]]:
         """Поиск по одной коллекции. Возвращает чанки с метаданными."""
 
         if not collection:
             return []
 
-        res = collection.query(
-            query_embeddings=[embedding],
-            n_results=limit
-        )
+        res = collection.query(query_embeddings=[embedding], n_results=limit)
 
         out: List[Dict[str, Any]] = []
 
@@ -122,13 +122,15 @@ class GlobalSemanticMemory:
 
         for i, id_val in enumerate(ids):
             metadata = metas[i] if i < len(metas) else {}
-            out.append({
-                "id": id_val,               # chunk-level unique id
-                "text": docs[i],
-                "metadata": metadata,
-                "distance": dists[i] if i < len(dists) else 999,
-                "source": source
-            })
+            out.append(
+                {
+                    "id": id_val,
+                    "text": docs[i],
+                    "metadata": metadata,
+                    "distance": dists[i] if i < len(dists) else 999,
+                    "source": source,
+                }
+            )
 
         return out
 
@@ -143,7 +145,7 @@ class GlobalSemanticMemory:
         Использует source и имя файла из metadata.
         """
         file = metadata.get("file", "unknown")
-        normalized_source = source.replace('-', '_')
+        normalized_source = source.replace("-", "_")
         return f"[{normalized_source}] {file}"
 
     # ----------------------------
@@ -151,18 +153,21 @@ class GlobalSemanticMemory:
     # ----------------------------
 
     # pylint: disable=too-many-locals
-    def search_all(self, query: str, n_results: int = 10) -> List[Dict[str, Any]]:
+    def search_all(self, query: str, n_results: int = 10, enable_rerank: bool = False) -> List[Dict[str, Any]]:
         """
         Semantic cross-project search (hybrid-ready).
         Возвращает список результатов, каждый с ключом 'key' для RRF
         (document-level) и метаинформацией.
+
+        Args:
+            query: Search query
+            n_results: Number of results to return
+            enable_rerank: Apply cross-encoder reranking to results (default: False)
         """
         start_time = time.time()
         embedding = self._encode_query(query)
 
-        results_by_source: Dict[str, List[Dict[str, Any]]] = {
-            "semantic": []
-        }
+        results_by_source: Dict[str, List[Dict[str, Any]]] = {"semantic": []}
 
         # ------------------------
         # GLOBAL MEMORY
@@ -172,12 +177,7 @@ class GlobalSemanticMemory:
             global_col = self._get_collection(self.global_collection)
 
             results_by_source["semantic"].extend(
-                self._search_collection(
-                    global_col,
-                    embedding,
-                    n_results,
-                    "global"
-                )
+                self._search_collection(global_col, embedding, n_results, "global")
             )
         except Exception:  # nosec
             pass
@@ -190,7 +190,8 @@ class GlobalSemanticMemory:
         collections = self.client.list_collections()
 
         project_cols = [
-            c for c in collections
+            c
+            for c in collections
             if c.name.startswith(prefix) and c.name != self.global_collection
         ]
 
@@ -199,15 +200,10 @@ class GlobalSemanticMemory:
         for c in project_cols:
             try:
                 col = self._get_collection(c.name)
-                project_name = c.name[len(prefix):]
+                project_name = c.name[len(prefix) :]
 
                 results_by_source["semantic"].extend(
-                    self._search_collection(
-                        col,
-                        embedding,
-                        per_col,
-                        project_name
-                    )
+                    self._search_collection(col, embedding, per_col, project_name)
                 )
             except Exception:  # nosec
                 continue
@@ -233,7 +229,7 @@ class GlobalSemanticMemory:
                     "key": doc_key,
                     "best_chunk": chunk,
                     "distance": chunk["distance"],
-                    "chunks": [chunk]
+                    "chunks": [chunk],
                 }
             else:
                 if chunk["distance"] < semantic_docs[doc_key]["distance"]:
@@ -241,25 +237,67 @@ class GlobalSemanticMemory:
                     semantic_docs[doc_key]["distance"] = chunk["distance"]
                 semantic_docs[doc_key]["chunks"].append(chunk)
 
-        sorted_docs = sorted(semantic_docs.values(),
-                             key=lambda x: x["distance"])[:n_results]
+        sorted_docs = sorted(semantic_docs.values(), key=lambda x: x["distance"])[
+            :n_results
+        ]
 
         final = []
         for doc in sorted_docs:
             best = doc["best_chunk"]
-            final.append({
-                "id": best["id"],
-                "key": doc["key"],
-                "text": best["text"],
-                "distance": doc["distance"],
-                "metadata": best["metadata"],
-                "source": best["source"],
-                "_chunks": doc["chunks"]
-            })
+            final.append(
+                {
+                    "id": best["id"],
+                    "key": doc["key"],
+                    "text": best["text"],
+                    "distance": doc["distance"],
+                    "metadata": best["metadata"],
+                    "source": best["source"],
+                    "_chunks": doc["chunks"],
+                }
+            )
 
         elapsed = time.time() - start_time
-        logging.info("Search completed in %.2f seconds, %d results",
-                     elapsed, len(final))
+        logging.info(
+            "Search completed in %.2f seconds, %d results", elapsed, len(final)
+        )
+
+        # ------------------------
+        # OPTIONAL RERANKING
+        # ------------------------
+        if enable_rerank and l4_rerank is not None and final:
+            logging.info("[RERANKING] Applying cross-encoder to %d semantic results...", len(final))
+            rerank_start = time.time()
+
+            # Convert to RankedResult format for reranking
+            from ranking import RankedResult  # noqa: E402
+
+            candidates = []
+            for result in final:
+                candidates.append(
+                    RankedResult(
+                        key=result["key"],
+                        score=1.0 / (1.0 + result["distance"]),  # Convert distance to score
+                        sources={"semantic": [{"snippet": result["text"], "distance": result["distance"]}]}
+                    )
+                )
+
+            # Apply reranking
+            reranked = l4_rerank(query, candidates)
+
+            # Convert back to dict format
+            final_reranked = []
+            for ranked in reranked:
+                # Find original result by key
+                orig = next((r for r in final if r["key"] == ranked.key), None)
+                if orig:
+                    result_dict = orig.copy()
+                    result_dict["rerank_score"] = ranked.rerank_score
+                    final_reranked.append(result_dict)
+
+            final = final_reranked
+
+            rerank_time = time.time() - rerank_start
+            logging.info("[RERANKING] Completed in %.3fs", rerank_time)
 
         return final
 
@@ -278,7 +316,7 @@ class GlobalSemanticMemory:
     # INDEXING (with chunking)
     # ----------------------------
 
-    def index_directory(self, path: Path, collection_name: str):
+    def index_directory(self, path: Path, collection_name: str) -> None:
         """
         Индексирует все markdown файлы в директории, разбивая их на чанки.
 
@@ -311,19 +349,18 @@ class GlobalSemanticMemory:
                 ids.append(chunk_id)
                 documents.append(chunk)
                 embeddings.append(self.model.encode([chunk])[0].tolist())
-                metadatas.append({
-                    "file": md_file.name,
-                    "path": str(md_file),
-                    "source": collection_name.replace(self.collection_prefix, ""),
-                    "chunk_id": i,
-                    "chunk_total": total
-                })
+                metadatas.append(
+                    {
+                        "file": md_file.name,
+                        "path": str(md_file),
+                        "source": collection_name.replace(self.collection_prefix, ""),
+                        "chunk_id": i,
+                        "chunk_total": total,
+                    }
+                )
 
             collection.add(
-                ids=ids,
-                documents=documents,
-                embeddings=embeddings,
-                metadatas=metadatas
+                ids=ids, documents=documents, embeddings=embeddings, metadatas=metadatas
             )
 
 
@@ -331,9 +368,8 @@ class GlobalSemanticMemory:
 # CLI
 # ----------------------------
 
-def main():
-    import json
 
+def main() -> None:
     mem = GlobalSemanticMemory()
 
     if len(sys.argv) < 3:
@@ -362,7 +398,7 @@ def main():
                         "text": r["text"],
                         "distance": r["distance"],
                         "metadata": r["metadata"],
-                        "source": r["source"]
+                        "source": r["source"],
                     }
                     for r in results
                 ]
