@@ -162,7 +162,16 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    # Fix Windows console encoding for emoji output (only when run directly)
+    # Fix Windows console encoding for emoji output
+    # Use errors='replace' to handle emoji gracefully in all contexts
     if sys.platform == "win32":
-        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+        try:
+            sys.stdout = io.TextIOWrapper(
+                sys.stdout.buffer,
+                encoding='utf-8',
+                errors='replace'
+            )
+        except (AttributeError, io.UnsupportedOperation):
+            # stdout already wrapped or not available (e.g., in tests)
+            pass
     sys.exit(main())
