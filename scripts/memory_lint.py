@@ -27,8 +27,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Import refactored checkers and utilities (after sys.path modification)
 # pylint: disable=wrong-import-position,import-error
-from antipattern_checkers import AntiPatternRegistry  # noqa: E402
-from consistency_checkers import ConsistencyRegistry  # noqa: E402
+from antipattern_checkers import AntiPatternRegistry, CheckResult  # noqa: E402
+from consistency_checkers import ConsistencyRegistry, TerminologyInconsistency  # noqa: E402
 from memory_lint_helpers import EncodingGate  # noqa: E402
 
 from utils.base_reporter import BaseReporter  # noqa: E402
@@ -600,7 +600,7 @@ Format as JSON:
 
         return dated_claims
 
-    def check_consistency(self) -> List[Dict]:
+    def check_consistency(self) -> List[TerminologyInconsistency]:
         """Check for inconsistent terminology"""
         self.print_section("Layer 2: Consistency Verification")
 
@@ -617,7 +617,7 @@ Format as JSON:
 
         return inconsistencies
 
-    def _report_inconsistencies(self, inconsistencies: List[Dict]) -> None:
+    def _report_inconsistencies(self, inconsistencies: List[TerminologyInconsistency]) -> None:
         """Report terminology inconsistencies"""
         if not inconsistencies:
             self.print_ok("Terminology is consistent")
@@ -690,12 +690,12 @@ Format as JSON:
 
         return incomplete
 
-    def check_antipatterns(self) -> List[Dict]:
+    def check_antipatterns(self) -> List[CheckResult]:
         """Check for memory anti-patterns (inspired by UI/UX Pro Max)"""
         self.print_section("Layer 2: Anti-patterns Detection")
 
         md_files = self.find_all_md_files()
-        antipatterns = []
+        antipatterns: List[CheckResult] = []
 
         # Use refactored checker registry
         registry = AntiPatternRegistry()
@@ -717,7 +717,7 @@ Format as JSON:
 
         return antipatterns
 
-    def _report_antipatterns(self, antipatterns: List[Dict]) -> None:
+    def _report_antipatterns(self, antipatterns: List[CheckResult]) -> None:
         """Report anti-pattern findings"""
         if not antipatterns:
             self.print_ok("No anti-patterns detected")

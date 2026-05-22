@@ -548,10 +548,10 @@ def cmd_hybrid(fts: L4FTS5Search, query: str, enable_rerank: bool = True) -> Non
     semantic_results = _fetch_semantic_results(query)
 
     # BM25 (optional module)
-    bm25_results: list[dict] = []
+    bm25_results: list[dict] = []  # type: ignore
     if fetch_bm25_results is not None:
         try:
-            bm25_results = fetch_bm25_results(query)
+            bm25_results = fetch_bm25_results(query)  # type: ignore
         except Exception as exc:
             logging.warning("BM25 search failed: %s", exc)
 
