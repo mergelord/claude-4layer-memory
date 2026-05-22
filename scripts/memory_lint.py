@@ -1011,18 +1011,18 @@ def _process_file_repair(
     if issue is None:
         skipped_clean.append(md_file)
         return
-    
+
     try:
         text = md_file.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as exc:
         failed.append((md_file, f"unreadable: {exc}"))
         return
-    
+
     recovered, ok = EncodingGate.repair_mojibake(text)
     if not ok:
         failed.append((md_file, f"could not repair: {issue}"))
         return
-    
+
     if apply:
         backup = md_file.with_suffix(md_file.suffix + ".bak")
         md_file.replace(backup)
@@ -1030,7 +1030,7 @@ def _process_file_repair(
     else:
         preview = md_file.with_suffix(md_file.suffix + ".fixed")
         preview.write_text(recovered, encoding="utf-8")
-    
+
     repaired_paths.append(md_file)
 
 
@@ -1048,7 +1048,7 @@ def _print_repair_summary(
         f"  repaired: {len(repaired_paths)}\n"
         f"  manual-review: {len(failed)}"
     )
-    
+
     for path in repaired_paths:
         try:
             rel = path.relative_to(memory_path)
@@ -1056,7 +1056,7 @@ def _print_repair_summary(
             rel = path
         suffix = ".bak (original)" if apply else ".fixed (preview)"
         print(f"  REPAIRED: {rel}  ->  {rel}{suffix}")
-    
+
     if failed:
         print("\nManual review required for these files:", file=sys.stderr)
         for path, reason in failed:
@@ -1087,16 +1087,16 @@ def _run_encoding_repair(memory_path: Path, *, apply: bool) -> int:
     if not memory_path.exists():
         print(f"Memory path does not exist: {memory_path}", file=sys.stderr)
         return 1
-    
+
     repaired_paths: List[Path] = []
     skipped_clean: List[Path] = []
     failed: List[Tuple[Path, str]] = []
-    
+
     for md_file in _safe_rglob_md(memory_path):
         _process_file_repair(md_file, apply, repaired_paths, skipped_clean, failed)
-    
+
     _print_repair_summary(memory_path, repaired_paths, skipped_clean, failed, apply)
-    
+
     return 1 if failed else 0
 
 
@@ -1177,10 +1177,10 @@ def _handle_encoding_operations(args, memory_path: Path) -> bool:
     """
     if args.validate_encoding:
         sys.exit(_run_encoding_validation(memory_path))
-    
+
     if args.repair_mojibake:
         sys.exit(_run_encoding_repair(memory_path, apply=args.apply))
-    
+
     return False
 
 
@@ -1188,7 +1188,7 @@ def _run_lint_layers(lint: MemoryLint, args) -> None:
     """Run the appropriate lint layers based on arguments."""
     if args.layer in ["1", "all"]:
         lint.run_layer1()
-    
+
     if args.layer in ["2", "all"] and not args.quick:
         lint.run_layer2()
 
@@ -1197,9 +1197,9 @@ def _save_report_if_requested(lint: MemoryLint, report_path: str) -> None:
     """Save lint report to JSON file if requested."""
     if not report_path:
         return
-    
+
     import json  # pylint: disable=import-outside-toplevel
-    
+
     report = lint.generate_report()
     with open(report_path, "w", encoding="utf-8") as f:
         json.dump(report, f, indent=2)
@@ -1209,31 +1209,31 @@ def _save_report_if_requested(lint: MemoryLint, report_path: str) -> None:
 def main():
     parser = _create_argument_parser()
     args = parser.parse_args()
-    
+
     # Validate argument combinations
     if args.apply and not args.repair_mojibake:
         parser.error("--apply requires --repair-mojibake")
-    
+
     memory_path = _get_memory_path(args)
-    
+
     # Handle encoding operations (these exit immediately)
     _handle_encoding_operations(args, memory_path)
-    
+
     # Run lint
     lint = MemoryLint(memory_path, quick_mode=args.quick)
-    
+
     # Pre-delivery checklist mode
     if args.checklist:
         checklist = lint.pre_delivery_checklist()
         all_passed = all(checklist.values())
         sys.exit(0 if all_passed else 1)
-    
+
     # Run lint layers
     _run_lint_layers(lint, args)
-    
+
     # Save report if requested
     _save_report_if_requested(lint, args.report)
-    
+
     # Exit with appropriate code
     sys.exit(0 if len(lint.errors) == 0 else 1)
 
