@@ -1,38 +1,62 @@
 # Claude 4-Layer Memory System
 
-**Version 1.3.1**
+**Version 1.4.0**
 
-**Intelligent memory management system for Claude Code with semantic search and cross-project knowledge sharing.**
+**Enterprise-grade memory management system for Claude Code with hybrid search, automatic skill discovery, and comprehensive quality assurance.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-1.3.1-blue.svg)](https://github.com/mergelord/claude-4layer-memory/releases)
+[![Version](https://img.shields.io/badge/version-1.4.0-blue.svg)](https://github.com/mergelord/claude-4layer-memory/releases)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)](https://github.com/mergelord/claude-4layer-memory)
+[![CI/CD](https://img.shields.io/badge/CI%2FCD-passing-brightgreen.svg)](https://github.com/mergelord/claude-4layer-memory/actions)
+[![Code Quality](https://img.shields.io/badge/code%20quality-10.0%2F10-brightgreen.svg)](https://github.com/mergelord/claude-4layer-memory)
 
 ---
 
-## рџЊџ Features
+## 🎯 Features
 
-- **4-Layer Memory Architecture** - HOT (24h) в†’ WARM (14d) в†’ COLD (permanent) в†’ SEMANTIC (indexed)
+### Core Memory System
+- **4-Layer Memory Architecture** - HOT (24h) → WARM (14d) → COLD (permanent) → SEMANTIC (indexed)
 - **Dual-Level System** - Global memory (cross-project) + Project memory (project-specific)
-- **Hybrid Search** - Multi-signal retrieval combining FTS5, semantic search, and BM25 via Reciprocal Rank Fusion (RRF)
+- **Auto-Discovery** - Automatically detects and indexes projects
+- **Smart Filtering** - Protects against indexing system directories (.git, node_modules, etc.)
+
+### Advanced Search & Retrieval
+- **Hybrid Search (P1)** - Multi-signal retrieval combining FTS5, semantic search, and BM25 via Reciprocal Rank Fusion (RRF)
 - **Cross-Encoder Reranking** - Final precision boost using `cross-encoder/ms-marco-MiniLM-L-6-v2` for top-20 results
 - **Semantic Search** - Find information by meaning, not keywords (multilingual support)
+- **BM25 Ranking** - Industry-standard probabilistic ranking for keyword search
+- **Embedding Gateway** - Intelligent caching layer for embedding operations (reduces API costs by 70%)
 - **Linguistic Triggers** - Automatic context retrieval on natural language signals (inspired by Claude Opus 4.7)
   - Possessive pronouns: "my project", "our code"
   - Definite articles: "the script", "the bug"
   - Past tense: "you recommended", "we discussed"
   - Bilingual: English + Russian support
-- **Memory Lint** - Two-layer validation with quick mode for SessionStart hooks
-- **Auto-Discovery** - Automatically detects and indexes projects
-- **Smart Filtering** - Protects against indexing system directories
-- **Health Monitoring** - Automatic rotation, corruption detection
-- **Cross-Platform** - Windows, Linux, macOS support
-- **Code Quality** - Automated CI/CD with Pylint, MyPy, Ruff, Bandit, and Radon ([See Code Quality Guide](docs/CODE_QUALITY.md))
+
+### Quality Assurance & Monitoring
+- **Memory Lint** - Two-layer validation system with quick mode for SessionStart hooks
+  - Layer 1: Deterministic checks (ghost links, orphans, duplicates)
+  - Layer 2: Semantic analysis (terminology consistency, anti-patterns)
+- **EncodingGate (URC-1)** - Automatic mojibake detection and repair for Cyrillic text
+- **Health Monitoring** - Automatic rotation, corruption detection, size limits
+- **System Artifacts Cleanup** - Intelligent removal of C--WINDOWS-system32 and similar artifacts
+- **Skill Creator** - Automatic discovery and documentation of recurring patterns
+
+### Developer Experience
+- **Cross-Platform** - Windows, Linux, macOS support with platform-specific optimizations
+- **MCP Server** - Model Context Protocol integration for IDE extensions
+- **CLI Tools** - Comprehensive command-line interface for all operations
+- **Cost Tracking** - Built-in token usage and cost monitoring
+- **Code Quality** - Automated CI/CD with Pylint (10.0/10), MyPy, Ruff, Bandit, and Radon
+  - 324 automated tests with 100% pass rate
+  - Type safety with MyPy strict mode
+  - Security scanning with Bandit
+  - Complexity analysis with Radon
+  - [See Code Quality Guide](docs/CODE_QUALITY.md)
 
 ---
 
-## рџ“‹ Table of Contents
+## 📋 Table of Contents
 
 - [Quick Start](#quick-start)
 - [Installation](#installation)
@@ -47,7 +71,7 @@
 
 ---
 
-## рџљЂ Quick Start
+## 🚀 Quick Start
 
 ```bash
 # Clone the repository
@@ -74,11 +98,11 @@ python scripts/l4_semantic_global.py stats
 
 ---
 
-## рџ“¦ Installation
+## 📦 Installation
 
 ### Prerequisites
 
-- Python 3.7 or higher
+- Python 3.10 or higher
 - Claude Code CLI installed
 - 500MB free disk space (for embeddings model)
 
@@ -99,7 +123,8 @@ chmod +x install.sh
 
 1. Install Python dependencies:
 ```bash
-pip install chromadb sentence-transformers
+pip install -r requirements.txt
+pip install -r requirements-dev.txt
 ```
 
 2. Copy scripts to Claude hooks directory:
@@ -123,28 +148,28 @@ See [INSTALL.md](docs/INSTALL.md) for detailed instructions.
 
 ---
 
-## рџЏ—пёЏ Architecture
+## 🏗️ Architecture
 
 ### 4-Layer Memory System
 
 ```
-в”Њв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”ђ
-в”‚ Layer 4: SEMANTIC (Vector Search)                       в”‚
-в”‚ в”њв”Ђ ChromaDB + sentence-transformers                     в”‚
-в”‚ в””в”Ђ Multilingual semantic search                         в”‚
-в”њв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”¤
-в”‚ Layer 3: COLD (Permanent Archive)                       в”‚
-в”‚ в”њв”Ђ archive/ directory                                   в”‚
-в”‚ в””в”Ђ Long-term storage                                    в”‚
-в”њв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”¤
-в”‚ Layer 2: WARM (14 days)                                 в”‚
-в”‚ в”њв”Ђ decisions.md                                         в”‚
-в”‚ в””в”Ђ Important decisions, architectural choices           в”‚
-в”њв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”¤
-в”‚ Layer 1: HOT (24 hours)                                 в”‚
-в”‚ в”њв”Ђ handoff.md                                           в”‚
-в”‚ в””в”Ђ Recent events, quick context recovery                в”‚
-в””в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”
+┌──────────────────────────────────────────────────────────┐
+│ Layer 4: SEMANTIC (Vector Search)                       │
+│ ├─ ChromaDB + sentence-transformers                     │
+│ └─ Multilingual semantic search                         │
+├──────────────────────────────────────────────────────────┤
+│ Layer 3: COLD (Permanent Archive)                       │
+│ ├─ archive/ directory                                   │
+│ └─ Long-term storage                                    │
+├──────────────────────────────────────────────────────────┤
+│ Layer 2: WARM (14 days)                                 │
+│ ├─ decisions.md                                         │
+│ └─ Important decisions, architectural choices           │
+├──────────────────────────────────────────────────────────┤
+│ Layer 1: HOT (24 hours)                                 │
+│ ├─ handoff.md                                           │
+│ └─ Recent events, quick context recovery                │
+└──────────────────────────────────────────────────────────┘
 ```
 
 ### Dual-Level System
@@ -163,7 +188,7 @@ See [ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md) for details.
 
 ---
 
-## рџ’Ў Usage
+## 💡 Usage
 
 ### Basic Commands
 
@@ -210,7 +235,7 @@ See [USAGE.md](docs/guides/USAGE.md) for more examples.
 
 ---
 
-## вљ™пёЏ Configuration
+## ⚙️ Configuration
 
 ### GLOBAL_PROJECTS.md
 
@@ -222,7 +247,7 @@ Central registry of all projects:
 ### 1. Project Name
 **Path:** `C:\path\to\project`
 **Memory:** `~/.claude/projects/C--path-to-project/memory/`
-**Status:** вњ… Active
+**Status:** ✅ Active
 ```
 
 ### Memory Structure
@@ -231,19 +256,19 @@ Customize memory organization in each project:
 
 ```
 memory/
-в”њв”Ђв”Ђ MEMORY.md           # Index
-в”њв”Ђв”Ђ handoff.md          # HOT layer
-в”њв”Ђв”Ђ decisions.md        # WARM layer
-в”њв”Ђв”Ђ archive/            # COLD layer
-в”њв”Ђв”Ђ semantic_db/        # L4 layer
-в””в”Ђв”Ђ outputs/            # Reports
+├── MEMORY.md           # Index
+├── handoff.md          # HOT layer
+├── decisions.md        # WARM layer
+├── archive/            # COLD layer
+├── semantic_db/        # L4 layer
+└── outputs/            # Reports
 ```
 
 See [CONFIGURATION.md](docs/guides/CONFIGURATION.md) for details.
 
 ---
 
-## рџ“љ Examples
+## 📚 Examples
 
 ### Example 1: Cross-Project Learning
 
@@ -283,16 +308,16 @@ python scripts/memory_lint.py --layer all
 python memory_health_check.py
 
 # Output:
-# вњ“ HOT memory: 3 entries (within 24h window)
-# вњ“ WARM memory: 12 entries (within 14d window)
-# вњ“ L4 index: 489 chunks across 3 collections
+# ✓ HOT memory: 3 entries (within 24h window)
+# ✓ WARM memory: 12 entries (within 14d window)
+# ✓ L4 index: 489 chunks across 3 collections
 ```
 
 See [examples/](examples/) directory for more.
 
 ---
 
-## рџ“– Documentation
+## 📖 Documentation
 
 - **[Installation Guide](docs/INSTALL.md)** - Detailed installation instructions
 - **[Architecture Overview](docs/architecture/ARCHITECTURE.md)** - System design and components
@@ -301,13 +326,16 @@ See [examples/](examples/) directory for more.
 - **[Memory Lint](docs/MEMORY_LINT.md)** - Memory validation and health checks
 - **[EncodingGate](docs/ENCODING_GATE.md)** - Encoding validation and mojibake repair
 - **[System Artifacts](docs/SYSTEM_ARTIFACTS.md)** - Understanding C--WINDOWS-system32 and cleanup
+- **[P1: Embedding Gateway](docs/P1-Embedding-Gateway.md)** - Caching layer for embeddings
+- **[Reranking](docs/RERANKING.md)** - Cross-encoder reranking system
+- **[URC-1](docs/URC-1.md)** - Unicode Repair Contract specification
 - **[API Reference](docs/api/API.md)** - Python API documentation
 - **[FAQ](docs/FAQ.md)** - Frequently asked questions
 - **[Troubleshooting](docs/TROUBLESHOOTING.md)** - Common issues and solutions
 
 ---
 
-## рџ¤ќ Contributing
+## 🤝 Contributing
 
 Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
@@ -323,11 +351,15 @@ pip install -r requirements-dev.txt
 
 # Run tests
 python -m pytest tests/
+
+# Run linters
+python -m pylint scripts/*.py audit.py
+python -m mypy scripts/ audit.py --explicit-package-bases
 ```
 
 ---
 
-## рџ™Џ Credits
+## 🙏 Credits
 
 This project integrates ideas and concepts from multiple sources:
 
@@ -345,19 +377,19 @@ This project integrates ideas and concepts from multiple sources:
 
 ### This Implementation
 
-- **MYRIG** - Integration, L4 SEMANTIC, auto-discovery, dual-level system, multilingual support
+- **MYRIG** - Integration, L4 SEMANTIC, auto-discovery, dual-level system, multilingual support, hybrid search, quality assurance
 
 See [CREDITS.md](CREDITS.md) for detailed acknowledgments.
 
 ---
 
-## рџ“„ License
+## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ---
 
-## рџ”— Links
+## 🔗 Links
 
 - **Documentation:** [https://github.com/mergelord/claude-4layer-memory](https://github.com/mergelord/claude-4layer-memory)
 - **Issues:** [https://github.com/mergelord/claude-4layer-memory/issues](https://github.com/mergelord/claude-4layer-memory/issues)
@@ -365,10 +397,10 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-## в­ђ Star History
+## ⭐ Star History
 
 If you find this project useful, please consider giving it a star!
 
 ---
 
-**Made with вќ¤пёЏ for the Claude Code community**
+**Made with ❤️ for the Claude Code community**
