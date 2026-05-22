@@ -39,6 +39,13 @@ jobs:
         echo "$CHANGELOG" >> $GITHUB_OUTPUT
         echo "EOF" >> $GITHUB_OUTPUT
 
+    - name: Remove empty files
+      run: |
+        # Remove __init__.py files (they are empty and cause upload errors)
+        find scripts -name "__init__.py" -size 0 -delete
+        find utils -name "__init__.py" -size 0 -delete
+        find tests -name "__init__.py" -size 0 -delete
+
     - name: Create Release
       uses: softprops/action-gh-release@v2
       with:
@@ -48,11 +55,9 @@ jobs:
         generate_release_notes: true
         files: |
           scripts/*.py
-          scripts/*.sh
-          scripts/*.bat
-          templates/*.md
+          scripts/windows/*.bat
+          scripts/linux/*.sh
           templates/*.bat
-          templates/*.sh
           install.sh
           install.bat
           audit.py
