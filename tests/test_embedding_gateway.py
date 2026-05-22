@@ -4,17 +4,16 @@
 
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
-import pytest
-
-sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
+from unittest.mock import MagicMock
 
 # Мокаем внешние библиотеки, чтобы избежать импорта реальных моделей
 sys.modules['sentence_transformers'] = MagicMock()
 sys.modules['chromadb'] = MagicMock()
 sys.modules['chromadb.config'] = MagicMock()
 
-from l4_semantic_global import GlobalSemanticMemory
+sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
+
+from l4_semantic_global import GlobalSemanticMemory  # noqa: E402
 
 
 class TestEmbeddingGateway:
@@ -53,7 +52,7 @@ class TestEmbeddingGateway:
         memory.global_collection = 'test_global'
 
         # Вызываем поиск
-        results = memory.search_all("test query", n_results=3)
+        _ = memory.search_all("test query", n_results=3)
 
         # Проверяем, что model.encode вызван ровно 1 раз (через _encode_query)
         assert memory.model.encode.call_count == 1, (

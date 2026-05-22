@@ -61,10 +61,11 @@ class TestSkillCreatorInit:
 
     def test_safe_file_path_invalid(self, temp_claude_dir):
         """Test safe_file_path rejects path outside claude_dir"""
+        import tempfile
         creator = SkillCreator()
         creator.claude_dir = temp_claude_dir
 
-        invalid_path = Path("/tmp/outside.json")
+        invalid_path = Path(tempfile.gettempdir()) / "outside.json"
         with pytest.raises(ValueError, match="Invalid path"):
             creator.safe_file_path(invalid_path)
 
@@ -89,7 +90,8 @@ class TestSessionAnalysis:
 
     def test_analyze_session_nonexistent(self, creator):
         """Test analyzing nonexistent session file"""
-        fake_file = Path("/tmp/nonexistent.jsonl")
+        import tempfile
+        fake_file = Path(tempfile.gettempdir()) / "nonexistent-test.jsonl"
         patterns = creator.analyze_session(fake_file)
         assert patterns == []
 

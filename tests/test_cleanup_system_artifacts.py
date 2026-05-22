@@ -111,7 +111,8 @@ class TestFindSystemArtifacts:
 
     def test_nonexistent_directory(self):
         """Test with nonexistent directory"""
-        fake_dir = Path("/tmp/nonexistent-12345")
+        import tempfile
+        fake_dir = Path(tempfile.gettempdir()) / "nonexistent-12345-test"
         artifacts = find_system_artifacts(fake_dir)
         assert artifacts == []
 

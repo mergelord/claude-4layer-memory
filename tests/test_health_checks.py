@@ -74,7 +74,7 @@ def test_health_check_timeout():
     import time
     start = time.time()
 
-    result = subprocess.run(
+    _ = subprocess.run(
         [sys.executable, str(HEALTH_SCRIPT)],
         capture_output=True, text=True, timeout=30,
     )

@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""L4 BM25 Search – независимый лексический источник для гибридного поиска.
+# pylint: disable=duplicate-code
+# -*- coding: utf-8 -*-
+"""
+L4 BM25 Search – независимый лексический источник для гибридного поиска.
 
 Использует функцию bm25() встроенного FTS5-движка SQLite.
 Возвращает результаты в контракте, ожидаемом RRF-слиянием.
@@ -7,26 +10,63 @@
 Контракт возвращаемых результатов:
 - key: document-level идентификатор "[source] filename"
 - rank: позиция в выдаче BM25 (1-based, чем меньше тем лучше)
-- bm25_score: сырое значение BM25 (отрицательное, чем ближе к 0 тем лучше)
+- bm25_score: сырое значение BM25 (чем ближе к 0, тем лучше)
 - snippet: фрагмент текста с контекстом совпадения
-- source_type: "bm25"
+- source_type: "bm25" (retrieval method identifier, not original document source)
 """
 
 import logging
+import os
+import re
 import sqlite3
-from collections.abc import Iterator
+import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Iterator, List, TypedDict
 
 # Параметры snippet() функции FTS5
 SNIPPET_COLUMN = 2  # Индекс колонки content в FTS таблице
-SNIPPET_START_MARKER = "»"
-SNIPPET_END_MARKER = "«"
-SNIPPET_ELLIPSIS = "..."
+SNIPPET_START_MARKER = '»'
+SNIPPET_END_MARKER = '«'
+SNIPPET_ELLIPSIS = '...'
 SNIPPET_MAX_TOKENS = 60  # Максимум токенов в snippet
 
 
+# ---------------------------------------------------------------------------
+# Типы для улучшения контракта (mypy‑friendly)
+# ---------------------------------------------------------------------------
+class BM25Result(TypedDict):
+    """Структура одного результата BM25‑поиска. Все поля обязательны."""
+    key: str
+    rank: int
+    bm25_score: float
+    snippet: str
+    source_type: str
+
+
+# ---------------------------------------------------------------------------
+# Нормализация запроса (защита от MATCH syntax injection)
+# ---------------------------------------------------------------------------
+def _sanitize_query(query: str) -> str:
+    """
+    Убирает из запроса операторы FTS5 MATCH, но сохраняет пунктуацию.
+
+    Удаляются: кавычки, скобки, ключевые слова AND, OR, NOT, NEAR.
+    Остаются: буквы, цифры, пробелы, знаки пунктуации (+, #, @, . и т.д.).
+    """
+    if not query.strip():
+        return ""
+    # Удаляем только FTS-операторы и кавычки/скобки
+    sanitized = re.sub(r'\b(AND|OR|NOT|NEAR)\b', '', query, flags=re.IGNORECASE)
+    sanitized = re.sub(r'["()]', '', sanitized)
+    # Схлопываем множественные пробелы
+    sanitized = re.sub(r'\s+', ' ', sanitized).strip()
+    return sanitized
+
+
+# ---------------------------------------------------------------------------
+# Подключение к FTS5 БД
+# ---------------------------------------------------------------------------
 @contextmanager
 def _get_fts5_connection() -> Iterator[sqlite3.Connection]:
     """Получить подключение к FTS5 БД (без зависимости от L4FTS5Search)."""
@@ -45,29 +85,31 @@ def _get_fts5_connection() -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
-def fetch_bm25_results(query: str, limit: int = 20) -> list[dict[str, Any]]:
-    """Возвращает список результатов BM25-поиска, готовых для подачи в RRF.
+# ---------------------------------------------------------------------------
+# Основная функция поиска
+# ---------------------------------------------------------------------------
+def fetch_bm25_results(query: str, limit: int = 20) -> List[BM25Result]:
+    """
+    Возвращает список результатов BM25-поиска, готовых для подачи в RRF.
 
     Использует встроенную функцию bm25() в SQLite FTS5 для ранжирования.
     BM25 scores отрицательные — чем ближе к 0, тем релевантнее документ.
 
     Args:
-        query: Поисковый запрос (FTS5 query syntax)
-        limit: Максимальное количество результатов (default: 20)
+        query: Поисковый запрос (свободный текст; нормализуется автоматически).
+        limit: Максимальное количество результатов (default: 20).
 
     Returns:
         Список словарей с полями: key, rank, bm25_score, snippet, source_type.
-        Пустой список если BM25 недоступен или произошла ошибка.
-
-    Examples:
-        >>> results = fetch_bm25_results("memory system")
-        >>> results[0]["key"]
-        '[global] architecture.md'
-        >>> results[0]["source_type"]
-        'bm25'
-
+        Пустой список если BM25 недоступен, запрос пуст или произошла ошибка.
     """
-    results = []
+    # Защита от пустого запроса
+    normalized = _sanitize_query(query)
+    if not normalized:
+        return []
+
+    results: List[BM25Result] = []
+    start_time = time.perf_counter()
 
     try:
         with _get_fts5_connection() as conn:
@@ -80,7 +122,7 @@ def fetch_bm25_results(query: str, limit: int = 20) -> list[dict[str, Any]]:
                     bm25(memory_fts) AS bm25_score
                 FROM memory_fts
                 WHERE memory_fts MATCH ?
-                ORDER BY bm25_score
+                ORDER BY bm25_score, path      -- детерминированный порядок
                 LIMIT ?
                 """,
                 (
@@ -89,28 +131,33 @@ def fetch_bm25_results(query: str, limit: int = 20) -> list[dict[str, Any]]:
                     SNIPPET_END_MARKER,
                     SNIPPET_ELLIPSIS,
                     SNIPPET_MAX_TOKENS,
-                    query,
-                    limit,
-                ),
+                    normalized,
+                    limit
+                )
             ).fetchall()
 
         for i, row in enumerate(rows, start=1):
-            results.append(
-                {
-                    "key": f"[{row['source']}] {row['path']}",
-                    "rank": i,
-                    "bm25_score": row["bm25_score"],
-                    "snippet": row["snippet"],
-                    "source_type": "bm25",
-                },
-            )
+            # Ключ — document-level: [source] filename (только имя файла)
+            file_name = os.path.basename(row['path'])
+            results.append({
+                "key": f"[{row['source']}] {file_name}",
+                "rank": i,
+                "bm25_score": row['bm25_score'],
+                "snippet": row['snippet'],
+                # Retrieval method identifier, not original document source
+                "source_type": "bm25",
+            })
+
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+        logging.info(
+            "BM25 search completed: query=%r, results=%d, latency_ms=%.2f",
+            normalized, len(results), elapsed_ms,
+        )
 
     except Exception as exc:
         logging.warning(
             "BM25 search failed (query=%r, limit=%d): %s",
-            query,
-            limit,
-            exc,
+            normalized, limit, exc
         )
         return []
 

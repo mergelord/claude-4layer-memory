@@ -4,17 +4,18 @@
 
 import sys
 from pathlib import Path
-from unittest.mock import patch, MagicMock
-import pytest
+from unittest.mock import MagicMock
 
-# окаем sentence-transformers и chromadb  импорта нашего модуля
+# Мокаем sentence-transformers и chromadb ДО импорта нашего модуля
 sys.modules['sentence_transformers'] = MagicMock()
 sys.modules['chromadb'] = MagicMock()
 sys.modules['chromadb.config'] = MagicMock()
 
+# Добавляем путь к scripts перед импортом
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
-from l4_semantic_global import GlobalSemanticMemory
-from chunking import chunk_text
+
+from l4_semantic_global import GlobalSemanticMemory  # noqa: E402
+from chunking import chunk_text  # noqa: E402
 
 
 # -------------------------------------------------------------------
