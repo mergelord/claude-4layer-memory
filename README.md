@@ -23,6 +23,7 @@
 
 ### Advanced Search & Retrieval
 - **Hybrid Search (P1)** - Multi-signal retrieval combining FTS5, semantic search, and BM25 via Reciprocal Rank Fusion (RRF)
+- **Parallel Search** - ThreadPoolExecutor-based concurrent execution for 2-3x performance boost
 - **Cross-Encoder Reranking** - Final precision boost using `cross-encoder/ms-marco-MiniLM-L-6-v2` for top-20 results
 - **Semantic Search** - Find information by meaning, not keywords (multilingual support)
 - **BM25 Ranking** - Industry-standard probabilistic ranking for keyword search
@@ -288,7 +289,26 @@ l4_search_all.bat "how to handle Unicode errors"
 l4_search.bat "API integration"
 ```
 
-### Example 3: Memory Lint Quick Check
+### Example 3: Parallel Hybrid Search
+
+```bash
+# Standard hybrid search (sequential)
+python scripts/l4_fts5_search.py hybrid "memory system"
+
+# Parallel hybrid search (2-3x faster)
+python scripts/l4_fts5_search.py hybrid --parallel "memory system"
+
+# Benchmark performance comparison
+python scripts/benchmark_parallel_search.py "memory system"
+
+# Output:
+# Sequential (avg): 2.450s
+# Parallel (avg):   0.890s
+# Speedup: 2.75x
+# Improvement: 63.7%
+```
+
+### Example 4: Memory Lint Quick Check
 
 ```bash
 # Quick check (SessionStart hook - fast)
@@ -301,7 +321,7 @@ python scripts/memory_lint.py --layer 1
 python scripts/memory_lint.py --layer all
 ```
 
-### Example 4: Health Check
+### Example 5: Health Check
 
 ```bash
 # Check memory system health
