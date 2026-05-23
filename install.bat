@@ -1,6 +1,6 @@
 @echo off
 REM Claude 4-Layer Memory System - Windows Installation Script
-REM Copyright (c) 2026 MYRIG and Contributors
+REM Copyright (c) 2026 Project Contributors
 REM Licensed under MIT License
 
 echo ========================================

@@ -397,7 +397,7 @@ This project integrates ideas and concepts from multiple sources:
 
 ### This Implementation
 
-- **MYRIG** - Integration, L4 SEMANTIC, auto-discovery, dual-level system, multilingual support, hybrid search, quality assurance
+- **Project Contributors** - Integration, L4 SEMANTIC, auto-discovery, dual-level system, multilingual support, hybrid search, quality assurance
 
 See [CREDITS.md](CREDITS.md) for detailed acknowledgments.
 

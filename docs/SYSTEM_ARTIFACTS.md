@@ -58,7 +58,7 @@ rm -rf ~/.claude/projects/C-WINDOWS-system32/
 
 **Невозможно.** Это встроенное поведение Claude Code CLI.
 
-**Альтернатива:** Запускайте CLI без админских прав, если они не нужны. Тогда CWD будет `%USERPROFILE%` (C:\Users\MYRIG), а не `system32`.
+**Альтернатива:** Запускайте CLI без админских прав, если они не нужны. Тогда CWD будет `%USERPROFILE%` (C:\Users\USERNAME), а не `system32`.
 
 ## Влияние на систему памяти
 

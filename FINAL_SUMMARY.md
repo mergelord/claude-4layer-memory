@@ -236,7 +236,7 @@ This project wouldn't exist without:
 
 - **qwwiwi** - 4-layer architecture, HOT/WARM/COLD concept
 - **cablate** - Atomic wiki system
-- **MYRIG** - Integration, L4 SEMANTIC, auto-discovery
+- **Project Contributors** - Integration, L4 SEMANTIC, auto-discovery
 - **Claude Code Community** - Feedback and support
 
 ---

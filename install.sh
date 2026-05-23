@@ -1,6 +1,6 @@
 #!/bin/bash
 # Claude 4-Layer Memory System - Linux/Mac Installation Script
-# Copyright (c) 2026 MYRIG and Contributors
+# Copyright (c) 2026 Project Contributors
 # Licensed under MIT License
 
 set -e

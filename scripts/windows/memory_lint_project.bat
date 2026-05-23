@@ -6,14 +6,14 @@ setlocal
 
 if "%~1"=="" (
     echo Usage: memory_lint_project.bat [project_path]
-    echo Example: memory_lint_project.bat C:\BAT\msfs_autoland
+    echo Example: memory_lint_project.bat C:\projects\my-project
     exit /b 1
 )
 
 set PROJECT_PATH=%~1
 
 REM Convert path to memory directory format
-REM C:\BAT\msfs_autoland -> C--BAT-msfs_autoland
+REM C:\projects\my-project -> C--projects-my-project
 set MEMORY_NAME=%PROJECT_PATH::=-%
 set MEMORY_NAME=%MEMORY_NAME:\=-%
 

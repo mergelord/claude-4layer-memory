@@ -62,7 +62,7 @@
 .EXAMPLE
     # Dry-run with explicit paths (recommended first step).
     .\deploy\install_to_claude_dir.ps1 -Source 'D:\src\claude-4layer-memory' `
-        -Target 'C:\Users\MYRIG\.claude' -DryRun
+        -Target 'C:\Users\USERNAME\.claude' -DryRun
 
 .EXAMPLE
     # Real run with a custom backup location and Claude Code already closed.

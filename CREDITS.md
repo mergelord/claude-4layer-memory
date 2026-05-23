@@ -66,7 +66,7 @@ The foundational architecture of this memory system is based on qwwiwi's groundb
 
 ## 🔨 This Implementation
 
-### MYRIG - Integration and Extensions
+### Project Contributors - Integration and Extensions
 
 **Contributions to this project:**
 
