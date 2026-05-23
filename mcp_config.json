@@ -3,10 +3,10 @@
     "claude-4layer-memory": {
       "command": "python",
       "args": [
-        "C:\\BAT\\claude-4layer-memory\\mcp_server.py"
+        "<INSTALL_DIR>/mcp_server.py"
       ],
       "env": {
-        "PYTHONPATH": "C:\\BAT\\claude-4layer-memory\\scripts"
+        "PYTHONPATH": "<INSTALL_DIR>/scripts"
       }
     }
   }

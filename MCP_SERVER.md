@@ -46,7 +46,7 @@ pip install -r requirements.txt
     "claude-4layer-memory": {
       "command": "python",
       "args": [
-        "C:\\BAT\\claude-4layer-memory\\mcp_server.py"
+        "C:\\path\\to\\claude-4layer-memory\\mcp_server.py"
       ]
     }
   }

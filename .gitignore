@@ -102,6 +102,7 @@ tmp/
 # User-specific configs
 GLOBAL_PROJECTS.md
 settings.json
+pre_install_audit_report.json
 
 # Node.js
 node_modules/

@@ -164,4 +164,4 @@
 
 ---
 
-**For MYRIG:** Excellent progress! The core system is solid. Tomorrow we can finish documentation and prepare for GitHub publication.
+**Status note:** Excellent progress! The core system is solid. Tomorrow we can finish documentation and prepare for GitHub publication.

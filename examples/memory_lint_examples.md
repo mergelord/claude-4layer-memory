@@ -18,7 +18,7 @@ python memory_lint.py ~/.claude/memory
              Memory Lint - Layer 1: Deterministic Checks              
 ======================================================================
 
-[OK] Memory directory: C:\Users\MYRIG\.claude\memory
+[OK] Memory directory: C:\Users\USERNAME\.claude\memory
 
 ## Layer 1: Ghost Links Detection
 ----------------------------------------------------------------------
@@ -101,7 +101,7 @@ Incomplete sections: 0
 
 **Command:**
 ```bash
-python memory_lint.py ~/.claude/projects/C--BAT-msfs-autoland/memory
+python memory_lint.py ~/.claude/projects/C--projects-my-project/memory
 ```
 
 **Output:**
@@ -111,7 +111,7 @@ python memory_lint.py ~/.claude/projects/C--BAT-msfs-autoland/memory
              Memory Lint - Layer 1: Deterministic Checks              
 ======================================================================
 
-[OK] Memory directory: C:\Users\MYRIG\.claude\projects\C--BAT-msfs-autoland\memory
+[OK] Memory directory: C:\Users\USERNAME\.claude\projects\C--projects-my-project\memory
 
 ## Layer 1: Ghost Links Detection
 ----------------------------------------------------------------------
@@ -202,7 +202,7 @@ python memory_lint.py ~/.claude/memory --layer 1
              Memory Lint - Layer 1: Deterministic Checks              
 ======================================================================
 
-[OK] Memory directory: C:\Users\MYRIG\.claude\memory
+[OK] Memory directory: C:\Users\USERNAME\.claude\memory
 
 ## Layer 1: Ghost Links Detection
 ----------------------------------------------------------------------
@@ -308,7 +308,7 @@ Report saved: lint_report.json
 ```json
 {
   "timestamp": "2026-04-19T00:57:00.000000",
-  "memory_path": "C:\\Users\\MYRIG\\.claude\\memory",
+  "memory_path": "C:\\Users\\USERNAME\\.claude\\memory",
   "errors": 1,
   "warnings": 2,
   "info": 3,
