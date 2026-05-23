@@ -77,9 +77,23 @@ def find_system_artifacts(projects_dir: Path) -> List[Path]:
     return artifacts
 
 
-def cleanup_artifacts(artifacts: List[Path], dry_run: bool = False,
-                     verbose: bool = False, projects_dir: Path = None) -> Tuple[int, int]:
-    """Удаляет артефакты. Returns (deleted_count, failed_count)."""
+def cleanup_artifacts(
+    artifacts: List[Path],
+    projects_dir: Path,
+    *,
+    dry_run: bool = False,
+    verbose: bool = False,
+) -> Tuple[int, int]:
+    """Удаляет артефакты. Returns (deleted_count, failed_count).
+
+    ``projects_dir`` is required — every artifact path must resolve inside
+    it before we call :func:`shutil.rmtree`. Allowing ``projects_dir=None``
+    silently disabled the containment check and turned ``rmtree`` into an
+    unconstrained delete primitive for any caller passing a list of paths.
+    """
+    if projects_dir is None:  # type: ignore[unreachable]
+        raise ValueError("projects_dir is required for path-traversal sandboxing")
+
     if not artifacts:
         print("[OK] No system artifacts found")
         return (0, 0)
@@ -96,16 +110,20 @@ def cleanup_artifacts(artifacts: List[Path], dry_run: bool = False,
     deleted_count = 0
     failed_count = 0
 
+    projects_root = projects_dir.resolve()
+
     for artifact in artifacts:
         try:
-            # Validate path is within projects_dir
-            if projects_dir:
-                try:
-                    artifact.resolve().relative_to(projects_dir.resolve())
-                except ValueError:
-                    print(f"  [ERROR] Path outside projects dir: {artifact.name}", file=sys.stderr)
-                    failed_count += 1
-                    continue
+            # Validate path is within projects_dir (sandbox check).
+            # Path.is_relative_to (3.9+) returns False rather than raising for
+            # unrelated paths, so a single bool check suffices.
+            if not artifact.resolve().is_relative_to(projects_root):
+                print(
+                    f"  [ERROR] Path outside projects dir: {artifact.name}",
+                    file=sys.stderr,
+                )
+                failed_count += 1
+                continue
 
             # Check write access
             if not os.access(artifact, os.W_OK):
@@ -173,8 +191,12 @@ def main() -> None:
     artifacts = find_system_artifacts(projects_dir)
 
     # Удаляем
-    _deleted, failed = cleanup_artifacts(artifacts, dry_run=args.dry_run,
-                                        verbose=args.verbose, projects_dir=projects_dir)
+    _deleted, failed = cleanup_artifacts(
+        artifacts,
+        projects_dir,
+        dry_run=args.dry_run,
+        verbose=args.verbose,
+    )
 
     # Exit code
     sys.exit(0 if failed == 0 else 1)

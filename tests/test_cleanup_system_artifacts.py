@@ -133,18 +133,29 @@ class TestCleanupArtifacts:
         yield temp_dir
         shutil.rmtree(temp_dir, ignore_errors=True)
 
-    def test_cleanup_no_artifacts(self):
+    def test_cleanup_no_artifacts(self, tmp_path):
         """Test cleanup with no artifacts"""
-        deleted, failed = cleanup_artifacts([], dry_run=False)
+        deleted, failed = cleanup_artifacts([], tmp_path, dry_run=False)
         assert deleted == 0
         assert failed == 0
+
+    def test_cleanup_rejects_missing_projects_dir(self):
+        """projects_dir is required — None must fail loud."""
+        with pytest.raises(ValueError, match="projects_dir is required"):
+            cleanup_artifacts(
+                [Path("/tmp/anything")],
+                None,  # type: ignore[arg-type]
+                dry_run=False,
+            )
 
     def test_cleanup_dry_run(self, temp_projects_dir):
         """Test dry run mode"""
         artifact = temp_projects_dir / "C--WINDOWS-system32"
         artifact.mkdir()
 
-        deleted, failed = cleanup_artifacts([artifact], dry_run=True)
+        deleted, failed = cleanup_artifacts(
+            [artifact], temp_projects_dir, dry_run=True
+        )
         assert deleted == 0
         assert failed == 0
         assert artifact.exists()  # Should not be deleted
@@ -154,8 +165,9 @@ class TestCleanupArtifacts:
         artifact = temp_projects_dir / "C--WINDOWS-system32"
         artifact.mkdir()
 
-        deleted, failed = cleanup_artifacts([artifact], dry_run=False,
-                                           projects_dir=temp_projects_dir)
+        deleted, failed = cleanup_artifacts(
+            [artifact], temp_projects_dir, dry_run=False
+        )
         assert deleted == 1
         assert failed == 0
         assert not artifact.exists()
@@ -167,8 +179,9 @@ class TestCleanupArtifacts:
         artifact1.mkdir()
         artifact2.mkdir()
 
-        deleted, failed = cleanup_artifacts([artifact1, artifact2], dry_run=False,
-                                           projects_dir=temp_projects_dir)
+        deleted, failed = cleanup_artifacts(
+            [artifact1, artifact2], temp_projects_dir, dry_run=False
+        )
         assert deleted == 2
         assert failed == 0
 
@@ -178,8 +191,9 @@ class TestCleanupArtifacts:
         artifact.mkdir()
 
         with patch('os.access', return_value=False):
-            deleted, failed = cleanup_artifacts([artifact], dry_run=False,
-                                               projects_dir=temp_projects_dir)
+            deleted, failed = cleanup_artifacts(
+                [artifact], temp_projects_dir, dry_run=False
+            )
             assert deleted == 0
             assert failed == 1
             assert artifact.exists()
@@ -188,8 +202,9 @@ class TestCleanupArtifacts:
         """Test path validation (outside projects_dir)"""
         outside_path = Path(tempfile.mkdtemp())
         try:
-            deleted, failed = cleanup_artifacts([outside_path], dry_run=False,
-                                               projects_dir=temp_projects_dir)
+            deleted, failed = cleanup_artifacts(
+                [outside_path], temp_projects_dir, dry_run=False
+            )
             assert deleted == 0
             assert failed == 1
             assert outside_path.exists()
@@ -203,8 +218,9 @@ class TestCleanupArtifacts:
         # Create some files
         (artifact / "test.txt").write_text("test content")
 
-        deleted, failed = cleanup_artifacts([artifact], dry_run=False,
-                                           verbose=True, projects_dir=temp_projects_dir)
+        deleted, failed = cleanup_artifacts(
+            [artifact], temp_projects_dir, dry_run=False, verbose=True
+        )
         assert deleted == 1
         assert failed == 0
 
@@ -231,8 +247,9 @@ class TestEdgeCases:
         (artifact / "subdir").mkdir()
         (artifact / "subdir" / "file2.txt").write_text("content2")
 
-        deleted, failed = cleanup_artifacts([artifact], dry_run=False,
-                                           projects_dir=temp_projects_dir)
+        deleted, failed = cleanup_artifacts(
+            [artifact], temp_projects_dir, dry_run=False
+        )
         assert deleted == 1
         assert failed == 0
         assert not artifact.exists()
@@ -243,8 +260,9 @@ class TestEdgeCases:
         artifact.mkdir()
         (artifact / "тест.txt").write_text("содержимое", encoding="utf-8")
 
-        deleted, failed = cleanup_artifacts([artifact], dry_run=False,
-                                           projects_dir=temp_projects_dir)
+        deleted, failed = cleanup_artifacts(
+            [artifact], temp_projects_dir, dry_run=False
+        )
         assert deleted == 1
         assert failed == 0
 
@@ -258,8 +276,9 @@ class TestEdgeCases:
             symlink = temp_projects_dir / "C--WINDOWS-system32"
             symlink.symlink_to(real_dir)
 
-            deleted, failed = cleanup_artifacts([symlink], dry_run=False,
-                                               projects_dir=temp_projects_dir)
+            deleted, failed = cleanup_artifacts(
+                [symlink], temp_projects_dir, dry_run=False
+            )
             # Should handle symlink
             assert deleted + failed == 1
         except OSError:

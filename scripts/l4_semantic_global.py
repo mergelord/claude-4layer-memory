@@ -29,9 +29,13 @@ from chromadb.config import Settings
 # Common chunker (shared with FTS5 and future BM25)
 # pylint: disable=import-error
 from chunking import chunk_text  # noqa: E402
+from ranking import make_join_key  # noqa: E402
 from sentence_transformers import SentenceTransformer
 
-# Cross-encoder reranker (optional module)
+# Cross-encoder reranker (optional module).
+# Kept as a lazy import hook for the hybrid pipeline; ``search_all``
+# itself is semantic-only and intentionally does not rerank — reranking
+# is a cross-source operation that lives in ``l4_fts5_search``.
 try:
     from l4_rerank import rerank as l4_rerank  # noqa: E402 # pylint: disable=unused-import
 except ImportError:
@@ -144,20 +148,19 @@ class GlobalSemanticMemory:
         """
         Формирует document-level ключ для RRF на основе метаданных чанка.
 
-        Использует source и имя файла из metadata.
+        Нормализация делегирована :func:`ranking.make_join_key`, чтобы semantic /
+        BM25 / FTS5 все сходились на один и тот же ключ для одного документа.
         """
         file = metadata.get("file", "unknown")
-        normalized_source = source.replace("-", "_")
-        return f"[{normalized_source}] {file}"
+        return make_join_key(source, file)
 
     # ----------------------------
     # MAIN SEARCH
     # ----------------------------
 
     # pylint: disable=too-many-branches, too-many-statements, too-many-locals
-    # pylint: disable=unused-argument
     def search_all(
-        self, query: str, n_results: int = 10, enable_rerank: bool = False
+        self, query: str, n_results: int = 10
     ) -> List[Dict[str, Any]]:
         """
         Semantic cross-project search (hybrid-ready).
@@ -167,7 +170,15 @@ class GlobalSemanticMemory:
         Args:
             query: Search query
             n_results: Number of results to return
-            enable_rerank: Apply cross-encoder reranking to results (default: False)
+
+        Note:
+            Cross-encoder reranking is **not** applied here.
+            ``l4_rerank.rerank`` operates on the merged ``RankedResult``
+            objects produced by :func:`ranking.rrf_merge`, so reranking
+            is the hybrid layer's responsibility (see
+            ``l4_fts5_search.cmd_hybrid`` and ``cmd_hybrid_parallel``).
+            Calling ``rerank`` on this function's dict output would be
+            a contract violation.
         """
         start_time = time.time()
         embedding = self._encode_query(query)

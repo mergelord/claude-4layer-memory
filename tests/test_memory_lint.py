@@ -85,6 +85,63 @@ class TestMemoryLint:
         ghost_links = memory_lint.check_ghost_links()
         assert len(ghost_links) > 0
 
+    def test_check_ghost_links_rejects_path_traversal(self, temp_memory_dir, memory_lint, tmp_path):
+        """Path traversal links MUST be flagged as ghost links and MUST NOT
+        cause a filesystem ``stat`` outside ``memory_path``.
+
+        Without the sandbox check, a markdown link like ``../../etc/passwd``
+        would be ``Path.resolve()``-ed and ``Path.exists()``-tested, turning
+        the linter into an existence oracle on the entire filesystem.
+        """
+        # Create a real file OUTSIDE memory_path that we should NOT be able
+        # to probe via a malicious markdown link.
+        outside = tmp_path / "outside-secret.md"
+        outside.write_text("secret")
+
+        # Compute a relative link from memory_path → outside that escapes the
+        # sandbox via ``../``. ``os.path.relpath`` handles cross-platform
+        # path math without leaking absolute paths into the markdown.
+        import os as _os
+        escape_link = _os.path.relpath(outside, start=temp_memory_dir)
+
+        (temp_memory_dir / "evil.md").write_text(
+            f"# Evil\n\n[escape]({escape_link})"
+        )
+
+        ghost_links = memory_lint.check_ghost_links()
+
+        # Linter MUST flag the escape attempt as a ghost link (sandbox
+        # violation) even though the underlying file actually exists.
+        evil_file = temp_memory_dir / "evil.md"
+        assert evil_file in ghost_links, (
+            "Sandbox-escaping links must be reported as ghost links, not silently "
+            "treated as valid"
+        )
+        assert escape_link in ghost_links[evil_file]
+
+    def test_check_orphan_files_ignores_sandbox_escape(
+        self, temp_memory_dir, memory_lint, tmp_path
+    ):
+        """Sandbox-escaping links must NOT count as covering a file —
+        otherwise an attacker-controlled markdown could mask an orphan
+        by linking to ``../something``.
+        """
+        outside = tmp_path / "orphan-target.md"
+        outside.write_text("# Orphan")
+
+        import os as _os
+        escape_link = _os.path.relpath(outside, start=temp_memory_dir)
+
+        (temp_memory_dir / "index.md").write_text(
+            f"# Index\n\n[external]({escape_link})"
+        )
+        # Real orphan inside the sandbox.
+        orphan = temp_memory_dir / "real_orphan.md"
+        orphan.write_text("# Orphan")
+
+        orphans = memory_lint.check_orphan_files()
+        assert orphan in orphans
+
     def test_check_orphan_files_no_orphans(self, temp_memory_dir, memory_lint):
         """Test orphan detection with no orphans"""
         (temp_memory_dir / "MEMORY.md").write_text("# Memory\n\n- [test](test.md)")

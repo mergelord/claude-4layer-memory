@@ -37,6 +37,20 @@ from utils.colors import Colors  # noqa: E402
 # pylint: enable=wrong-import-position,import-error
 
 
+def _path_within(candidate: Path, root: Path) -> bool:
+    """Return True iff ``candidate`` is the same as ``root`` or lives inside it.
+
+    Path.is_relative_to is available from Python 3.9 onwards; this project's
+    declared minimum is 3.10 (see CLAUDE.md). Both operands MUST already be
+    resolved by the caller — we don't re-resolve here so the function can be
+    used in hot loops without paying the syscall twice.
+    """
+    try:
+        return candidate.is_relative_to(root)
+    except ValueError:
+        return False
+
+
 class MemoryLint(BaseReporter):
     def __init__(self, memory_path: Path, quick_mode: bool = False):
         super().__init__()
@@ -143,11 +157,19 @@ class MemoryLint(BaseReporter):
         return links
 
     def check_ghost_links(self) -> Dict[Path, List[str]]:
-        """Check for links to non-existent files (parallel)"""
+        """Check for links to non-existent files (parallel).
+
+        Markdown links are user-controlled input. ``Path.resolve()`` would
+        happily escape ``memory_path`` if a link is e.g. ``../../etc/passwd``,
+        turning this check into an existence oracle on arbitrary filesystem
+        paths. We confine resolution to ``memory_path`` and treat anything
+        that escapes it as a ghost link without ever touching the filesystem.
+        """
         self.print_section("Layer 1: Ghost Links Detection")
 
         ghost_links: Dict[Path, List[str]] = {}
         md_files = self.find_all_md_files()
+        memory_root = self.memory_path.resolve()
 
         # Read all files in parallel
         file_contents = self._read_files_parallel(md_files)
@@ -156,10 +178,12 @@ class MemoryLint(BaseReporter):
             links = self.extract_links(content)
 
             for link in links:
-                # Resolve relative path
+                # Resolve relative path, then enforce sandbox.
                 target = (md_file.parent / link).resolve()
 
-                if not target.exists():
+                escapes_sandbox = not _path_within(target, memory_root)
+
+                if escapes_sandbox or not target.exists():
                     if md_file not in ghost_links:
                         ghost_links[md_file] = []
                     ghost_links[md_file].append(link)
@@ -178,10 +202,17 @@ class MemoryLint(BaseReporter):
         return ghost_links
 
     def check_orphan_files(self) -> List[Path]:
-        """Check for files not linked from anywhere (parallel)"""
+        """Check for files not linked from anywhere (parallel).
+
+        Same path-traversal guard as :meth:`check_ghost_links`: only
+        links that resolve inside ``memory_path`` count as ``all_links``
+        — stray ``../`` links can't be used to mark arbitrary files as
+        "linked" or trigger ``stat`` on unrelated paths.
+        """
         self.print_section("Layer 1: Orphan Files Detection")
 
         md_files = self.find_all_md_files()
+        memory_root = self.memory_path.resolve()
         all_links = set()
 
         # Read all files in parallel
@@ -192,7 +223,8 @@ class MemoryLint(BaseReporter):
             links = self.extract_links(content)
             for link in links:
                 target = (md_file.parent / link).resolve()
-                all_links.add(target)
+                if _path_within(target, memory_root):
+                    all_links.add(target)
 
         # Find orphans (exclude index files)
         orphans = []

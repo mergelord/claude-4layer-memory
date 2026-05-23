@@ -62,6 +62,34 @@ class TestCostTrackerInit:
         with pytest.raises(ValueError, match="Database path"):
             tracker._safe_db_path(invalid_path)
 
+    def test_safe_db_path_rejects_trailing_prefix_collision(self, tmp_path):
+        """Regression: ``startswith(home)`` would accept ``/home/userbackup``
+        as living under ``/home/user``. The fix uses ``Path.is_relative_to``
+        which is component-aware and rejects this.
+
+        We can't change ``Path.home()`` mid-process, but we can fake the same
+        class of bug by constructing a sibling directory whose name shares
+        the home prefix as a string.
+        """
+        tracker = CostTracker()
+        home = Path.home().resolve()
+        # A directory whose name starts with the home basename but is NOT a
+        # descendant (e.g. ``/home/user`` → ``/home/userbackup``). This must
+        # be rejected.
+        sibling = home.parent / (home.name + "backup-12345")
+        # No need to actually create it; _safe_db_path only resolves, doesn't
+        # stat.
+        bad_path = sibling / "test.db"
+
+        # On hosts where ``Path.home().parent`` is ``/`` (e.g. root user),
+        # the sibling-construction trick collapses. Skip in that pathological
+        # case rather than asserting a false invariant.
+        if home.parent == home:
+            pytest.skip("Cannot construct a sibling of root home directory")
+
+        with pytest.raises(ValueError, match="Database path"):
+            tracker._safe_db_path(bad_path)
+
     def test_load_prices_default(self, temp_dir):
         """Test loading default prices when config missing"""
         db_path = temp_dir / "test.db"
