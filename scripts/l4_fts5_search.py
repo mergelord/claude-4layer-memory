@@ -45,7 +45,12 @@ from chunking import chunk_text  # noqa: E402
 
 # RRF ranker is local + stdlib-only, safe to import eagerly.
 # pylint: disable-next=wrong-import-position,import-error
-from ranking import normalize_existing_key, normalize_scores, rrf_merge  # noqa: E402
+from ranking import (  # noqa: E402
+    make_join_key,
+    normalize_existing_key,
+    normalize_scores,
+    rrf_merge,
+)
 
 # BM25 search (optional module)
 try:
@@ -80,9 +85,23 @@ logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 
 @dataclass
 class SearchResult:
-    """Результат поиска"""
+    """Результат поиска.
+
+    Attributes:
+        path: Display path of the form ``"[source] rel_path"`` (preserves
+            subdirectory information for human-readable output).
+        key: Document-level join key produced by
+            :func:`ranking.make_join_key`. **Must** be used for RRF
+            merging across engines (FTS / BM25 / semantic) so that the
+            same document is always identified by the same string,
+            regardless of which engine produced the hit.
+        snippet: FTS5 ``snippet()`` excerpt with delimiters.
+        rank: Raw FTS5 ``rank`` value (lower == better).
+        source: Retrieval method identifier (``'fts5'`` here).
+    """
 
     path: str
+    key: str
     snippet: str
     rank: float
     source: str  # 'fts5' или 'semantic' или 'bm25'
@@ -277,6 +296,9 @@ class L4FTS5Search:
                 results = tuple(
                     SearchResult(
                         path=f"[{row['source']}] {row['path']}",
+                        key=make_join_key(
+                            row['source'], os.path.basename(row['path'])
+                        ),
                         snippet=row["snippet"],
                         rank=row["rank"],
                         source="fts5",
@@ -590,7 +612,7 @@ def cmd_hybrid_parallel(fts: L4FTS5Search, query: str, enable_rerank: bool = Tru
     # Формируем потоки с явным source_type
     fts_stream = [
         {
-            "key": normalize_existing_key(res.path),
+            "key": res.key,
             "display_path": res.path,
             "snippet": res.snippet,
             "rank": res.rank,
@@ -682,7 +704,7 @@ def cmd_hybrid(fts: L4FTS5Search, query: str, enable_rerank: bool = True) -> Non
     # Формируем потоки с явным source_type
     fts_stream = [
         {
-            "key": normalize_existing_key(res.path),
+            "key": res.key,
             "display_path": res.path,
             "snippet": res.snippet,
             "rank": res.rank,

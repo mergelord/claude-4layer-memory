@@ -19,10 +19,19 @@ import logging
 import os
 import re
 import sqlite3
+import sys
 import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator, List, TypedDict
+
+# Ensure sibling modules in scripts/ are importable when invoked as a script.
+_SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
+# pylint: disable-next=wrong-import-position,import-error
+from ranking import make_join_key  # noqa: E402
 
 # Параметры snippet() функции FTS5
 SNIPPET_COLUMN = 2  # Индекс колонки content в FTS таблице
@@ -137,10 +146,12 @@ def fetch_bm25_results(query: str, limit: int = 20) -> List[BM25Result]:
             ).fetchall()
 
         for i, row in enumerate(rows, start=1):
-            # Ключ — document-level: [source] filename (только имя файла)
+            # Document-level ключ: используется единый make_join_key, чтобы
+            # BM25 / FTS5 / semantic сходились на одинаковом значении для
+            # одного и того же документа (см. KEY CONTRACT в ranking.py).
             file_name = os.path.basename(row['path'])
             results.append({
-                "key": f"[{row['source']}] {file_name}",
+                "key": make_join_key(row['source'], file_name),
                 "rank": i,
                 "bm25_score": row['bm25_score'],
                 "snippet": row['snippet'],

@@ -49,13 +49,17 @@ class CostTracker:
 
         Allowed roots: the user's home directory or the system temp directory
         (so test fixtures using pytest's tmp_path work cross-platform).
+
+        Uses ``Path.is_relative_to`` (Python 3.9+) for the containment check.
+        A naive ``str.startswith`` comparison would accept ``/home/userbackup``
+        as living inside ``/home/user`` — exactly the trailing-match bypass
+        flagged in the audit.
         """
         try:
             resolved = path.resolve()
-            home = str(Path.home().resolve())
-            tmp = str(Path(tempfile.gettempdir()).resolve())
-            resolved_str = str(resolved)
-            if not (resolved_str.startswith(home) or resolved_str.startswith(tmp)):
+            home = Path.home().resolve()
+            tmp = Path(tempfile.gettempdir()).resolve()
+            if not (resolved.is_relative_to(home) or resolved.is_relative_to(tmp)):
                 raise ValueError(
                     f"Database path must be within home or temp directory: {path}"
                 )
