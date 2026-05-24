@@ -15,6 +15,7 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 import mcp_server  # noqa: E402  pylint: disable=wrong-import-position
 from l4_fts5_search import SearchResult  # noqa: E402  pylint: disable=wrong-import-position
+from ranking import make_join_key  # noqa: E402  pylint: disable=wrong-import-position
 
 
 def test_reindex_memory_returns_dict_with_int_count():
@@ -42,6 +43,7 @@ def test_search_memory_returns_results():
     fake_results = [
         SearchResult(
             path="/x/handoff.md",
+            key=make_join_key("global", "handoff.md"),
             snippet="hello world",
             rank=1.0,
             source="global",
@@ -68,12 +70,14 @@ def test_search_memory_emits_structured_meta_when_debug_true():
     fake_results = [
         SearchResult(
             path="[global] handoff.md",
+            key=make_join_key("global", "handoff.md"),
             snippet="hit",
             rank=0.9,
             source="global",
         ),
         SearchResult(
             path="[global] decisions.md",
+            key=make_join_key("global", "decisions.md"),
             snippet="hit2",
             rank=0.5,
             source="global",
