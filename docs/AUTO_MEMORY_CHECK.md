@@ -58,7 +58,7 @@ Read: MEMORY.md
 ### Layer 4: SEMANTIC (векторная БД)
 ```bash
 python ~/.claude/hooks/l4_semantic_global.py stats
-python ~/.claude/hooks/l4_semantic_global.py index-global
+python ~/.claude/hooks/l4_semantic_global.py index-all
 ```
 - Проверяет количество chunks (должно увеличиться)
 - Переиндексирует если были изменения

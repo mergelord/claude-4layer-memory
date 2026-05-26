@@ -63,7 +63,7 @@ l4_search_all.sh "how to handle errors"
 | Command | Description | Example |
 |---------|-------------|---------|
 | `l4_index_all` | Index all projects | `l4_index_all.bat` |
-| `python l4_semantic_global.py index-global` | Index global memory only | - |
+| `python l4_semantic_global.py index-all` | Index global memory and all projects | - |
 | `python l4_semantic_global.py index-project <path>` | Index specific project | - |
 
 ### Search Commands
@@ -133,18 +133,21 @@ Find information from any project:
 l4_search_all.sh "database connection pooling"
 ```
 
-**Output:**
+**Output (hook wraps results in semantic_context):**
 ```
-[SEARCH ALL] 'database connection pooling'
+database connection pooling
 
-[1] [project-A] decisions.md (distance: 12.345)
-    We decided to use connection pooling with max_connections=20...
-
-[2] [project-B] feedback.md (distance: 13.456)
-    Connection pooling improved performance by 40%...
-
-[3] [global] reference_resources.md (distance: 14.567)
-    Best practices for database connection management...
+<semantic_context>
+[project-A] decisions.md
+We decided to use connection pooling with max_connections=20...
+---
+[project-B] feedback.md
+Connection pooling improved performance by 40%...
+---
+[global] reference_resources.md
+Best practices for database connection management...
+---
+</semantic_context>
 ```
 
 ### Search Global Memory Only
