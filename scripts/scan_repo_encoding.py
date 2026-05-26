@@ -95,6 +95,9 @@ EXCLUDE_FILES = frozenset({
     # Documentation that quotes EncodingGate's own report verbatim,
     # which by construction contains mojibake characters as examples.
     'deploy/INSTALL_WINDOWS.md',
+    # Troubleshooting guide that intentionally shows mojibake examples
+    # to demonstrate what cp1251-as-utf8 corruption looks like.
+    'docs/TROUBLESHOOTING.md',
 })
 
 # File extensions that we treat as text-source and want to gate on.
