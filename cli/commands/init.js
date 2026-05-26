@@ -49,8 +49,8 @@ module.exports = async function init() {
     // Install Python dependencies
     spinner.text = 'Installing Python dependencies...';
 
-    const scriptDir = path.join(__dirname, '..', '..', 'scripts');
-    const requirementsPath = path.join(scriptDir, 'requirements.txt');
+    const repoRoot = path.join(__dirname, '..', '..');
+    const requirementsPath = path.join(repoRoot, 'requirements.txt');
 
     if (fs.existsSync(requirementsPath)) {
       try {

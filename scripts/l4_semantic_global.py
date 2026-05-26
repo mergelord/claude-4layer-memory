@@ -337,12 +337,52 @@ class GlobalSemanticMemory:
                     }
                 )
 
-            collection.add(
+            collection.upsert(
                 ids=ids,
                 documents=documents,
                 embeddings=embeddings,
                 metadatas=metadatas,  # type: ignore[arg-type]
             )
+
+
+# ----------------------------
+# CLI METHODS
+# ----------------------------
+
+    def index_all(self) -> None:
+        """Индексирует глобальную память и все проекты."""
+        self.index_directory(self.global_memory, self.global_collection)
+        print(f"[OK] Indexed global: {self.global_memory}")
+
+        if self.projects_base.exists():
+            for project_dir in sorted(self.projects_base.iterdir()):
+                if not project_dir.is_dir():
+                    continue
+                memory_dir = project_dir / "memory"
+                if memory_dir.exists():
+                    col_name = self.collection_prefix + project_dir.name
+                    self.index_directory(memory_dir, col_name)
+                    print(f"[OK] Indexed project: {project_dir.name}")
+
+    def print_stats(self) -> None:
+        """Выводит статистику по коллекциям ChromaDB."""
+        collections = self.client.list_collections()
+        print(f"DB: {self.db_path}")
+        print(f"Collections: {len(collections)}")
+        for c in collections:
+            col = self.client.get_collection(c.name)
+            print(f"  {c.name}: {col.count()} documents")
+
+    def cleanup(self) -> None:
+        """Удаляет пустые коллекции."""
+        collections = self.client.list_collections()
+        removed = 0
+        for c in collections:
+            col = self.client.get_collection(c.name)
+            if col.count() == 0:
+                self.client.delete_collection(c.name)
+                removed += 1
+        print(f"[OK] Removed {removed} empty collections")
 
 
 # ----------------------------
@@ -353,9 +393,9 @@ class GlobalSemanticMemory:
 def main() -> None:
     mem = GlobalSemanticMemory()
 
-    if len(sys.argv) < 3:
-        print("Usage: l4_semantic_global.py <command> <query> [--json]")
-        print("Commands: search, search-all")
+    if len(sys.argv) < 2:
+        print("Usage: l4_semantic_global.py <command> [args] [--json]")
+        print("Commands: search, search-all, search-global, search-project, index-all, stats, cleanup")
         return
 
     cmd = sys.argv[1]
@@ -365,9 +405,24 @@ def main() -> None:
     if json_output:
         sys.argv.remove("--json")
 
-    query = " ".join(sys.argv[2:])
+    if cmd in ("index-all", "reindex"):
+        mem.index_all()
+        return
 
-    if cmd in ("search", "search-all"):
+    if cmd == "stats":
+        mem.print_stats()
+        return
+
+    if cmd == "cleanup":
+        mem.cleanup()
+        return
+
+    if cmd in ("search", "search-all", "search-global", "search-project"):
+        if len(sys.argv) < 3:
+            print(f"Usage: l4_semantic_global.py {cmd} <query>")
+            return
+
+        query = " ".join(sys.argv[2:])
         results = mem.search_all(query)
 
         if json_output:
@@ -391,6 +446,10 @@ def main() -> None:
                 print(f"[{i}] {r['source']} | {r['metadata'].get('file')}")
                 print(r["text"][:200])
                 print("-" * 40)
+        return
+
+    print(f"Unknown command: {cmd}")
+    print("Commands: search, search-all, search-global, search-project, index-all, stats, cleanup")
 
 
 if __name__ == "__main__":

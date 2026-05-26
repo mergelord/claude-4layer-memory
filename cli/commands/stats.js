@@ -78,7 +78,7 @@ module.exports = async function stats() {
     console.log(chalk.gray(`  Location:   ${memoryDir}`));
 
     // Check for semantic index
-    const chromaDir = path.join(homeDir, '.claude', 'chroma_db');
+    const chromaDir = path.join(homeDir, '.claude', 'semantic_db_global');
     if (fs.existsSync(chromaDir)) {
       const chromaStats = fs.statSync(chromaDir);
       const chromaSizeMB = (getDirectorySize(chromaDir) / 1024 / 1024).toFixed(2);
@@ -88,7 +88,7 @@ module.exports = async function stats() {
     } else {
       console.log(chalk.white('\n🔍 Semantic Index:\n'));
       console.log(chalk.yellow(`  ⚠️  Not initialized`));
-      console.log(chalk.gray(`  Run: python scripts/l4_semantic_global.py index-global`));
+      console.log(chalk.gray(`  Run: python scripts/l4_semantic_global.py index-all`));
     }
 
     // Check for FTS5 index

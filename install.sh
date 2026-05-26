@@ -59,6 +59,8 @@ echo -e "${GREEN}[OK]${NC} Directories created"
 echo ""
 echo "Copying scripts..."
 cp -f scripts/l4_semantic_global.py "$HOME/.claude/hooks/"
+cp -f scripts/chunking.py "$HOME/.claude/hooks/"
+cp -f scripts/ranking.py "$HOME/.claude/hooks/"
 chmod +x "$HOME/.claude/hooks/l4_semantic_global.py"
 
 cp -f scripts/linux/*.sh "$HOME/.claude/hooks/"

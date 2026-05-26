@@ -107,8 +107,8 @@ class TestIndexDirectory:
 
         memory.client.get_or_create_collection.assert_called_with("memory_test")
         collection = memory.client.get_or_create_collection.return_value
-        assert collection.add.called
-        call_args = collection.add.call_args[1]
+        assert collection.upsert.called
+        call_args = collection.upsert.call_args[1]
         for cid in call_args['ids']:
             assert ":" in cid
         for meta in call_args['metadatas']:

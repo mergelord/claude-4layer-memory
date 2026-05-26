@@ -97,9 +97,9 @@ class TestIndexDirectory:
 
         # Проверяем, что коллекция была создана/получена
         memory.client.get_or_create_collection.assert_called_with("memory_test")
-        assert collection.add.called
+        assert collection.upsert.called
 
-        call_args = collection.add.call_args[1]
+        call_args = collection.upsert.call_args[1]
         # Должны быть ids, documents, embeddings, metadatas
         assert "ids" in call_args
         assert "documents" in call_args
@@ -140,7 +140,7 @@ class TestIndexDirectory:
 
         # Коллекция создаётся, но add не вызывается (нет чанков)
         memory.client.get_or_create_collection.assert_called_once()
-        collection.add.assert_not_called()
+        collection.upsert.assert_not_called()
 
     def test_index_file_with_empty_content(self, memory, tmp_path):
         """Empty file should not produce chunks."""
@@ -153,7 +153,7 @@ class TestIndexDirectory:
         memory.index_directory(tmp_path, "memory_test")
 
         # add не должен вызываться
-        collection.add.assert_not_called()
+        collection.upsert.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
