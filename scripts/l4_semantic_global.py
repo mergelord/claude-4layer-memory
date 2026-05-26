@@ -406,64 +406,72 @@ class GlobalSemanticMemory:
 # CLI
 # ----------------------------
 
+COMMANDS_HELP = (
+    "Commands: search, search-all, search-global, search-project, "
+    "index-all, stats, cleanup"
+)
 
-def main() -> None:
-    mem = GlobalSemanticMemory()
 
-    if len(sys.argv) < 2:
-        print("Usage: l4_semantic_global.py <command> [args] [--json]")
-        print("Commands: search, search-all, search-global, search-project, index-all, stats, cleanup")
-        return
+def _print_usage() -> None:
+    print("Usage: l4_semantic_global.py <command> [args] [--json]")
+    print(COMMANDS_HELP)
 
-    cmd = sys.argv[1]
 
-    # Проверка флага --json
-    json_output = "--json" in sys.argv
-    if json_output:
-        sys.argv.remove("--json")
-
+def _run_admin_command(mem: GlobalSemanticMemory, cmd: str) -> bool:
+    """Run non-search CLI commands. Returns True when command was handled."""
     if cmd in ("index-all", "reindex"):
         mem.index_all()
-        return
+        return True
 
     if cmd == "stats":
         mem.print_stats()
-        return
+        return True
 
     if cmd == "cleanup":
         dry_run = "--dry-run" in sys.argv
         mem.cleanup(dry_run=dry_run)
-        return
+        return True
+
+    return False
+
+
+def _get_search_results(
+    mem: GlobalSemanticMemory, cmd: str
+) -> List[Dict[str, Any]] | None:
+    """Dispatch search commands and return None for invalid commands/arguments."""
+    results: List[Dict[str, Any]] | None = None
 
     if cmd in ("search", "search-all"):
         if len(sys.argv) < 3:
             print(f"Usage: l4_semantic_global.py {cmd} <query>")
-            return
-        query = " ".join(sys.argv[2:])
-        results = mem.search_all(query)
+        else:
+            query = " ".join(sys.argv[2:])
+            results = mem.search_all(query)
 
     elif cmd == "search-global":
         if len(sys.argv) < 3:
             print("Usage: l4_semantic_global.py search-global <query>")
-            return
-        query = " ".join(sys.argv[2:])
-        results = mem.search_global(query)
+        else:
+            query = " ".join(sys.argv[2:])
+            results = mem.search_global(query)
 
     elif cmd == "search-project":
         if len(sys.argv) < 4:
             print("Usage: l4_semantic_global.py search-project <project> <query>")
-            return
-        project = sys.argv[2]
-        query = " ".join(sys.argv[3:])
-        results = mem.search_project(project, query)
+        else:
+            project = sys.argv[2]
+            query = " ".join(sys.argv[3:])
+            results = mem.search_project(project, query)
 
     else:
         print(f"Unknown command: {cmd}")
-        print("Commands: search, search-all, search-global, search-project, index-all, stats, cleanup")
-        return
+        print(COMMANDS_HELP)
 
+    return results
+
+
+def _print_results(results: List[Dict[str, Any]], json_output: bool) -> None:
     if json_output:
-        # JSON формат для RRF интеграции
         output = {
             "results": [
                 {
@@ -477,14 +485,38 @@ def main() -> None:
             ]
         }
         print(json.dumps(output, ensure_ascii=False))
-    else:
-        # Маркер для semantic_search.py — включает <semantic_context> в hook output
-        if results:
-            print("[SEARCH ALL]")
-        for i, r in enumerate(results, 1):
-            print(f"[{i}] {r['source']} | {r['metadata'].get('file')}")
-            print(r["text"][:200])
-            print("-" * 40)
+        return
+
+    if results:
+        print("[SEARCH ALL]")
+    for i, r in enumerate(results, 1):
+        print(f"[{i}] {r['source']} | {r['metadata'].get('file')}")
+        print(r["text"][:200])
+        print("-" * 40)
+
+
+def main() -> None:
+    mem = GlobalSemanticMemory()
+
+    if len(sys.argv) < 2:
+        _print_usage()
+        return
+
+    cmd = sys.argv[1]
+
+    # Проверка флага --json
+    json_output = "--json" in sys.argv
+    if json_output:
+        sys.argv.remove("--json")
+
+    if _run_admin_command(mem, cmd):
+        return
+
+    results = _get_search_results(mem, cmd)
+    if results is None:
+        return
+
+    _print_results(results, json_output)
 
 
 if __name__ == "__main__":
