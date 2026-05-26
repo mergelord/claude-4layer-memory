@@ -56,7 +56,7 @@ module.exports = async function init() {
       try {
         execSync(`python -m pip install -r "${requirementsPath}"`, {
           stdio: 'pipe',
-          cwd: scriptDir
+          cwd: repoRoot
         });
         spinner.succeed('Python dependencies installed');
       } catch (error) {

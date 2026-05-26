@@ -5,13 +5,14 @@ Semantic Search Hook для Claude Code
 Проверяет триггерные слова и добавляет контекст из L4 SEMANTIC
 """
 
+import json
 import sys
 import os
 import logging
 import subprocess
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, List, Tuple
 
 # Импорт cost tracker
 sys.path.insert(0, str(Path(__file__).parent))
@@ -168,7 +169,7 @@ def execute_semantic_search(user_prompt: str, trigger_found: str) -> None:
 
     try:
         result = subprocess.run(
-            [sys.executable, str(l4_script), "search-all", user_prompt],
+            [sys.executable, str(l4_script), "search-all", user_prompt, "--json"],
             capture_output=True,
             text=True,
             encoding=CONFIG['encoding'],
@@ -214,14 +215,29 @@ def execute_semantic_search(user_prompt: str, trigger_found: str) -> None:
     # Отслеживаем стоимость операции
     track_search_cost(user_prompt, result.stdout, trigger_found)
 
-    if "[SEARCH ALL]" in result.stdout:
+    try:
+        data = json.loads(result.stdout)
+        results: List[Dict[str, Any]] = data.get("results", [])
+    except (json.JSONDecodeError, ValueError) as exc:
+        _emit_fallback(user_prompt, "json_parse_error", str(exc))
+        return
+
+    if not results:
         print(user_prompt)
-        print()
-        print("<semantic_context>")
-        print(result.stdout)
-        print("</semantic_context>")
-    else:
-        print(user_prompt)
+        return
+
+    lines = []
+    for r in results:
+        source = r.get("source", "?")
+        file_ = r.get("metadata", {}).get("file", "?")
+        text = r.get("text", "")[:200]
+        lines.append(f"[{source}] {file_}\n{text}\n---")
+
+    print(user_prompt)
+    print()
+    print("<semantic_context>")
+    print("\n".join(lines))
+    print("</semantic_context>")
 
 
 def main():

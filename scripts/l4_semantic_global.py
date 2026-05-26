@@ -373,16 +373,33 @@ class GlobalSemanticMemory:
             col = self.client.get_collection(c.name)
             print(f"  {c.name}: {col.count()} documents")
 
-    def cleanup(self) -> None:
+    def cleanup(self, dry_run: bool = False) -> None:
         """Удаляет пустые коллекции."""
         collections = self.client.list_collections()
         removed = 0
         for c in collections:
             col = self.client.get_collection(c.name)
             if col.count() == 0:
-                self.client.delete_collection(c.name)
+                if dry_run:
+                    print(f"[DRY-RUN] Would remove: {c.name}")
+                else:
+                    self.client.delete_collection(c.name)
                 removed += 1
-        print(f"[OK] Removed {removed} empty collections")
+        action = "Would remove" if dry_run else "Removed"
+        print(f"[OK] {action} {removed} empty collections")
+
+    def search_global(self, query: str, n_results: int = 10) -> List[Dict[str, Any]]:
+        """Поиск только в глобальной памяти."""
+        embedding = self._encode_query(query)
+        col = self._get_collection(self.global_collection)
+        return self._search_collection(col, embedding, n_results, "global")
+
+    def search_project(self, project_name: str, query: str, n_results: int = 10) -> List[Dict[str, Any]]:
+        """Поиск только в памяти конкретного проекта."""
+        embedding = self._encode_query(query)
+        col_name = self.collection_prefix + project_name
+        col = self._get_collection(col_name)
+        return self._search_collection(col, embedding, n_results, project_name)
 
 
 # ----------------------------
@@ -414,42 +431,60 @@ def main() -> None:
         return
 
     if cmd == "cleanup":
-        mem.cleanup()
+        dry_run = "--dry-run" in sys.argv
+        mem.cleanup(dry_run=dry_run)
         return
 
-    if cmd in ("search", "search-all", "search-global", "search-project"):
+    if cmd in ("search", "search-all"):
         if len(sys.argv) < 3:
             print(f"Usage: l4_semantic_global.py {cmd} <query>")
             return
-
         query = " ".join(sys.argv[2:])
         results = mem.search_all(query)
 
-        if json_output:
-            # JSON формат для RRF интеграции
-            output = {
-                "results": [
-                    {
-                        "key": r["key"],
-                        "text": r["text"],
-                        "distance": r["distance"],
-                        "metadata": r["metadata"],
-                        "source": r["source"],
-                    }
-                    for r in results
-                ]
-            }
-            print(json.dumps(output, ensure_ascii=False))
-        else:
-            # Человекочитаемый формат
-            for i, r in enumerate(results, 1):
-                print(f"[{i}] {r['source']} | {r['metadata'].get('file')}")
-                print(r["text"][:200])
-                print("-" * 40)
+    elif cmd == "search-global":
+        if len(sys.argv) < 3:
+            print("Usage: l4_semantic_global.py search-global <query>")
+            return
+        query = " ".join(sys.argv[2:])
+        results = mem.search_global(query)
+
+    elif cmd == "search-project":
+        if len(sys.argv) < 4:
+            print("Usage: l4_semantic_global.py search-project <project> <query>")
+            return
+        project = sys.argv[2]
+        query = " ".join(sys.argv[3:])
+        results = mem.search_project(project, query)
+
+    else:
+        print(f"Unknown command: {cmd}")
+        print("Commands: search, search-all, search-global, search-project, index-all, stats, cleanup")
         return
 
-    print(f"Unknown command: {cmd}")
-    print("Commands: search, search-all, search-global, search-project, index-all, stats, cleanup")
+    if json_output:
+        # JSON формат для RRF интеграции
+        output = {
+            "results": [
+                {
+                    "key": r["key"],
+                    "text": r["text"],
+                    "distance": r["distance"],
+                    "metadata": r["metadata"],
+                    "source": r["source"],
+                }
+                for r in results
+            ]
+        }
+        print(json.dumps(output, ensure_ascii=False))
+    else:
+        # Маркер для semantic_search.py — включает <semantic_context> в hook output
+        if results:
+            print("[SEARCH ALL]")
+        for i, r in enumerate(results, 1):
+            print(f"[{i}] {r['source']} | {r['metadata'].get('file')}")
+            print(r["text"][:200])
+            print("-" * 40)
 
 
 if __name__ == "__main__":
