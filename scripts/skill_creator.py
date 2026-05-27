@@ -45,13 +45,19 @@ class SkillCreator:
         self.min_success_rate = min_success_rate
 
     def safe_file_path(self, path: Path) -> Path:
-        """Validate that path is within allowed directories"""
+        """Validate that path is within allowed directories.
+
+        Uses ``Path.is_relative_to`` instead of ``str.startswith`` to avoid
+        sibling-path bypass (e.g. ``~/.claude_evil``, ``~/.claude.backup``).
+        """
         try:
             resolved = path.resolve()
-            # Check if path is within claude_dir
-            if not str(resolved).startswith(str(self.claude_dir.resolve())):
+            base = self.claude_dir.resolve()
+            if not resolved.is_relative_to(base):
                 raise ValueError(f"Path outside allowed directory: {path}")
             return resolved
+        except ValueError:
+            raise
         except Exception as exc:
             raise ValueError(f"Invalid path: {path}") from exc
 

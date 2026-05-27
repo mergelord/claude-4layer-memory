@@ -1,510 +1,462 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+"""Real tests for cmd_hybrid_parallel() and CLI flag parsing in l4_fts5_search.
+
+The previous version of this file was a stale snapshot of scripts/l4_fts5_search.py
+with no test_* functions — pytest collected zero tests, which masked a regression
+risk in the parallel hybrid search code path. These tests exercise the actual
+target module via importlib and stub out all external collaborators (FTS engine,
+semantic subprocess, BM25 module, cross-encoder reranker) with deterministic
+fakes, so the suite can run with no DB, no network, and no model weights.
 """
-L4 FTS5 Search - Fast keyword search for memory system
+from __future__ import annotations
 
-Дополняет семантический поиск ChromaDB быстрым keyword-поиском через SQLite FTS5.
-Поддерживает чанковую индексацию для согласования с семантическим retrieval (chunk-level).
-
-Использование:
-    python l4_fts5_search.py init          # Инициализация FTS5 таблицы
-    python l4_fts5_search.py reindex       # Полная переиндексация
-    python l4_fts5_search.py search "query" # Поиск
-    python l4_fts5_search.py hybrid "query" # Гибридный поиск (FTS5 + ChromaDB)
-"""
-
-import json
-import logging
-import os
-import sqlite3
+import importlib
 import subprocess
 import sys
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from contextlib import contextmanager
-from dataclasses import dataclass
-from functools import lru_cache
 from pathlib import Path
-from typing import Iterator, List, Optional, Tuple
+from typing import Any
+from unittest.mock import MagicMock
 
-# Импорт cost tracker
-scripts_dir = Path(__file__).parent.parent / "scripts"
-sys.path.insert(0, str(scripts_dir))
-try:
-    from cost_tracker import CostTracker
-    COST_TRACKING_ENABLED = True
-except ImportError:
-    COST_TRACKING_ENABLED = False
+import pytest
 
-# RRF ranker is local + stdlib-only, safe to import eagerly.
+
+SCRIPTS_DIR = Path(__file__).resolve().parent.parent / "scripts"
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
+
+
 # pylint: disable-next=wrong-import-position,import-error
-from ranking import normalize_existing_key, normalize_scores, rrf_merge  # noqa: E402
-
-# Common chunker (shared with semantic module)
-# pylint: disable-next=wrong-import-position,import-error
-from chunking import chunk_text  # noqa: E402
-
-# Настройка UTF-8 для Windows
-if sys.platform == 'win32':
-    import codecs
-    if hasattr(sys.stdout, 'buffer'):
-        sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
-        sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'strict')
-
-# Настройка логирования
-logging.basicConfig(
-    level=logging.INFO,
-    format='[%(levelname)s] %(message)s'
-)
+from ranking import make_join_key  # noqa: E402
 
 
-# ---------------------------------------------------------------------------
-# Data model
-# ---------------------------------------------------------------------------
-
-@dataclass
-class SearchResult:
-    """Результат поиска"""
-    path: str
-    snippet: str
-    rank: float
-    source: str  # 'fts5' или 'semantic'
+@pytest.fixture(name="module")
+def fixture_module():
+    """Provide the freshly imported target module under test."""
+    return importlib.import_module("l4_fts5_search")
 
 
-class L4FTS5Search:
-    """FTS5 поиск для системы памяти"""
-
-    def __init__(self, db_path: Optional[Path] = None):
-        self.home = Path.home()
-        if db_path is None:
-            db_path = self.home / ".claude" / "memory_fts5.db"
-
-        self.db_path = db_path
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-
-        self.global_memory = self.home / ".claude" / "memory"
-        self.projects_base = self.home / ".claude" / "projects"
-
-    def clear_cache(self):
-        """Очистить кэш поиска (вызывать после reindex/index_file)"""
-        self._cached_search.cache_clear()
-
-    @contextmanager
-    def _get_connection(self) -> Iterator[sqlite3.Connection]:
-        conn = sqlite3.connect(str(self.db_path), timeout=30)
-        conn.row_factory = sqlite3.Row
-        try:
-            try:
-                conn.execute("PRAGMA journal_mode=WAL")
-                conn.execute("PRAGMA busy_timeout=30000")
-                conn.execute("PRAGMA synchronous=NORMAL")
-            except sqlite3.OperationalError:  # nosec
-                pass
-            yield conn
-        finally:
-            conn.close()
-
-    def init_fts(self) -> bool:
-        """Создать FTS5 таблицу если не существует"""
-        try:
-            with self._get_connection() as conn:
-                conn.execute("""
-                    CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
-                        path UNINDEXED,
-                        source UNINDEXED,
-                        content,
-                        tokenize='unicode61 remove_diacritics 2'
-                    )
-                """)
-                conn.commit()
-                logging.info("FTS5 table initialized")
-                return True
-        except Exception as e:  # nosec
-            logging.error("FTS5 initialization failed: %s", e)
-            return False
-
-    def _index_single_file(self, md_file: Path, base_path: Path, source: str) -> bool:
-        """
-        Индексировать один файл, разбивая его на чанки.
-        Все чанки получают одинаковый path (для группировки в RRF),
-        но разное содержимое (content).
-        """
-        if md_file.name.startswith('.'):
-            return False
-
-        if not os.access(md_file, os.R_OK):
-            logging.warning("No read access: %s", md_file)
-            return False
-
-        try:
-            content = md_file.read_text(encoding='utf-8')
-            rel_path = str(md_file.relative_to(base_path))
-            chunks = chunk_text(content)
-
-            with self._get_connection() as conn:
-                for chunk in chunks:
-                    conn.execute(
-                        "INSERT INTO memory_fts (path, source, content) VALUES (?, ?, ?)",
-                        (rel_path, source, chunk)
-                    )
-                conn.commit()
-            return True
-        except Exception as e:  # nosec
-            logging.warning("Failed to index %s: %s", md_file.name, e)
-            return False
-
-    def reindex_all(self) -> int:
-        """
-        Полная переиндексация всех файлов памяти с параллельной обработкой.
-        Каждый файл разбивается на чанки и индексируется.
-        """
-        indexed_count = 0
-
-        try:
-            with self._get_connection() as conn:
-                conn.execute("DELETE FROM memory_fts")
-                conn.commit()
-
-            files_to_index = []
-
-            if self.global_memory.exists():
-                for md_file in self.global_memory.rglob("*.md"):
-                    files_to_index.append((md_file, self.global_memory, "global"))
-
-            if self.projects_base.exists():
-                for project_dir in self.projects_base.iterdir():
-                    if not project_dir.is_dir():
-                        continue
-                    memory_path = project_dir / "memory"
-                    if not memory_path.exists():
-                        continue
-                    for md_file in memory_path.rglob("*.md"):
-                        files_to_index.append((md_file, memory_path, project_dir.name))
-
-            with ThreadPoolExecutor(max_workers=4) as executor:
-                futures = {
-                    executor.submit(self._index_single_file, md_file, base_path, source): md_file
-                    for md_file, base_path, source in files_to_index
-                }
-                for future in as_completed(futures):
-                    if future.result():
-                        indexed_count += 1
-
-            logging.info("Reindexed %s files", indexed_count)
-            self.clear_cache()
-            return indexed_count
-
-        except Exception as e:  # nosec
-            logging.error("Reindex failed: %s", e)
-            return 0
-
-    def index_file(self, file_path: Path, source: str) -> bool:
-        """
-        Индексировать один файл (с разбивкой на чанки).
-        Удаляет все предыдущие записи для этого файла и вставляет чанки.
-        """
-        if not os.access(file_path, os.R_OK):
-            logging.error("No read access: %s", file_path)
-            return False
-
-        try:
-            with self._get_connection() as conn:
-                content = file_path.read_text(encoding='utf-8')
-                rel_path = file_path.name
-                conn.execute(
-                    "DELETE FROM memory_fts WHERE path = ? AND source = ?",
-                    (rel_path, source)
-                )
-                chunks = chunk_text(content)
-                for chunk in chunks:
-                    conn.execute(
-                        "INSERT INTO memory_fts (path, source, content) VALUES (?, ?, ?)",
-                        (rel_path, source, chunk)
-                    )
-                conn.commit()
-                logging.info(
-                    "Indexed: %s (%s) with %d chunks",
-                    rel_path, source, len(chunks)
-                )
-                self.clear_cache()
-                return True
-
-        except Exception as e:  # nosec
-            logging.error("Failed to index %s: %s", file_path, e)
-            return False
-
-    @lru_cache(maxsize=128)
-    def _cached_search(self, query: str, limit: int) -> Tuple[SearchResult, ...]:
-        """
-        Кэшируемый поиск. Возвращает результаты для каждого чанка,
-        путь имеет вид "[source] rel_path" (без чанк-суффикса).
-        """
-        try:
-            with self._get_connection() as conn:
-                rows = conn.execute(
-                    """
-                    SELECT
-                        path,
-                        source,
-                        snippet(memory_fts, 2, '»', '«', '...', 60) as snippet,
-                        rank
-                    FROM memory_fts
-                    WHERE memory_fts MATCH ?
-                    ORDER BY rank
-                    LIMIT ?
-                    """,
-                    (query, limit)
-                ).fetchall()
-
-                results = tuple(
-                    SearchResult(
-                        path=f"[{row['source']}] {row['path']}",
-                        snippet=row['snippet'],
-                        rank=row['rank'],
-                        source='fts5'
-                    )
-                    for row in rows
-                )
-                return results
-
-        except Exception as e:  # nosec
-            logging.error("Cached search failed: %s", e)
-            return tuple()
-
-    def search(self, query: str, limit: int = 10) -> List[SearchResult]:
-        """
-        FTS5 поиск с ранжированием и кэшированием.
-        """
-        results = list(self._cached_search(query, limit))
-
-        if COST_TRACKING_ENABLED and results:
-            try:
-                tracker = CostTracker()
-                input_tokens = len(query.split()) * 1.3
-                output_tokens = sum(len(r.snippet.split()) for r in results) * 1.3
-                tracker.track_operation(
-                    operation_type='fts5_search',
-                    input_tokens=int(input_tokens),
-                    output_tokens=int(output_tokens),
-                    model='embedding',
-                    metadata=f"results: {len(results)}"
-                )
-            except Exception:  # nosec
-                logging.debug("Cost tracking failed")
-
-        return results
-
-    def stats(self) -> dict:
-        """Статистика FTS5 индекса"""
-        try:
-            with self._get_connection() as conn:
-                row = conn.execute(
-                    "SELECT COUNT(*) as count FROM memory_fts"
-                ).fetchone()
-
-                sources = conn.execute(
-                    "SELECT source, COUNT(*) as count FROM memory_fts GROUP BY source"
-                ).fetchall()
-
-                return {
-                    'total_documents': row['count'],
-                    'sources': {s['source']: s['count'] for s in sources},
-                    'db_path': str(self.db_path),
-                    'db_size_kb': round(self.db_path.stat().st_size / 1024, 1) if self.db_path.exists() else 0
-                }
-        except Exception as e:  # nosec
-            logging.error("Stats failed: %s", e)
-            return {
-                'total_documents': 0,
-                'sources': {},
-                'db_path': str(self.db_path),
-                'db_size_kb': 0
-            }
-
-
-# ---------------------------------------------------------------------------
-# CLI commands
-# ---------------------------------------------------------------------------
-
-def cmd_init(fts: L4FTS5Search):
-    if fts.init_fts():
-        print("[OK] FTS5 table initialized")
-    else:
-        print("[ERROR] Initialization failed")
-        sys.exit(1)
-
-
-def cmd_reindex(fts: L4FTS5Search):
-    count = fts.reindex_all()
-    print(f"[OK] Reindexed {count} files")
-
-
-def cmd_search(fts: L4FTS5Search, query: str):
-    results = fts.search(query)
-    print(f"\n[SEARCH] FTS5 Search: '{query}'")
-    print(f"Found {len(results)} results\n")
-    for i, result in enumerate(results, 1):
-        print(f"[{i}] {result.path} (rank: {result.rank:.3f})")
-        print(f"    {result.snippet}")
-        print()
-
-
-def cmd_stats(fts: L4FTS5Search):
-    stats = fts.stats()
-    print("\n[STATS] FTS5 Statistics:")
-    print(f"   Total documents: {stats['total_documents']}")
-    print(f"   DB size: {stats['db_size_kb']} KB")
-    print(f"   DB path: {stats['db_path']}")
-    print("\n   Sources:")
-    for source, count in stats['sources'].items():
-        print(f"      {source}: {count} documents")
-
-
-def _fetch_semantic_results(query: str, timeout: int = 30) -> list[dict]:
-    """Запускает семантический поиск и возвращает результаты в JSON."""
-    semantic_script = Path(__file__).parent / "l4_semantic_global.py"
-    if not semantic_script.exists():
-        return []
-
-    try:
-        result = subprocess.run(
-            [sys.executable, str(semantic_script), "search-all", query, "--json"],
-            capture_output=True,
-            text=True,
-            encoding='utf-8',
-            errors='replace',
-            timeout=timeout,
-            check=False,
-        )
-    except (subprocess.TimeoutExpired, OSError) as exc:
-        logging.warning("Semantic search subprocess failed: %s", exc)
-        return []
-
-    if result.returncode != 0:
-        logging.warning(
-            "Semantic search exited %s: %s",
-            result.returncode, result.stderr.strip(),
-        )
-        return []
-
-    try:
-        payload = json.loads(result.stdout)
-    except json.JSONDecodeError as exc:
-        logging.warning("Semantic JSON parse failed: %s", exc)
-        return []
-
-    return payload.get('results', []) if isinstance(payload, dict) else []
-
-
-def _print_merged_results(merged, fts_count: int, semantic_count: int) -> None:
-    """Форматирует и выводит объединённые результаты гибридного поиска."""
-    print(
-        f"\nMerged {len(merged)} unique result(s) "
-        f"(FTS: {fts_count}, Semantic: {semantic_count})"
-    )
-    print("-" * 70)
-
-    for i, entry in enumerate(merged[:10], 1):
-        contributors = sorted(entry.sources.keys())
-        print(
-            f"[{i}] {entry.key}  "
-            f"score={entry.score:.4f}  "
-            f"normalized={entry.normalized_score:.3f}  "
-            f"sources=[{', '.join(contributors)}]"
-        )
-        for source_name in contributors:
-            for hit in entry.sources[source_name]:
-                rank = hit.get("rank", "?")
-                contrib = hit.get("rrf_contribution", 0.0)
-                if source_name == "fts":
-                    extra = hit.get("snippet", "").strip().replace("\n", " ")[:120]
-                    print(
-                        f"    [{source_name} rank={rank} rrf={contrib:.4f}] {extra}"
-                    )
-                else:
-                    distance = hit.get("distance")
-                    distance_str = (
-                        f"{distance:.3f}"
-                        if isinstance(distance, (int, float))
-                        else "n/a"
-                    )
-                    text = hit.get("text", "").strip().replace("\n", " ")[:120]
-                    print(
-                        f"    [{source_name} rank={rank} rrf={contrib:.4f} "
-                        f"dist={distance_str}] {text}"
-                    )
-        print()
-
-
-def cmd_hybrid(fts: L4FTS5Search, query: str):
-    """
-    Гибридный поиск: FTS5 + семантика через Reciprocal Rank Fusion.
-    FTS5 теперь возвращает результаты по чанкам, но с одинаковым ключом
-    для одного файла, что позволяет RRF корректно усилить документ.
-    """
-    fts_results = fts.search(query, limit=5)
-    semantic_results = _fetch_semantic_results(query)
-
-    fts_stream = [
-        {
-            "key": normalize_existing_key(res.path),
-            "display_path": res.path,
-            "snippet": res.snippet,
-            "bm25_rank": res.rank,
-        }
-        for res in fts_results
-    ]
-
-    semantic_stream = [
-        {**hit, "key": normalize_existing_key(hit.get("key", ""))}
-        for hit in semantic_results
-    ]
-
-    print(f"\n[HYBRID SEARCH] '{query}'")
-    print("=" * 70)
-
-    if not fts_stream and not semantic_stream:
-        print("No results from either engine.\n")
-        return
-
-    merged = normalize_scores(
-        rrf_merge(("fts", fts_stream), ("semantic", semantic_stream))
+def _make_search_result(
+    module: Any,
+    source: str,
+    rel_path: str,
+    snippet: str = "snippet",
+    rank: float = -3.0,
+) -> Any:
+    """Build a SearchResult whose key matches production normalisation."""
+    return module.SearchResult(
+        path=f"[{source}] {rel_path}",
+        key=make_join_key(source, rel_path),
+        snippet=snippet,
+        rank=rank,
+        source="fts5",
     )
 
-    _print_merged_results(merged, len(fts_stream), len(semantic_stream))
 
+def _patch_streams(
+    monkeypatch,
+    module,
+    *,
+    fts_results=None,
+    fts_side_effect=None,
+    semantic_results=None,
+    bm25_results=None,
+    reranker_lookup=None,
+):
+    """Patch every external collaborator used by cmd_hybrid_parallel.
 
-def main():
-    """CLI интерфейс"""
-    if len(sys.argv) < 2:
-        print(__doc__)
-        sys.exit(1)
-
-    command = sys.argv[1]
-    fts = L4FTS5Search()
-
-    if command == 'init':
-        cmd_init(fts)
-    elif command == 'reindex':
-        cmd_reindex(fts)
-    elif command == 'search':
-        if len(sys.argv) < 3:
-            print("Usage: l4_fts5_search.py search <query>")
-            sys.exit(1)
-        query = ' '.join(sys.argv[2:])
-        cmd_search(fts, query)
-    elif command == 'stats':
-        cmd_stats(fts)
-    elif command == 'hybrid':
-        if len(sys.argv) < 3:
-            print("Usage: l4_fts5_search.py hybrid <query>")
-            sys.exit(1)
-        query = ' '.join(sys.argv[2:])
-        cmd_hybrid(fts, query)
+    Returns the L4FTS5Search mock so individual tests can inspect calls if
+    needed. ``reranker_lookup`` should be a callable replacing
+    ``_get_l4_rerank``; default is a MagicMock returning ``None`` so tests
+    can also assert it was *not* called.
+    """
+    fts_mock = MagicMock(spec=module.L4FTS5Search)
+    if fts_side_effect is not None:
+        fts_mock.search.side_effect = fts_side_effect
     else:
-        print(f"Unknown command: {command}")
-        print(__doc__)
-        sys.exit(1)
+        fts_mock.search.return_value = fts_results or []
+
+    semantic_payload = semantic_results or []
+
+    def fake_fetch_semantic(query, timeout=30):  # noqa: ARG001
+        return semantic_payload
+
+    monkeypatch.setattr(module, "_fetch_semantic_results", fake_fetch_semantic)
+
+    if bm25_results is None:
+        monkeypatch.setattr(module, "fetch_bm25_results", None)
+    else:
+        bm25_payload = bm25_results
+
+        def fake_bm25(query):  # noqa: ARG001
+            return bm25_payload
+
+        monkeypatch.setattr(module, "fetch_bm25_results", fake_bm25)
+
+    if reranker_lookup is None:
+        reranker_lookup = MagicMock(return_value=None)
+    monkeypatch.setattr(module, "_get_l4_rerank", reranker_lookup)
+    return fts_mock, reranker_lookup
 
 
-if __name__ == '__main__':
-    main()
+# ---------------------------------------------------------------------------
+# 1. End-to-end: three engines merge and the printed output reflects all of
+#    them.
+# ---------------------------------------------------------------------------
+
+
+def test_cmd_hybrid_parallel_merges_fts_semantic_bm25_and_prints_sources(
+    module, monkeypatch, capsys
+):
+    fts_results = [
+        _make_search_result(module, "global", "notes.md", snippet="alpha fts", rank=-1.0)
+    ]
+    semantic_results = [
+        {"key": "[global] notes.md", "text": "alpha semantic", "distance": 0.1, "rank": 0}
+    ]
+    bm25_results = [
+        {"key": "[global] notes.md", "snippet": "alpha bm25", "rank": 0, "bm25_score": 1.23}
+    ]
+
+    fts_mock, _ = _patch_streams(
+        monkeypatch,
+        module,
+        fts_results=fts_results,
+        semantic_results=semantic_results,
+        bm25_results=bm25_results,
+    )
+
+    module.cmd_hybrid_parallel(fts_mock, "alpha", enable_rerank=False)
+
+    out = capsys.readouterr().out
+    assert "[HYBRID SEARCH - PARALLEL] 'alpha'" in out
+    assert "Fetch time:" in out
+    assert "Merge time:" in out
+    assert "Total time:" in out
+    assert "Merged 1 unique result(s)" in out
+    # All three engines must appear on the single merged-result line.
+    contributors_lines = [line for line in out.splitlines() if "sources=" in line]
+    assert contributors_lines, "Expected at least one merged-result line"
+    assert "sources=[bm25, fts, semantic]" in contributors_lines[0]
+
+
+# ---------------------------------------------------------------------------
+# 2. Semantic / BM25 keys with dashed source names must be normalised onto
+#    the FTS key so RRF actually merges them.
+# ---------------------------------------------------------------------------
+
+
+def test_cmd_hybrid_parallel_normalizes_semantic_and_bm25_keys(
+    module, monkeypatch, capsys
+):
+    # FTS uses already-normalised source ("my-project" → "my_project").
+    fts_results = [_make_search_result(module, "my-project", "notes.md")]
+    # Semantic and BM25 still ship the raw dashed bracket — production
+    # normalisation must coerce them onto the same join key.
+    semantic_results = [
+        {"key": "[my-project] notes.md", "text": "sem", "distance": 0.2, "rank": 0}
+    ]
+    bm25_results = [
+        {"key": "[my-project] notes.md", "snippet": "bm", "rank": 0, "bm25_score": 0.5}
+    ]
+
+    fts_mock, _ = _patch_streams(
+        monkeypatch,
+        module,
+        fts_results=fts_results,
+        semantic_results=semantic_results,
+        bm25_results=bm25_results,
+    )
+
+    module.cmd_hybrid_parallel(fts_mock, "x", enable_rerank=False)
+
+    out = capsys.readouterr().out
+    assert "Merged 1 unique result(s)" in out
+    # Normalised key wins; the raw dashed bracket must never appear as the
+    # merged-key header.
+    assert "[my_project] notes.md" in out
+    result_line = next(line for line in out.splitlines() if "sources=" in line)
+    assert "[my-project]" not in result_line
+    assert "sources=[bm25, fts, semantic]" in result_line
+
+
+# ---------------------------------------------------------------------------
+# 3. Multiple chunks of the same doc from the same engine collapse to one
+#    best hit (semantic → min distance).
+# ---------------------------------------------------------------------------
+
+
+def test_cmd_hybrid_parallel_collapses_duplicate_chunks_per_engine(
+    module, monkeypatch, capsys
+):
+    semantic_results = [
+        {"key": "[global] notes.md", "text": "chunk-A", "distance": 0.5, "rank": 0},
+        {"key": "[global] notes.md", "text": "chunk-B-best", "distance": 0.1, "rank": 1},
+        {"key": "[global] notes.md", "text": "chunk-C", "distance": 0.4, "rank": 2},
+    ]
+
+    fts_mock, _ = _patch_streams(
+        monkeypatch,
+        module,
+        fts_results=[],
+        semantic_results=semantic_results,
+        bm25_results=[],
+    )
+
+    module.cmd_hybrid_parallel(fts_mock, "alpha", enable_rerank=False)
+
+    out = capsys.readouterr().out
+    assert "Merged 1 unique result(s)" in out
+    assert "chunk-B-best" in out
+    assert "chunk-A" not in out
+    assert "chunk-C" not in out
+
+
+# ---------------------------------------------------------------------------
+# 4. If one engine raises, the others still drive the merged output.
+# ---------------------------------------------------------------------------
+
+
+def test_cmd_hybrid_parallel_engine_failure_degrades_to_remaining_streams(
+    module, monkeypatch, capsys
+):
+    semantic_results = [
+        {"key": "[global] notes.md", "text": "ok-sem", "distance": 0.2, "rank": 0}
+    ]
+    bm25_results = [
+        {"key": "[global] notes.md", "snippet": "ok-bm", "rank": 0, "bm25_score": 0.5}
+    ]
+
+    fts_mock, _ = _patch_streams(
+        monkeypatch,
+        module,
+        fts_side_effect=RuntimeError("fts engine boom"),
+        semantic_results=semantic_results,
+        bm25_results=bm25_results,
+    )
+
+    module.cmd_hybrid_parallel(fts_mock, "alpha", enable_rerank=False)
+
+    out = capsys.readouterr().out
+    assert "Merged 1 unique result(s)" in out
+    result_line = next(line for line in out.splitlines() if "sources=" in line)
+    assert "sources=[bm25, semantic]" in result_line
+    assert "fts" not in result_line
+
+
+# ---------------------------------------------------------------------------
+# 5. All engines empty → explicit empty-result message and no merge line.
+# ---------------------------------------------------------------------------
+
+
+def test_cmd_hybrid_parallel_no_results_prints_empty_message(
+    module, monkeypatch, capsys
+):
+    fts_mock, _ = _patch_streams(
+        monkeypatch,
+        module,
+        fts_results=[],
+        semantic_results=[],
+        bm25_results=[],
+    )
+
+    module.cmd_hybrid_parallel(fts_mock, "nothing here", enable_rerank=False)
+
+    out = capsys.readouterr().out
+    assert "No results from any engine." in out
+    assert "Merged" not in out
+
+
+# ---------------------------------------------------------------------------
+# 6. enable_rerank=False short-circuits the lazy reranker lookup entirely.
+# ---------------------------------------------------------------------------
+
+
+def test_cmd_hybrid_parallel_no_rerank_does_not_import_reranker(
+    module, monkeypatch
+):
+    fts_results = [_make_search_result(module, "global", "notes.md")]
+    rerank_lookup = MagicMock(return_value=None)
+
+    fts_mock, _ = _patch_streams(
+        monkeypatch,
+        module,
+        fts_results=fts_results,
+        semantic_results=[],
+        bm25_results=None,  # BM25 module unavailable
+        reranker_lookup=rerank_lookup,
+    )
+
+    module.cmd_hybrid_parallel(fts_mock, "alpha", enable_rerank=False)
+
+    assert rerank_lookup.call_count == 0
+
+
+# ---------------------------------------------------------------------------
+# 7. enable_rerank=True must hand the reranker at most the top 20 merged
+#    candidates, even when more were merged.
+# ---------------------------------------------------------------------------
+
+
+def test_cmd_hybrid_parallel_rerank_enabled_applies_top20_only(
+    module, monkeypatch
+):
+    # 25 unique FTS hits → 25 merged candidates → top-20 to the reranker.
+    fts_results = [
+        _make_search_result(
+            module, "global", f"doc{i:02d}.md", snippet=f"s{i}", rank=-float(25 - i)
+        )
+        for i in range(25)
+    ]
+    received: dict[str, Any] = {}
+
+    def fake_reranker(query, merged):
+        received["query"] = query
+        received["merged_len"] = len(merged)
+        return merged  # pass-through
+
+    fts_mock, _ = _patch_streams(
+        monkeypatch,
+        module,
+        fts_results=fts_results,
+        semantic_results=[],
+        bm25_results=None,
+        reranker_lookup=lambda: fake_reranker,
+    )
+
+    module.cmd_hybrid_parallel(fts_mock, "alpha", enable_rerank=True)
+
+    assert received == {"query": "alpha", "merged_len": 20}
+
+
+# ---------------------------------------------------------------------------
+# 8. CLI `hybrid --parallel --no-rerank <query>` routes to cmd_hybrid_parallel
+#    with enable_rerank=False (and cmd_hybrid is NOT called).
+# ---------------------------------------------------------------------------
+
+
+def test_main_hybrid_parallel_flag_parsing_with_no_rerank(module, monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["l4_fts5_search.py", "hybrid", "--parallel", "--no-rerank", "alpha", "beta"],
+    )
+
+    captured: dict[str, Any] = {}
+
+    def fake_cmd_hybrid_parallel(fts, query, enable_rerank=True):
+        captured["query"] = query
+        captured["enable_rerank"] = enable_rerank
+        captured["fts_cls"] = type(fts).__name__
+
+    def fail_cmd_hybrid(*args, **kwargs):  # noqa: ARG001
+        raise AssertionError("cmd_hybrid must not run when --parallel is set")
+
+    monkeypatch.setattr(module, "cmd_hybrid_parallel", fake_cmd_hybrid_parallel)
+    monkeypatch.setattr(module, "cmd_hybrid", fail_cmd_hybrid)
+
+    module.main()
+
+    assert captured == {
+        "query": "alpha beta",
+        "enable_rerank": False,
+        "fts_cls": "L4FTS5Search",
+    }
+
+
+# ---------------------------------------------------------------------------
+# 9a. Parity guard: cmd_hybrid() and cmd_hybrid_parallel() must produce the
+#     same merged ranking and source attribution on identical fake streams
+#     (timing-only lines are stripped before comparison). This is the
+#     overarching invariant the per-engine tests above enforce piecewise.
+# ---------------------------------------------------------------------------
+
+
+def _strip_timing_and_header(out: str) -> list[str]:
+    """Remove timing lines and the parallel/sequential header so the merged
+    ranking lines can be compared verbatim between the two code paths.
+    """
+    skip_prefixes = (
+        "[HYBRID SEARCH",  # header line differs by "- PARALLEL" suffix
+        "Fetch time:",
+        "Merge time:",
+        "Rerank time:",
+        "Total time:",
+    )
+    return [
+        line
+        for line in out.splitlines()
+        if line.strip() and not line.startswith(skip_prefixes)
+    ]
+
+
+def test_cmd_hybrid_parity_with_cmd_hybrid_parallel(module, monkeypatch, capsys):
+    fts_results = [
+        _make_search_result(module, "global", "notes.md", snippet="alpha fts", rank=-1.0),
+        _make_search_result(module, "global", "other.md", snippet="beta fts", rank=-0.5),
+    ]
+    semantic_results = [
+        {"key": "[global] notes.md", "text": "alpha sem", "distance": 0.1, "rank": 0},
+        {"key": "[global] third.md", "text": "gamma sem", "distance": 0.3, "rank": 1},
+    ]
+    bm25_results = [
+        {"key": "[global] notes.md", "snippet": "alpha bm", "rank": 0, "bm25_score": 1.0}
+    ]
+
+    fts_mock, _ = _patch_streams(
+        monkeypatch,
+        module,
+        fts_results=fts_results,
+        semantic_results=semantic_results,
+        bm25_results=bm25_results,
+    )
+
+    module.cmd_hybrid_parallel(fts_mock, "alpha", enable_rerank=False)
+    parallel_out = _strip_timing_and_header(capsys.readouterr().out)
+
+    # Reset side-effects on the same fakes (semantic / bm25 are pure
+    # closures, fts_mock.search.return_value is unchanged).
+    module.cmd_hybrid(fts_mock, "alpha", enable_rerank=False)
+    sequential_out = _strip_timing_and_header(capsys.readouterr().out)
+
+    assert parallel_out == sequential_out, (
+        "cmd_hybrid_parallel and cmd_hybrid diverged on identical streams:\n"
+        f"parallel:\n{parallel_out}\nsequential:\n{sequential_out}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 9. _fetch_semantic_results returns [] under three subprocess failure modes:
+#    TimeoutExpired, non-zero exit, and invalid JSON output.
+# ---------------------------------------------------------------------------
+
+
+class _FakeCompleted:  # pylint: disable=too-few-public-methods
+    """Minimal stand-in for subprocess.CompletedProcess."""
+
+    def __init__(self, returncode, stdout="", stderr=""):
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+@pytest.mark.parametrize("scenario", ["timeout", "nonzero", "bad_json"])
+def test_fetch_semantic_results_timeout_nonzero_bad_json(
+    scenario, module, monkeypatch
+):
+    if scenario == "timeout":
+        def fake_run(*args, **kwargs):  # noqa: ARG001
+            raise subprocess.TimeoutExpired(cmd=["x"], timeout=kwargs.get("timeout", 30))
+    elif scenario == "nonzero":
+        def fake_run(*args, **kwargs):  # noqa: ARG001
+            return _FakeCompleted(returncode=2, stderr="oops")
+    else:  # bad_json
+        def fake_run(*args, **kwargs):  # noqa: ARG001
+            return _FakeCompleted(returncode=0, stdout="this is not json")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    # The l4_fts5_search module references `subprocess.run` via its imported
+    # `subprocess` symbol — patching the stdlib attribute is enough because
+    # the module didn't `from subprocess import run`.
+    assert module._fetch_semantic_results("alpha") == []
