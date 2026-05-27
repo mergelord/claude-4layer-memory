@@ -190,8 +190,51 @@ def generate_summary(duration_min, activity_count, modified_files, tools_counter
 
 
 def count_entries(content: str) -> int:
-    """Count number of entries in handoff/decisions file."""
-    return content.count('\n## 20')
+    """Count number of entries in handoff/decisions file.
+
+    Counts both normal entries (## 20YY-...) and crash-recovered blocks
+    (### [RECOVERED] 20YY-...) so emergency_trim triggers even when
+    crash-recovery has filled the file with [RECOVERED] entries.
+    """
+    return content.count('\n## 20') + content.count('\n### [RECOVERED] 20')
+
+
+def _is_entry_header(line: str) -> bool:
+    """Return True if a line begins a new entry block.
+
+    Recognises both standard event headers and crash-recovery blocks so
+    parse_entries treats them as boundaries (and rotation can evict
+    [RECOVERED] noise).
+    """
+    return line.startswith('## 20') or line.startswith('### [RECOVERED] 20')
+
+
+def parse_entries(entries_text: str) -> list[str]:
+    """Split the body of a handoff/decisions file into discrete entries.
+
+    Strips stale footer lines (``**Всего записей:**`` /
+    ``**Последнее обновление:**``) before parsing so they don't get
+    absorbed into the last entry and re-emitted on every Stop — that
+    absorption was the source of the "N/10" footer pile-up at end of
+    handoff.md.
+    """
+    cleaned = '\n'.join(
+        line for line in entries_text.split('\n')
+        if not line.startswith('**Всего записей:**')
+        and not line.startswith('**Последнее обновление:**')
+    )
+
+    entries: list[str] = []
+    current_entry: list[str] = []
+    for line in cleaned.split('\n'):
+        if _is_entry_header(line) and current_entry:
+            entries.append('\n'.join(current_entry))
+            current_entry = [line]
+        else:
+            current_entry.append(line)
+    if current_entry:
+        entries.append('\n'.join(current_entry))
+    return entries
 
 
 def emergency_trim_handoff(handoff_file: Path, decisions_file: Path):
@@ -215,17 +258,7 @@ def emergency_trim_handoff(handoff_file: Path, decisions_file: Path):
     header = parts[0] + '---' + parts[1] + '---'
     entries_text = parts[2]
 
-    # Parse entries
-    entries = []
-    current_entry = []
-    for line in entries_text.split('\n'):
-        if line.startswith('## 20') and current_entry:
-            entries.append('\n'.join(current_entry))
-            current_entry = [line]
-        else:
-            current_entry.append(line)
-    if current_entry:
-        entries.append('\n'.join(current_entry))
+    entries = parse_entries(entries_text)
 
     # Keep newest 10, move rest to decisions
     keep_entries = entries[-10:]
@@ -311,17 +344,7 @@ def emergency_trim_decisions(decisions_file: Path, memory_dir: Path):
     header = parts[0] + '---' + parts[1] + '---'
     entries_text = parts[2]
 
-    # Parse entries
-    entries = []
-    current_entry = []
-    for line in entries_text.split('\n'):
-        if line.startswith('## 20') and current_entry:
-            entries.append('\n'.join(current_entry))
-            current_entry = [line]
-        else:
-            current_entry.append(line)
-    if current_entry:
-        entries.append('\n'.join(current_entry))
+    entries = parse_entries(entries_text)
 
     # Keep newest 100, move rest to COLD
     keep_entries = entries[-100:]
