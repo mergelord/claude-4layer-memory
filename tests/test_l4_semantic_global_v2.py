@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """Тесты для L4 Semantic Global Memory (v2) с чанкингом и адаптерным слоем."""
 
+import io
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -14,6 +15,7 @@ sys.modules['chromadb.config'] = MagicMock()
 # Добавляем путь к scripts перед импортом
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
+import l4_semantic_global  # noqa: E402
 from l4_semantic_global import GlobalSemanticMemory  # noqa: E402
 from chunking import chunk_text  # noqa: E402
 
@@ -186,6 +188,77 @@ class TestSearchAllOutput:
         assert "[global] file1.md" in keys
         assert "[global] file2.md" in keys
 
+    def test_search_global_returns_key_field(self):
+        memory = GlobalSemanticMemory.__new__(GlobalSemanticMemory)
+        memory.model = MagicMock()
+        emb_mock = MagicMock()
+        emb_mock.tolist.return_value = [0.1, 0.2]
+        memory.model.encode.return_value = [emb_mock]
+        memory.client = MagicMock()
+        memory.collection_prefix = "memory_"
+        memory.global_collection = "memory_global"
+
+        fake_collection = MagicMock()
+        fake_collection.query.return_value = {
+            "ids": [["id1"]],
+            "documents": [["global note"]],
+            "metadatas": [[{"file": "file.md"}]],
+            "distances": [[0.2]],
+        }
+        memory.client.get_collection.return_value = fake_collection
+
+        results = memory.search_global("test")
+
+        assert results[0]["key"] == "[global] file.md"
+
+    def test_search_project_normalizes_collection_name_prefix(self):
+        memory = GlobalSemanticMemory.__new__(GlobalSemanticMemory)
+        memory.model = MagicMock()
+        emb_mock = MagicMock()
+        emb_mock.tolist.return_value = [0.1, 0.2]
+        memory.model.encode.return_value = [emb_mock]
+        memory.collection_prefix = "memory_"
+        memory.global_collection = "memory_global"
+
+        target_collection = MagicMock()
+        target_collection.query.return_value = {
+            "ids": [["id1"]],
+            "documents": [["project note"]],
+            "metadatas": [[{"file": "handoff.md"}]],
+            "distances": [[0.1]],
+        }
+        listed_collection = MagicMock()
+        listed_collection.name = "memory_C__BAT_CUSTOMWGMSFS"
+        memory.client = MagicMock()
+
+        def get_collection(name):
+            if name == "memory_C__BAT_CUSTOMWGMSFS":
+                return target_collection
+            raise ValueError(name)
+
+        memory.client.get_collection.side_effect = get_collection
+        memory.client.list_collections.return_value = [listed_collection]
+
+        results = memory.search_project("C--BAT", "handoff")
+
+        memory.client.get_collection.assert_any_call("memory_C__BAT_CUSTOMWGMSFS")
+        assert results[0]["source"] == "C__BAT_CUSTOMWGMSFS"
+        assert results[0]["key"] == "[C_BAT_CUSTOMWGMSFS] handoff.md"
+
+    def test_print_results_json_handles_raw_chunk_without_key(self, capsys):
+        results = [
+            {
+                "text": "unicode: memory",
+                "distance": 0.1,
+                "metadata": {"file": "handoff.md"},
+                "source": "global",
+            }
+        ]
+
+        l4_semantic_global._print_results(results, json_output=True)
+
+        assert '"key": "[global] handoff.md"' in capsys.readouterr().out
+
 
 # -------------------------------------------------------------------
 # Original encode tests
@@ -211,3 +284,89 @@ class TestEncode:
         r2 = memory._encode_query("test")
         assert r1 == r2
         assert memory.model.encode.call_count == 1
+
+
+class TestLazyModelAndEncoding:
+    def test_init_does_not_load_sentence_transformer(self):
+        memory = GlobalSemanticMemory()
+
+        assert memory._model is None
+
+    def test_search_triggers_model_load(self):
+        memory = GlobalSemanticMemory.__new__(GlobalSemanticMemory)
+        memory.model_name = "test-model"
+        memory._model = None
+        memory.client = MagicMock()
+        memory.collection_prefix = "memory_"
+        memory.global_collection = "memory_global"
+
+        fake_model = MagicMock()
+        emb_mock = MagicMock()
+        emb_mock.tolist.return_value = [0.1, 0.2]
+        fake_model.encode.return_value = [emb_mock]
+        sentence_transformer = MagicMock(return_value=fake_model)
+        sys.modules["sentence_transformers"].SentenceTransformer = sentence_transformer
+
+        fake_collection = MagicMock()
+        fake_collection.query.return_value = {
+            "ids": [[]],
+            "documents": [[]],
+            "metadatas": [[]],
+            "distances": [[]],
+        }
+        memory.client.get_collection.return_value = fake_collection
+        memory.client.list_collections.return_value = []
+
+        memory.search_all("test")
+
+        sentence_transformer.assert_called_once_with("test-model")
+        fake_model.encode.assert_called_once()
+
+    def test_configure_utf8_output_reconfigures_windows_streams(self, monkeypatch):
+        class FakeStream:
+            encoding = "cp1252"
+
+            def __init__(self):
+                self.buffer = io.BytesIO()
+                self.calls = []
+
+            def reconfigure(self, **kwargs):
+                self.calls.append(kwargs)
+                self.encoding = kwargs["encoding"]
+
+        stdout = FakeStream()
+        stderr = FakeStream()
+        monkeypatch.setattr(l4_semantic_global.sys, "platform", "win32")
+        monkeypatch.setattr(l4_semantic_global.sys, "stdout", stdout)
+        monkeypatch.setattr(l4_semantic_global.sys, "stderr", stderr)
+
+        l4_semantic_global.configure_utf8_output()
+
+        assert stdout.encoding == "utf-8"
+        assert stderr.encoding == "utf-8"
+
+    def test_configure_utf8_output_falls_back_to_buffer(self, monkeypatch):
+        class FakeStream:
+            encoding = "cp1252"
+
+            def __init__(self):
+                self.buffer = io.BytesIO()
+
+            def reconfigure(self, **kwargs):
+                raise OSError("reconfigure unavailable")
+
+        stdout = FakeStream()
+        stderr = FakeStream()
+        monkeypatch.setattr(l4_semantic_global.sys, "platform", "win32")
+        monkeypatch.setattr(l4_semantic_global.sys, "stdout", stdout)
+        monkeypatch.setattr(l4_semantic_global.sys, "stderr", stderr)
+
+        l4_semantic_global.configure_utf8_output()
+
+        l4_semantic_global.sys.stdout.write("память")
+        l4_semantic_global.sys.stdout.flush()
+        l4_semantic_global.sys.stderr.write("ошибка")
+        l4_semantic_global.sys.stderr.flush()
+
+        assert stdout.buffer.getvalue() == "память".encode("utf-8")
+        assert stderr.buffer.getvalue() == "ошибка".encode("utf-8")

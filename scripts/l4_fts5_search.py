@@ -59,13 +59,6 @@ try:
 except ImportError:
     fetch_bm25_results = None
 
-# Cross-encoder reranker (optional module)
-try:
-    # pylint: disable-next=wrong-import-position,import-error
-    from l4_rerank import rerank as l4_rerank  # noqa: E402
-except ImportError:
-    l4_rerank = None
-
 # Настройка UTF-8 для Windows
 if sys.platform == "win32":
     import codecs
@@ -76,6 +69,17 @@ if sys.platform == "win32":
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
+
+
+@lru_cache(maxsize=1)
+def _get_l4_rerank():
+    """Import the optional cross-encoder reranker only when hybrid needs it."""
+    try:
+        # pylint: disable-next=import-outside-toplevel,import-error
+        from l4_rerank import rerank
+    except ImportError:
+        return None
+    return rerank
 
 
 # ---------------------------------------------------------------------------
@@ -669,9 +673,10 @@ def cmd_hybrid_parallel(fts: L4FTS5Search, query: str, enable_rerank: bool = Tru
 
     # Опциональный cross‑encoder реранкинг
     rerank_time = 0.0
-    if enable_rerank and l4_rerank is not None and merged:
+    reranker = _get_l4_rerank() if enable_rerank and merged else None
+    if reranker is not None:
         rerank_start = time.time()
-        merged = l4_rerank(query, merged[:20])
+        merged = reranker(query, merged[:20])
         rerank_time = time.time() - rerank_start
 
     total_time = time.time() - start_time
@@ -757,8 +762,9 @@ def cmd_hybrid(fts: L4FTS5Search, query: str, enable_rerank: bool = True) -> Non
     )
 
     # Опциональный cross‑encoder реранкинг
-    if enable_rerank and l4_rerank is not None and merged:
-        merged = l4_rerank(query, merged[:20])
+    reranker = _get_l4_rerank() if enable_rerank and merged else None
+    if reranker is not None:
+        merged = reranker(query, merged[:20])
 
     _print_merged_results(merged)
 

@@ -14,9 +14,11 @@ L4 Semantic Global Memory Layer (Hybrid-ready)
 - Chunking contract: retrieval is chunk-level, fusion is document-level
 """
 
+import codecs
 import json
 import logging
 import os
+import re
 import sys
 import time
 from functools import lru_cache
@@ -30,16 +32,6 @@ from chromadb.config import Settings
 # pylint: disable=import-error
 from chunking import chunk_text  # noqa: E402
 from ranking import make_join_key  # noqa: E402
-from sentence_transformers import SentenceTransformer
-
-# Cross-encoder reranker (optional module).
-# Kept as a lazy import hook for the hybrid pipeline; ``search_all``
-# itself is semantic-only and intentionally does not rerank — reranking
-# is a cross-source operation that lives in ``l4_fts5_search``.
-try:
-    from l4_rerank import rerank as l4_rerank  # noqa: E402 # pylint: disable=unused-import
-except ImportError:
-    l4_rerank = None  # type: ignore[assignment]
 
 # ----------------------------
 # CONFIG
@@ -47,6 +39,30 @@ except ImportError:
 
 DEFAULT_MODEL = "paraphrase-multilingual-MiniLM-L12-v2"
 MAX_CHUNKS_PER_DOC = 3  # for future aggregation if needed
+_COLLECTION_NON_ALNUM = re.compile(r"[^a-zA-Z0-9_]")
+
+
+def configure_utf8_output() -> None:
+    """Force UTF-8 console output on Windows when the script runs as a CLI."""
+    if sys.platform != "win32":
+        return
+
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name)
+        encoding = (getattr(stream, "encoding", None) or "").lower()
+        if encoding.replace("-", "") == "utf8":
+            continue
+
+        if hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="strict")
+                continue
+            except (AttributeError, OSError, ValueError):
+                pass
+
+        buffer = getattr(stream, "buffer", None)
+        if buffer is not None:
+            setattr(sys, stream_name, codecs.getwriter("utf-8")(buffer, "strict"))
 
 
 # ----------------------------
@@ -74,11 +90,30 @@ class GlobalSemanticMemory:
             path=str(self.db_path), settings=Settings(anonymized_telemetry=False)
         )
 
-        model_name = os.getenv("L4_MODEL", DEFAULT_MODEL)
-        self.model = SentenceTransformer(model_name)
+        self.model_name = os.getenv("L4_MODEL", DEFAULT_MODEL)
+        self._model = None
 
         self.collection_prefix = "memory_"
         self.global_collection = "memory_global"
+
+    @property
+    def model(self):
+        """Load SentenceTransformer only for operations that need embeddings."""
+        if self._model is None:
+            try:
+                from sentence_transformers import SentenceTransformer
+            except ImportError as exc:
+                msg = (
+                    "sentence_transformers is required for semantic search/index. "
+                    "Install project dependencies and retry."
+                )
+                raise RuntimeError(msg) from exc
+            self._model = SentenceTransformer(self.model_name)
+        return self._model
+
+    @model.setter
+    def model(self, value) -> None:
+        self._model = value
 
     # =====================================================
     # EMBEDDING GATEWAY (P1)
@@ -100,6 +135,26 @@ class GlobalSemanticMemory:
         except Exception as e:  # nosec
             logging.error("Failed to get collection %s: %s", name, e)
             return None
+
+    def _normalize_collection_suffix(self, project_name: str) -> str:
+        """Return the Chroma-compatible project suffix used in collection names."""
+        return _COLLECTION_NON_ALNUM.sub("_", project_name)
+
+    def _resolve_project_collection_name(self, project_name: str) -> str:
+        """Resolve a user project argument to an existing Chroma collection name."""
+        normalized_suffix = self._normalize_collection_suffix(project_name)
+        candidate = self.collection_prefix + normalized_suffix
+
+        if self._get_collection(candidate) is not None:
+            return candidate
+
+        prefix = self.collection_prefix + normalized_suffix
+        matches = sorted(
+            c.name
+            for c in self.client.list_collections()
+            if c.name.startswith(prefix) and c.name != self.global_collection
+        )
+        return matches[0] if matches else candidate
 
     # ----------------------------
     # SEARCH CORE
@@ -131,6 +186,7 @@ class GlobalSemanticMemory:
             out.append(
                 {
                     "id": id_val,
+                    "key": self._make_document_key(source, metadata),
                     "text": docs[i],
                     "metadata": metadata,
                     "distance": dists[i] if i < len(dists) else 999,
@@ -397,9 +453,10 @@ class GlobalSemanticMemory:
     def search_project(self, project_name: str, query: str, n_results: int = 10) -> List[Dict[str, Any]]:
         """Поиск только в памяти конкретного проекта."""
         embedding = self._encode_query(query)
-        col_name = self.collection_prefix + project_name
+        col_name = self._resolve_project_collection_name(project_name)
         col = self._get_collection(col_name)
-        return self._search_collection(col, embedding, n_results, project_name)
+        source = col_name[len(self.collection_prefix) :]
+        return self._search_collection(col, embedding, n_results, source)
 
 
 # ----------------------------
@@ -475,7 +532,10 @@ def _print_results(results: List[Dict[str, Any]], json_output: bool) -> None:
         output = {
             "results": [
                 {
-                    "key": r["key"],
+                    "key": r.get(
+                        "key",
+                        make_join_key(r["source"], r["metadata"].get("file", "unknown")),
+                    ),
                     "text": r["text"],
                     "distance": r["distance"],
                     "metadata": r["metadata"],
@@ -496,6 +556,7 @@ def _print_results(results: List[Dict[str, Any]], json_output: bool) -> None:
 
 
 def main() -> None:
+    configure_utf8_output()
     mem = GlobalSemanticMemory()
 
     if len(sys.argv) < 2:

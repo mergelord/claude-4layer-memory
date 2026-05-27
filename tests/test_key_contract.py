@@ -120,9 +120,8 @@ def test_fts5_search_result_key_is_document_level_basename():
     display can show subdirectories, but the join key must be
     ``"[normalized_source] notes.md"`` to align with BM25 and semantic.
     """
-    from l4_fts5_search import L4FTS5Search, SearchResult  # noqa: E402
+    from l4_fts5_search import SearchResult  # noqa: E402
 
-    fts = L4FTS5Search.__new__(L4FTS5Search)  # bypass __init__/db
     # Build a fake row resembling what sqlite3.Row + FTS5 yield.
     fake_row = {
         "path": "archive/notes.md",
@@ -163,6 +162,7 @@ def test_fts5_cached_search_uses_make_join_key(tmp_path, monkeypatch):
     # index_file uses file.name (basename) for path, so to simulate a
     # nested rel_path we patch the DB row directly via reindex_all.
     monkeypatch.setattr(fts, "global_memory", md.parent.parent)
+    monkeypatch.setattr(fts, "projects_base", tmp_path / "projects")
     fts.reindex_all()
 
     results = list(fts.search("memory"))
