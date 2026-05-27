@@ -22,7 +22,15 @@ the three streams produced ``"[my_app] notes.md"``,
 respectively — three different keys for the same document, so RRF
 saw three independent hits and never merged them.
 
-This test pins the contract: ``ranking.make_join_key(source, filename)``
+Bug N-4 went further: the basename-based collapse meant two distinct
+files (``archive/notes.md`` and ``current/notes.md``) silently merged
+into one RankedResult ``[global] notes.md``. The fix routes every
+engine through :func:`ranking.make_join_key`, which internally calls
+:func:`ranking.normalize_document_path` on the document path — so a
+POSIX rel_path is preserved verbatim and sub-directory siblings stay
+distinct.
+
+This test pins the contract: ``ranking.make_join_key(source, document)``
 is the **only** legitimate way to construct a join key, and all three
 engines must route through it (or through ``normalize_existing_key``
 when they receive a pre-formed bracketed key from another engine).
@@ -30,7 +38,6 @@ when they receive a pre-formed bracketed key from another engine).
 
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -63,7 +70,13 @@ def _build_bm25_mock(rows):
 
 
 def test_bm25_key_matches_make_join_key_for_plain_source():
-    """``global`` round-trips unchanged through both code paths."""
+    """``global`` round-trips unchanged through both code paths.
+
+    After Bug N-4 the BM25 key preserves the rel_path stored in
+    ``row['path']`` (it no longer strips down to basename), so a hit on
+    ``docs/memory.md`` produces ``[global] docs/memory.md`` — distinct
+    from a separate ``memory.md`` at the root.
+    """
     from l4_bm25_search import fetch_bm25_results  # noqa: E402
 
     conn = _build_bm25_mock(
@@ -79,7 +92,7 @@ def test_bm25_key_matches_make_join_key_for_plain_source():
     with patch("l4_bm25_search._get_fts5_connection", return_value=conn):
         result = fetch_bm25_results("query")
 
-    assert result[0]["key"] == make_join_key("global", "memory.md")
+    assert result[0]["key"] == make_join_key("global", "docs/memory.md")
 
 
 def test_bm25_key_normalises_hyphenated_source():
@@ -104,8 +117,8 @@ def test_bm25_key_normalises_hyphenated_source():
     with patch("l4_bm25_search._get_fts5_connection", return_value=conn):
         result = fetch_bm25_results("query")
 
-    assert result[0]["key"] == make_join_key("my-fancy-app", "handoff.md")
-    assert result[0]["key"] == "[my_fancy_app] handoff.md"
+    assert result[0]["key"] == make_join_key("my-fancy-app", "memory/handoff.md")
+    assert result[0]["key"] == "[my_fancy_app] memory/handoff.md"
 
 
 # ---------------------------------------------------------------------------
@@ -113,12 +126,14 @@ def test_bm25_key_normalises_hyphenated_source():
 # ---------------------------------------------------------------------------
 
 
-def test_fts5_search_result_key_is_document_level_basename():
-    """FTS5 ``SearchResult.key`` MUST be document-level basename, not full path.
+def test_fts5_search_result_key_is_document_level_rel_path():
+    """FTS5 ``SearchResult.key`` MUST be document-level POSIX rel_path.
 
-    The raw FTS5 row may contain ``archive/notes.md`` so that the human
-    display can show subdirectories, but the join key must be
-    ``"[normalized_source] notes.md"`` to align with BM25 and semantic.
+    Bug N-4: the previous contract used ``basename(path)``, which silently
+    collapsed ``archive/notes.md`` and ``current/notes.md`` into one
+    ``[normalized_source] notes.md`` key during RRF merge. The fix is to
+    preserve the full relative path (normalised through
+    ``make_join_key`` → ``normalize_document_path``).
     """
     from l4_fts5_search import SearchResult  # noqa: E402
 
@@ -135,20 +150,24 @@ def test_fts5_search_result_key_is_document_level_basename():
     # contract test below.
     sr = SearchResult(
         path=f"[{fake_row['source']}] {fake_row['path']}",
-        key=make_join_key(fake_row["source"], os.path.basename(fake_row["path"])),
+        key=make_join_key(fake_row["source"], fake_row["path"]),
         snippet=fake_row["snippet"],
         rank=fake_row["rank"],
         source="fts5",
     )
 
-    assert sr.key == "[my_fancy_app] notes.md"
+    assert sr.key == "[my_fancy_app] archive/notes.md"
     # Display still preserves subdirectory info for humans.
     assert "archive/notes.md" in sr.path
 
 
 def test_fts5_cached_search_uses_make_join_key(tmp_path, monkeypatch):
     """Live ``_cached_search`` must populate ``SearchResult.key`` via
-    :func:`ranking.make_join_key` — not a string template."""
+    :func:`ranking.make_join_key` — not a string template.
+
+    After Bug N-4 the join key preserves the sub-directory component so
+    siblings with the same basename in different folders stay distinct.
+    """
     from l4_fts5_search import L4FTS5Search  # noqa: E402
 
     fts = L4FTS5Search(db_path=tmp_path / "fts.db")
@@ -159,8 +178,6 @@ def test_fts5_cached_search_uses_make_join_key(tmp_path, monkeypatch):
     md = tmp_path / "memory" / "archive" / "notes.md"
     md.parent.mkdir(parents=True)
     md.write_text("memory subsystem notes", encoding="utf-8")
-    # index_file uses file.name (basename) for path, so to simulate a
-    # nested rel_path we patch the DB row directly via reindex_all.
     monkeypatch.setattr(fts, "global_memory", md.parent.parent)
     monkeypatch.setattr(fts, "projects_base", tmp_path / "projects")
     fts.reindex_all()
@@ -169,8 +186,8 @@ def test_fts5_cached_search_uses_make_join_key(tmp_path, monkeypatch):
     assert results, "FTS5 index must return at least one hit for the seeded file"
 
     for r in results:
-        # The display path keeps the rel_path; key uses basename.
-        assert r.key == make_join_key("global", "notes.md")
+        # The display path AND the join key both keep the rel_path now.
+        assert r.key == make_join_key("global", "archive/notes.md")
 
 
 # ---------------------------------------------------------------------------
@@ -213,31 +230,84 @@ def test_semantic_make_document_key_matches_make_join_key():
 
 
 @pytest.mark.parametrize(
-    "source,filename",
+    "source,rel_path",
     [
         ("global", "handoff.md"),
         ("my-app", "decisions.md"),
         ("my-fancy-app", "architecture.md"),
         ("project.with.dots", "x.md"),
         ("with spaces", "doc.md"),
+        # Sub-directory cases (Bug N-4 regression): all three engines must
+        # preserve the rel_path so siblings with shared basenames remain
+        # distinct.
+        ("global", "archive/notes.md"),
+        ("my-app", "current/notes.md"),
     ],
 )
-def test_three_streams_emit_identical_join_keys(source, filename):
-    """For every (source, filename), bm25 / fts / semantic must agree.
+def test_three_streams_emit_identical_join_keys(source, rel_path):
+    """For every (source, rel_path), bm25 / fts / semantic must agree.
 
-    This is the regression net for the original audit finding: as long
-    as every engine routes through ``make_join_key`` (or
-    ``normalize_existing_key`` for already-formed brackets), the three
+    This is the regression net for the original audit finding *and*
+    Bug N-4: as long as every engine routes through ``make_join_key``
+    (which internally calls ``normalize_document_path``), the three
     streams collapse onto a single key and RRF can merge them.
     """
-    # BM25 builds keys via make_join_key on (row['source'], basename(path)).
-    bm25_key = make_join_key(source, os.path.basename(f"sub/{filename}"))
-    # FTS5 builds keys via make_join_key on (row['source'], basename(path)).
-    fts_key = make_join_key(source, os.path.basename(f"sub/{filename}"))
+    # BM25 builds keys via make_join_key on (row['source'], row['path']).
+    bm25_key = make_join_key(source, rel_path)
+    # FTS5 builds keys via make_join_key on (row['source'], row['path']).
+    fts_key = make_join_key(source, rel_path)
     # Semantic builds keys via make_join_key on (source, metadata['file']).
-    semantic_key = make_join_key(source, filename)
+    semantic_key = make_join_key(source, rel_path)
 
     assert bm25_key == fts_key == semantic_key
+
+
+def test_subdir_and_root_file_with_same_basename_produce_distinct_keys(
+    tmp_path, monkeypatch
+):
+    """Bug N-4 regression: archive/notes.md and current/notes.md must NOT
+    collapse into one RRF key.
+
+    Before the fix, both files would index with ``path = "notes.md"``
+    (or ``"notes.md"`` after basename-stripping at retrieval), so a
+    search would return a single merged ``[global] notes.md`` result
+    blending content from two different files.
+
+    After the fix, FTS5 stores POSIX rel_path and ``make_join_key``
+    preserves it verbatim, so the two files remain distinct.
+    """
+    from l4_fts5_search import L4FTS5Search  # noqa: E402
+
+    fts = L4FTS5Search(db_path=tmp_path / "fts.db")
+    assert fts.init_fts()
+
+    memory = tmp_path / "memory"
+    (memory / "archive").mkdir(parents=True)
+    (memory / "current").mkdir(parents=True)
+    (memory / "archive" / "notes.md").write_text(
+        "widgets used to live in the old archive notes", encoding="utf-8"
+    )
+    (memory / "current" / "notes.md").write_text(
+        "widgets currently documented in the live notes", encoding="utf-8"
+    )
+
+    monkeypatch.setattr(fts, "global_memory", memory)
+    monkeypatch.setattr(fts, "projects_base", tmp_path / "projects")
+    fts.reindex_all()
+
+    results = list(fts.search("widgets"))
+    keys = {r.key for r in results}
+
+    assert make_join_key("global", "archive/notes.md") in keys, (
+        f"archive/notes.md missing from result keys: {keys!r}"
+    )
+    assert make_join_key("global", "current/notes.md") in keys, (
+        f"current/notes.md missing from result keys: {keys!r}"
+    )
+    assert len(keys) >= 2, (
+        "sub-directory siblings with the same basename collapsed into "
+        f"one key (Bug N-4 regression): {keys!r}"
+    )
 
 
 def test_pre_formed_keys_renormalise_to_same_canonical_form():

@@ -66,8 +66,30 @@ class TestSkillCreatorInit:
         creator.claude_dir = temp_claude_dir
 
         invalid_path = Path(tempfile.gettempdir()) / "outside.json"
-        with pytest.raises(ValueError, match="Invalid path"):
+        with pytest.raises(ValueError, match="Path outside allowed directory"):
             creator.safe_file_path(invalid_path)
+
+    def test_safe_file_path_rejects_sibling_path(self, temp_claude_dir):
+        """Regression for C-1: ``.claude_evil`` / ``.claude.backup`` bypass.
+
+        The old ``str(resolved).startswith(str(claude_dir))`` check accepted
+        sibling paths whose string prefix matched ``claude_dir`` (e.g.
+        ``/tmp/abc_evil`` matches prefix ``/tmp/abc``). ``Path.is_relative_to``
+        compares path components, not string prefixes, so the bypass fails.
+        """
+        creator = SkillCreator()
+        creator.claude_dir = temp_claude_dir
+
+        sibling_dir = temp_claude_dir.parent / (temp_claude_dir.name + "_evil")
+        sibling_dir.mkdir(exist_ok=True)
+        sibling_path = sibling_dir / "malicious.json"
+        sibling_path.write_text("{}", encoding="utf-8")
+
+        try:
+            with pytest.raises(ValueError, match="Path outside allowed directory"):
+                creator.safe_file_path(sibling_path)
+        finally:
+            shutil.rmtree(sibling_dir, ignore_errors=True)
 
 
 class TestSessionAnalysis:

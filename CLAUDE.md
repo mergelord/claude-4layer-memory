@@ -6,8 +6,8 @@ This file provides guidance for Claude Code when working with this project.
 
 **Claude 4-Layer Memory System** is an intelligent memory management system for Claude Code that provides semantic search, cross-project knowledge sharing, and automated context management through a 4-layer architecture (HOT → WARM → COLD → SEMANTIC).
 
-**Version:** 1.3.1  
-**Status:** Production (published on GitHub)  
+**Version:** 1.4.0
+**Status:** Production (published on GitHub)
 **License:** MIT
 
 ## Project Structure
@@ -417,12 +417,12 @@ git checkout HEAD -- tests/test_memory_lint_helpers.py
 - Unused variables (pylint/ruff will catch them)
 - Dead code or commented-out blocks
 
-### ✅ Pre-commit Checklist (MANDATORY)
+### ✅ Pre-commit Checklist (MANDATORY, fast)
 
-Before every commit, run these checks:
+Before every commit, run these checks (target: <35s total):
 
 ```bash
-# 1. Run all tests (must pass 279/279)
+# 1. Run all tests
 python -m pytest tests/ -x --tb=short
 
 # 2. Run pylint on critical modules (errors only)
@@ -439,6 +439,40 @@ python scripts/scan_repo_encoding.py
 - ❌ DO NOT use `git commit --no-verify` to bypass
 - ✅ Fix the underlying issue
 - ✅ Re-run checks until all pass
+
+### 🚀 Full PR Validation (before opening / pushing a PR)
+
+These checks are not part of every commit (slower), but **must pass
+before a PR is merged**. CI runs them — local prevention saves a
+round-trip:
+
+```bash
+# 1. Pytest (same as pre-commit)
+python -m pytest tests/ --tb=short -q
+
+# 2. Encoding scan on the whole repo
+python scripts/scan_repo_encoding.py
+
+# 3. Ruff (formatting + lint)
+python -m ruff check scripts/*.py audit.py
+
+# 4. MyPy with CI flags (--explicit-package-bases required for src layout)
+python -m mypy scripts/ audit.py \
+  --explicit-package-bases --ignore-missing-imports \
+  --no-strict-optional --allow-untyped-defs --allow-incomplete-defs
+
+# 5. Full pylint 10.00/10 (when scripts/*.py changed)
+python -m pylint scripts/*.py audit.py \
+  --disable=C0114,C0115,C0116,R0913,R0914,R0915,R0903,R0904,W0718,R1702,C0415,R0902,R0912,R0801 \
+  --max-line-length=110 --good-names=i,j,k,e,f,_,rc
+
+# 6. Node CLI syntax (when cli/*.js changed)
+node --check cli/commands/build.js
+```
+
+**Scope hint:** if a PR only edits docs/comments, the full pylint step
+can be skipped (already validated on the parent commit). If `scripts/*.py`
+is touched, full pylint MUST pass at 10.00/10.
 
 ### 🛡️ Philosophy
 
@@ -472,6 +506,6 @@ We welcome contributions! Please:
 
 ## Version
 
-**Current:** 1.3.1  
-**Last Updated:** 2026-05-01  
+**Current:** 1.4.0
+**Last Updated:** 2026-05-27
 **Changelog:** See `CHANGELOG.md`

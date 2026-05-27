@@ -93,6 +93,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -133,7 +134,37 @@ def _normalize_source(source: str) -> str:
     return _SOURCE_REPEATED_UNDERSCORE.sub("_", normalised).strip("_")
 
 
-def make_join_key(source: str, filename: str) -> str:
+def normalize_document_path(path: str | Path) -> str:
+    """Return runtime-stable POSIX relative document path for RRF keys.
+
+    Centralises platform normalisation so FTS5 / BM25 / semantic all
+    build identical keys regardless of host OS. Callers SHOULD go
+    through this function (directly during indexing, or implicitly via
+    :func:`make_join_key` during retrieval) so an ``archive\\notes.md``
+    Windows path and an ``archive/notes.md`` POSIX path can never split
+    into two RRF documents.
+
+    Behaviour:
+        - ``Path("archive") / "notes.md"`` → ``"archive/notes.md"``
+        - ``"archive\\notes.md"`` → ``"archive/notes.md"``
+        - ``"./archive/notes.md"`` → ``"archive/notes.md"``
+        - ``"notes.md"`` → ``"notes.md"``
+
+    Args:
+        path: A ``Path`` from the indexer side, or a ``str`` read back
+            from a SQLite row / ChromaDB metadata. Both paths go through
+            the same canonicalisation.
+
+    Returns:
+        A forward-slash-separated relative path string.
+
+    """
+    if isinstance(path, Path):
+        return path.as_posix()
+    return PurePosixPath(path.replace("\\", "/")).as_posix()
+
+
+def make_join_key(source: str, filename: str | Path) -> str:
     """Build a stable identifier suitable for joining results across sources.
 
     Args:
@@ -142,13 +173,17 @@ def make_join_key(source: str, filename: str) -> str:
             FTS5 stores raw names while the semantic engine normalises
             them — :func:`make_join_key` collapses both into the same
             canonical form so RRF actually merges duplicate hits.
-        filename: Bare filename (no scope brackets). Stored verbatim.
+        filename: Document-level identifier — a bare filename or a
+            relative path (with sub-directories) from the source memory
+            root. Routed through :func:`normalize_document_path` so
+            ``archive\\notes.md`` and ``archive/notes.md`` cannot split
+            into two distinct RRF keys.
 
     Returns:
-        A string of the form ``"[normalised_source] filename"``.
+        A string of the form ``"[normalised_source] document_path"``.
 
     """
-    return f"[{_normalize_source(source)}] {filename}"
+    return f"[{_normalize_source(source)}] {normalize_document_path(filename)}"
 
 
 def normalize_existing_key(key: str) -> str:

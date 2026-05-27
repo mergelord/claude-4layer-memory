@@ -47,6 +47,7 @@ from chunking import chunk_text  # noqa: E402
 # pylint: disable-next=wrong-import-position,import-error
 from ranking import (  # noqa: E402
     make_join_key,
+    normalize_document_path,
     normalize_existing_key,
     normalize_scores,
     rrf_merge,
@@ -178,7 +179,7 @@ class L4FTS5Search:
 
         try:
             content = md_file.read_text(encoding="utf-8")
-            rel_path = str(md_file.relative_to(base_path))
+            rel_path = normalize_document_path(md_file.relative_to(base_path))
             chunks = chunk_text(content)
 
             with self._get_connection() as conn:
@@ -240,10 +241,22 @@ class L4FTS5Search:
             logging.error("Reindex failed: %s", e)
             return 0
 
-    def index_file(self, file_path: Path, source: str) -> bool:
+    def index_file(
+        self,
+        file_path: Path,
+        source: str,
+        base_path: Optional[Path] = None,
+    ) -> bool:
         """
         Индексировать один файл (с разбивкой на чанки).
         Удаляет все предыдущие записи для этого файла и вставляет чанки.
+
+        Когда ``base_path`` задан, ``path`` в FTS5 — POSIX rel_path
+        относительно корня source-директории (это нужно чтобы
+        ``archive/notes.md`` и ``current/notes.md`` оставались
+        различимыми после RRF merge). Без ``base_path`` сохраняется
+        старое поведение (``file_path.name``) — для обратной
+        совместимости с потенциальными внешними caller'ами.
         """
         if not os.access(file_path, os.R_OK):
             logging.error("No read access: %s", file_path)
@@ -252,7 +265,12 @@ class L4FTS5Search:
         try:
             with self._get_connection() as conn:
                 content = file_path.read_text(encoding="utf-8")
-                rel_path = file_path.name
+                if base_path is not None:
+                    rel_path = normalize_document_path(
+                        file_path.relative_to(base_path)
+                    )
+                else:
+                    rel_path = file_path.name
                 conn.execute(
                     "DELETE FROM memory_fts WHERE path = ? AND source = ?",
                     (rel_path, source),
@@ -300,9 +318,7 @@ class L4FTS5Search:
                 results = tuple(
                     SearchResult(
                         path=f"[{row['source']}] {row['path']}",
-                        key=make_join_key(
-                            row['source'], os.path.basename(row['path'])
-                        ),
+                        key=make_join_key(row['source'], row['path']),
                         snippet=row["snippet"],
                         rank=row["rank"],
                         source="fts5",

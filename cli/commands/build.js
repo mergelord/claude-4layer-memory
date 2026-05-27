@@ -4,6 +4,19 @@ const chalk = require('chalk');
 const inquirer = require('inquirer');
 const ora = require('ora');
 
+const ALLOWED_TYPES = new Set(['user', 'feedback', 'project', 'reference']);
+const NAME_RE = /^[a-z0-9_]+$/;
+
+function safeJoin(baseDir, filename) {
+  const resolvedBase = path.resolve(baseDir);
+  const resolved = path.resolve(resolvedBase, filename);
+  const rel = path.relative(resolvedBase, resolved);
+  if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) {
+    throw new Error(`Path escapes memory directory: ${filename}`);
+  }
+  return resolved;
+}
+
 module.exports = async function build(options) {
   console.log(chalk.blue.bold('\n📝 Memory Builder\n'));
 
@@ -38,6 +51,12 @@ module.exports = async function build(options) {
       type = typeAnswer.type;
     }
 
+    if (!ALLOWED_TYPES.has(type)) {
+      throw new Error(
+        `Invalid --type "${type}". Must be one of: ${[...ALLOWED_TYPES].join(', ')}`
+      );
+    }
+
     if (!name) {
       const nameAnswer = await inquirer.prompt([
         {
@@ -46,7 +65,7 @@ module.exports = async function build(options) {
           message: 'Memory name (e.g., "testing_workflow"):',
           validate: (input) => {
             if (!input.trim()) return 'Name is required';
-            if (!/^[a-z0-9_]+$/.test(input)) {
+            if (!NAME_RE.test(input)) {
               return 'Name must be lowercase with underscores only';
             }
             return true;
@@ -54,6 +73,12 @@ module.exports = async function build(options) {
         }
       ]);
       name = nameAnswer.name;
+    }
+
+    if (!NAME_RE.test(name)) {
+      throw new Error(
+        `Invalid --name "${name}". Must match ${NAME_RE} (lowercase letters, digits, underscores).`
+      );
     }
 
     const descAnswer = await inquirer.prompt([
@@ -75,7 +100,7 @@ module.exports = async function build(options) {
 
     // Build frontmatter
     const filename = `${type}_${name}.md`;
-    const filepath = path.join(memoryDir, filename);
+    const filepath = safeJoin(memoryDir, filename);
 
     const frontmatter = `---
 name: ${name}
