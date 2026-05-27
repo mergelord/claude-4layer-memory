@@ -16,6 +16,7 @@ permissions:
 
 jobs:
   claude-review:
+    if: github.event.sender.type != 'Bot'
     runs-on: ubuntu-latest
     steps:
       - uses: anthropics/claude-code-action@beta
