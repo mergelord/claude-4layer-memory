@@ -15,9 +15,9 @@ infrastructure for splitting the monolithic ``MemoryLint`` class in
 The ``EncodingGate`` class is *production* code — it is consumed by
 ``memory_lint.py``'s ``--validate-encoding`` mode and (via importing
 this module) by the hot-memory write hooks ``auto-remember.py`` /
-``autosave-context.py`` / ``precompact-flush-l4.py``. Its job is to
-fail loudly when a hook would otherwise silently corrupt
-``handoff.md`` with cp1251-as-utf8 mojibake.
+``precompact-flush-l4.py``. Its job is to fail loudly when a hook
+would otherwise silently corrupt ``handoff.md`` with cp1251-as-utf8
+mojibake.
 
 The classes below are re-exported via ``__all__`` so static analysers and
 dead-code linters (vulture, pylint W0611) understand they are part of
@@ -317,8 +317,8 @@ class EncodingError(ValueError):
 class EncodingGate:
     """Comprehensive encoding validation and cleanup for UTF-8 memory files.
 
-    Hot-memory hooks (``auto-remember.py``, ``autosave-context.py``,
-    ``precompact-flush-l4.py``) collect output from sub-processes
+    Hot-memory hooks (``auto-remember.py``, ``precompact-flush-l4.py``)
+    collect output from sub-processes
     (``git log``, PowerShell, etc.) and append it to ``handoff.md`` /
     ``decisions.md``. On Windows the sub-process default codepage is
     often ``cp1251`` (Cyrillic Windows), and naive concatenation of
