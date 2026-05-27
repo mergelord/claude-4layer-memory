@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-05-27
+
+### Fixed
+- **Bug N-4 (RRF basename collision, silent correctness):** join-key для
+  Reciprocal Rank Fusion во всех трёх движках (FTS5, BM25, semantic) теперь
+  строится из **POSIX относительного document path** вместо
+  `os.path.basename(path)`. Раньше `archive/notes.md` и `current/notes.md`
+  в одном source тихо сливались в один `[source] notes.md` ключ, и RRF
+  возвращал смешанные результаты разных файлов под одним идентификатором.
+- Добавлена централизованная функция `ranking.normalize_document_path()`,
+  и `ranking.make_join_key()` теперь сам её вызывает — callers больше не
+  могут забыть нормализацию.
+- `_index_single_file` в FTS5 перешёл с `str(path)` на `.as_posix()` —
+  исправлены Windows-style backslash ключи (`archive\notes.md`).
+
+### Operational requirement after upgrade
+- **`l4_search.bat reindex`** (или `python scripts/l4_fts5_search.py reindex`) —
+  старые FTS5 БД содержат basename / backslash в колонке `path`.
+- **Пересоздать ChromaDB коллекции** (`python scripts/l4_semantic_global.py index-all`) —
+  `metadata["file"]` теперь POSIX rel_path, старые коллекции продолжат
+  работать с basename до пересборки.
+- Без этих шагов баг сохранится для уже-проиндексированных данных.
+
 ## 2026-05-07
 
 ### Added

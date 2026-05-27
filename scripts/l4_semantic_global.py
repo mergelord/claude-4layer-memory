@@ -31,7 +31,7 @@ from chromadb.config import Settings
 # Common chunker (shared with FTS5 and future BM25)
 # pylint: disable=import-error
 from chunking import chunk_text  # noqa: E402
-from ranking import make_join_key  # noqa: E402
+from ranking import make_join_key, normalize_document_path  # noqa: E402
 
 # ----------------------------
 # CONFIG
@@ -385,7 +385,7 @@ class GlobalSemanticMemory:
                 embeddings.append(self.model.encode([chunk])[0].tolist())
                 metadatas.append(
                     {
-                        "file": md_file.name,
+                        "file": normalize_document_path(md_file.relative_to(path)),
                         "path": str(md_file),
                         "source": collection_name.replace(self.collection_prefix, ""),
                         "chunk_id": i,

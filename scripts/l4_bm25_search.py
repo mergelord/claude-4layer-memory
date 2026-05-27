@@ -16,7 +16,6 @@ L4 BM25 Search – независимый лексический источни�
 """
 
 import logging
-import os
 import re
 import sqlite3
 import sys
@@ -149,9 +148,11 @@ def fetch_bm25_results(query: str, limit: int = 20) -> List[BM25Result]:
             # Document-level ключ: используется единый make_join_key, чтобы
             # BM25 / FTS5 / semantic сходились на одинаковом значении для
             # одного и того же документа (см. KEY CONTRACT в ranking.py).
-            file_name = os.path.basename(row['path'])
+            # row['path'] — POSIX rel_path после reindex; make_join_key
+            # сам нормализует, поэтому basename() не нужен (он бы
+            # схлопнул archive/notes.md и current/notes.md в один ключ).
             results.append({
-                "key": make_join_key(row['source'], file_name),
+                "key": make_join_key(row['source'], row['path']),
                 "rank": i,
                 "bm25_score": row['bm25_score'],
                 "snippet": row['snippet'],

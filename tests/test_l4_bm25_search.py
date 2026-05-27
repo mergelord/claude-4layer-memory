@@ -134,19 +134,24 @@ class TestFetchBM25Results:
             result = fetch_bm25_results("test query")
 
         assert len(result) == 2
-        assert result[0]["key"] == "[global] memory.md"
+        # Bug N-4: key preserves the rel_path stored in row['path'], not basename.
+        assert result[0]["key"] == "[global] docs/memory.md"
         assert result[0]["rank"] == 1
         assert result[0]["bm25_score"] == -2.5
         assert result[0]["snippet"] is not None
         assert result[0]["source_type"] == "bm25"
 
     def test_result_has_document_level_key(self, mock_connection):
-        """Key must be document-level: [source] filename."""
+        """Key must be document-level: [source] rel_path.
+
+        Bug N-4: rel_path is now preserved verbatim so siblings with the
+        same basename in different sub-directories stay distinct.
+        """
         with patch("l4_bm25_search._get_fts5_connection", return_value=mock_connection):
             result = fetch_bm25_results("query")
 
-        assert result[0]["key"] == "[global] memory.md"
-        assert result[1]["key"] == "[global] guide.md"
+        assert result[0]["key"] == "[global] docs/memory.md"
+        assert result[1]["key"] == "[global] docs/guide.md"
 
     def test_rank_is_sequential(self, mock_connection):
         """Rank should be 1-based sequential."""
