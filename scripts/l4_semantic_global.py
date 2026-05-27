@@ -49,7 +49,7 @@ def configure_utf8_output() -> None:
 
     for stream_name in ("stdout", "stderr"):
         stream = getattr(sys, stream_name)
-        encoding = (getattr(stream, "encoding", None) or "").lower()
+        encoding = str(getattr(stream, "encoding", None) or "").lower()
         if encoding.replace("-", "") == "utf8":
             continue
 
