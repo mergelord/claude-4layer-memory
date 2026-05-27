@@ -15,13 +15,14 @@ This file provides guidance for Claude Code when working with this project.
 ```
 claude-4layer-memory/
 ├── scripts/                    # Core Python modules
-│   ├── memory_lint.py         # Two-layer validation system
+│   ├── memory_lint.py         # Two-layer validation system (--quick = SessionStart hook)
 │   ├── l4_semantic_global.py  # Semantic search engine
 │   ├── l4_fts5_search.py      # FTS5 keyword search
-│   ├── show_global_context.py # SessionStart hook
-│   ├── stop_handoff_universal.py # Stop hook
 │   ├── memory_lint_helpers.py # Validation helpers (EncodingGate)
 │   └── semantic_search.py     # ChromaDB integration
+├── hooks/                      # Claude Code hook entry points
+│   ├── stop_handoff_universal.py # Stop hook (handoff/decisions rotation)
+│   └── git-activity-detector.py  # Detects git activity for handoff summaries
 ├── tests/                      # Pytest test suite
 ├── docs/                       # Documentation
 ├── deploy/                     # Installation scripts
@@ -149,15 +150,15 @@ python scripts/l4_semantic_global.py stats
 - Fast indexing
 - Usage: `python scripts/l4_fts5_search.py search "keyword"`
 
-**SessionStart Hook (`scripts/show_global_context.py`):**
-- Loads context at session start
-- Displays recent events
-- Runs memory lint quick check
+**SessionStart Hook (`scripts/memory_lint.py --quick`):**
+- Runs ghost-link / encoding quick validation at session start
+- Designed to finish fast enough for inline SessionStart usage
+- Full integration example in `docs/MEMORY_LINT.md`
 
-**Stop Hook (`scripts/stop_handoff_universal.py`):**
+**Stop Hook (`hooks/stop_handoff_universal.py`):**
 - Saves session summary
 - Updates handoff.md
-- Triggers memory rotation
+- Triggers memory rotation (handoff → decisions → archive)
 
 ## Development Workflow
 
@@ -242,15 +243,11 @@ python scripts/l4_semantic_global.py stats
 - Regex patterns
 - Helper functions
 
-**`scripts/show_global_context.py`**
-- SessionStart hook implementation
-- Context loading
-- Memory lint quick check
-
-**`scripts/stop_handoff_universal.py`**
+**`hooks/stop_handoff_universal.py`**
 - Stop hook implementation
 - Session summary generation
 - Handoff.md updates
+- Rotation: handoff → decisions → archive when entry limits exceeded
 
 ### Configuration Files
 
