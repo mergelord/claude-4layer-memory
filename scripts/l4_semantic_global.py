@@ -99,6 +99,15 @@ class GlobalSemanticMemory:
         self.collection_prefix = "memory_"
         self.global_collection = "memory_global"
 
+        # Per-instance query-embedding cache. Binding ``lru_cache`` here —
+        # instead of decorating the method — keeps the cache scoped to this
+        # instance and lets it be garbage-collected together with the
+        # instance. Decorating an instance method with ``@lru_cache`` stores
+        # ``self`` in a cache that lives on the class object, which pins every
+        # instance in memory and shares cache entries across unrelated
+        # instances.
+        self._encode_query = lru_cache(maxsize=128)(self._encode_query_impl)
+
     @property
     def model(self):
         """Load SentenceTransformer only for operations that need embeddings."""
@@ -121,9 +130,12 @@ class GlobalSemanticMemory:
     # =====================================================
     # EMBEDDING GATEWAY (P1)
     # =====================================================
-    @lru_cache(maxsize=128)
-    def _encode_query(self, query: str):
-        """Возвращает embedding для запроса. Результат кэшируется."""
+    def _encode_query_impl(self, query: str):
+        """Возвращает embedding для запроса. Результат кэшируется.
+
+        Оборачивается в per-instance ``lru_cache`` в ``__init__`` (атрибут
+        ``self._encode_query``); напрямую вызывать не нужно.
+        """
         result = self.model.encode([query])[0]
         return result.tolist() if hasattr(result, "tolist") else result
 
