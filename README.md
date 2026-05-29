@@ -168,23 +168,23 @@ See [INSTALL.md](docs/INSTALL.md) for detailed instructions.
 ### 4-Layer Memory System
 
 ```
-┌────────────────────────────────────────────┐
+┌────────────────────────────────────────────────┐
 │ Layer 4: SEMANTIC (Vector Search)                       │
 │ ├─ ChromaDB + sentence-transformers                     │
 │ └─ Multilingual semantic search                         │
-├────────────────────────────────────────────┤
+├───────────────────────────────────────────────┤
 │ Layer 3: COLD (Permanent Archive)                       │
 │ ├─ archive/ directory                                   │
 │ └─ Long-term storage                                    │
-├────────────────────────────────────────────┤
+├───────────────────────────────────────────────┤
 │ Layer 2: WARM (14 days)                                 │
 │ ├─ decisions.md                                         │
 │ └─ Important decisions, architectural choices           │
-├────────────────────────────────────────────┤
+├───────────────────────────────────────────────┤
 │ Layer 1: HOT (24 hours)                                 │
 │ ├─ handoff.md                                           │
 │ └─ Recent events, quick context recovery                │
-└────────────────────────────────────────────┘
+└────────────────────────────────────────────────┘
 ```
 
 ### Dual-Level System
