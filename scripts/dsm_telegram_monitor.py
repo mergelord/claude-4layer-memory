@@ -16,6 +16,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
@@ -176,6 +177,14 @@ def require_string(value: Any, name: str) -> str:
     return value.strip()
 
 
+def require_https_url(value: Any, name: str) -> str:
+    url = require_string(value, name).rstrip("/")
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
+        raise ConfigError(f"Setting must be an HTTPS URL without credentials: {name}")
+    return url
+
+
 def parse_positive_int(value: Any, name: str) -> int:
     try:
         parsed = int(value)
@@ -267,15 +276,16 @@ def load_config(config_path: Path | None, env: Mapping[str, str] | None = None) 
         telegram = TelegramConfig(
             token=require_string(token, "DSM_TELEGRAM_BOT_TOKEN or telegram.bot_token"),
             chat_id=require_string(chat_id, "DSM_TELEGRAM_CHAT_ID or telegram.chat_id"),
-            api_base=str(
+            api_base=require_https_url(
                 get_setting(
                     env_map,
                     telegram_section,
                     "DSM_TELEGRAM_API_BASE",
                     "api_base",
                     default="https://api.telegram.org",
-                )
-            ).rstrip("/"),
+                ),
+                "DSM_TELEGRAM_API_BASE or telegram.api_base",
+            ),
         )
 
     interval = parse_positive_int(
@@ -567,7 +577,7 @@ def send_telegram_message(telegram: TelegramConfig, text: str, timeout: int = 30
             method="POST",
         )
         try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
+            with urllib.request.urlopen(request, timeout=timeout) as response:  # nosec B310
                 response_data = json.loads(response.read().decode("utf-8"))
         except (urllib.error.URLError, json.JSONDecodeError) as exc:
             raise TelegramError(f"Telegram send failed: {exc}") from exc

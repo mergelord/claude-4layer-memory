@@ -5,7 +5,7 @@
 - `tests/test_memory_lint_helpers.py` — intentional mojibake fixtures, DO NOT modify encoding
 - `scripts/__init__.py` — required by `tests/test_architecture.py`, DO NOT delete
 - pylint must stay 10.00/10
-- All tests must pass (currently 429, 1 skipped)
+- All tests must pass (currently 430, 1 skipped)
 - No `git commit --no-verify` to bypass pre-commit hooks
 
 ## Python Interpreter
@@ -31,9 +31,14 @@ py -3.13 -m pylint scripts/*.py audit.py `
 py -3.13 scripts/scan_repo_encoding.py
 ```
 
-Pass criteria: 429 tests green, pylint no new errors, encoding clean.
+Pass criteria: 430 tests green, pylint no new errors, encoding clean.
 
 ## Recent Decisions
+
+**2026-05-29** - GitHub CI Bandit follow-up:
+- After pushing `cabadeb`, GitHub Actions started for the commit. `Shellcheck` passed, but `Code Quality / Bandit Security Check` failed on existing `scripts/dsm_telegram_monitor.py` with B310 at `urllib.request.urlopen()`.
+- Fixed the monitor instead of broad-skipping the rule: added HTTPS-only Telegram `api_base` validation without credentials, kept a targeted `# nosec B310` only on the validated `urlopen` call, and added `test_load_config_rejects_non_https_telegram_api_base`.
+- Local validation before follow-up commit: focused DSM monitor tests `9 passed`; full pytest `430 passed, 1 skipped`; Bandit exact CI command clean; encoding gate clean; ruff clean; mypy clean; radon cc/mi clean; pylint `10.00/10`; `git diff --check` clean.
 
 **2026-05-29** - Runtime project search resolver hotfix:
 - Review after local/GitHub/runtime sync found one live regression: `l4_semantic_global.py search-project C--BAT-claude-4layer-memory ...` returned `[]` because resolver tried normalized `memory_C__BAT_claude_4layer_memory` before the raw collection name, while existing/indexed runtime collections are `memory_C--BAT-claude-4layer-memory`.

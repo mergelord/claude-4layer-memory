@@ -33,6 +33,23 @@ def test_load_config_from_environment():
     assert config.interval_seconds == 60
 
 
+def test_load_config_rejects_non_https_telegram_api_base():
+    env = {
+        "DSM_SSH_HOST": "dsm.example.test",
+        "DSM_SSH_USER": "jbsergie",
+        "DSM_TELEGRAM_BOT_TOKEN": "token",
+        "DSM_TELEGRAM_CHAT_ID": "123",
+        "DSM_TELEGRAM_API_BASE": "file:///tmp/telegram",
+    }
+
+    try:
+        monitor.load_config(None, env)
+    except monitor.ConfigError as exc:
+        assert "DSM_TELEGRAM_API_BASE" in str(exc)
+    else:
+        raise AssertionError("ConfigError was not raised")
+
+
 def test_load_config_from_file(tmp_path):
     config_file = tmp_path / "monitor.json"
     config_file.write_text(
