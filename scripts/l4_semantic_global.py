@@ -39,6 +39,9 @@ from ranking import make_join_key, normalize_document_path  # noqa: E402
 
 DEFAULT_MODEL = "paraphrase-multilingual-MiniLM-L12-v2"
 MAX_CHUNKS_PER_DOC = 3  # for future aggregation if needed
+# Batch size for embedding encode calls during indexing. Larger batches
+# improve throughput at the cost of memory; override via L4_EMBED_BATCH_SIZE.
+EMBED_BATCH_SIZE = max(1, int(os.getenv("L4_EMBED_BATCH_SIZE", "64")))
 _COLLECTION_NON_ALNUM = re.compile(r"[^a-zA-Z0-9_]")
 
 
@@ -123,6 +126,27 @@ class GlobalSemanticMemory:
         """Возвращает embedding для запроса. Результат кэшируется."""
         result = self.model.encode([query])[0]
         return result.tolist() if hasattr(result, "tolist") else result
+
+    def _encode_documents(self, documents: List[str]) -> List[Any]:
+        """Batch-encode chunk documents into embedding vectors.
+
+        Все чанки кодируются одним батч-вызовом ``model.encode`` вместо
+        отдельного вызова на каждый чанк — это убирает основную стоимость
+        индексации больших директорий.
+
+        Возвращает список float-векторов (по одному на чанк). Тип элемента
+        намеренно оставлен ``Any``: ``list`` в mypy инвариантен, и более точный
+        ``List[List[float]]`` не принимается ``Collection.upsert(embeddings=...)``,
+        который ждёт ``list[Sequence[float] | Sequence[int]]``.
+        """
+        if not documents:
+            return []
+        encoded = self.model.encode(documents, batch_size=EMBED_BATCH_SIZE)
+        if hasattr(encoded, "tolist"):
+            return encoded.tolist()
+        return [
+            vec.tolist() if hasattr(vec, "tolist") else list(vec) for vec in encoded
+        ]
 
     # ----------------------------
     # COLLECTIONS
@@ -356,6 +380,9 @@ class GlobalSemanticMemory:
 
         Для каждого файла создаётся несколько чанков с одинаковым `file` и `source`,
         но уникальным `chunk_id`. Идентификатор в ChromaDB: ``<file_path>:<chunk_id>``.
+
+        Эмбеддинги для всех чанков файла считаются одним батч-вызовом
+        (см. :meth:`_encode_documents`), а не по одному чанку за раз.
         """
         if not path.exists():
             return
@@ -375,14 +402,12 @@ class GlobalSemanticMemory:
 
             ids = []
             documents = []
-            embeddings = []
             metadatas = []
 
             for i, chunk in enumerate(chunks):
                 chunk_id = f"{md_file}:{i}"
                 ids.append(chunk_id)
                 documents.append(chunk)
-                embeddings.append(self.model.encode([chunk])[0].tolist())
                 metadatas.append(
                     {
                         "file": normalize_document_path(md_file.relative_to(path)),
@@ -392,6 +417,9 @@ class GlobalSemanticMemory:
                         "chunk_total": total,
                     }
                 )
+
+            # Batch-encode all chunks of this file in a single model call.
+            embeddings = self._encode_documents(documents)
 
             collection.upsert(
                 ids=ids,
