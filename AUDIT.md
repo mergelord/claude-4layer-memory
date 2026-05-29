@@ -17,7 +17,7 @@
 
 ## High severity
 
-- [x] **1. FTS5 MATCH crash on raw user query** — спецсимволы в сыром запросе, переданном напрямую в `MATCH`, роняли поиск. Исправлено санитайзингом (`sanitize_fts5_query()`) в `scripts/l4_fts5_search.py`. (PR #32) _Regression coverage: pending — прямые тесты на сам bug class (`sanitize_fts5_query()` + live FTS5 smoke) добавляются отдельным tests-only PR (PR-A)._
+- [x] **1. FTS5 MATCH crash on raw user query** — спецсимволы в сыром запросе, переданном напрямую в `MATCH`, роняли поиск. Исправлено санитайзингом (`sanitize_fts5_query()`) в `scripts/l4_fts5_search.py`. (PR #32) _Regression coverage: covered — прямые тесты на сам bug class (`sanitize_fts5_query()` + live FTS5 smoke) в `tests/test_l4_fts5_search.py`._
 - [x] **2. cost_tracker KeyError on unknown model** — поиск цены бросал `KeyError` для моделей вне таблицы цен. Исправлено безопасной цепочкой фоллбэков в `_resolve_price()` и доступом через `.get()`. (PR #33)
 
 ## Medium severity
