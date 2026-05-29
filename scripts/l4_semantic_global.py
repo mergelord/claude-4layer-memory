@@ -45,40 +45,30 @@ EMBED_BATCH_SIZE = max(1, int(os.getenv("L4_EMBED_BATCH_SIZE", "64")))
 _COLLECTION_NON_ALNUM = re.compile(r"[^a-zA-Z0-9_]")
 
 
-def _resolve_chroma_lookup_errors() -> tuple:
-    """Build the tuple of exceptions treated as recoverable Chroma failures.
+# chromadb's exception taxonomy differs across the supported range
+# (``chromadb>=0.4.0``): older releases raise a bare ``ValueError`` for a
+# missing collection, while newer releases raise ``chromadb.errors.ChromaError``
+# subclasses (e.g. ``NotFoundError``). Import ``ChromaError`` when it is
+# available *and* a genuine exception class, otherwise fall back to a local
+# definition. This keeps ``_CHROMA_LOOKUP_ERRORS`` a static tuple of real
+# exception classes -- safe under test doubles that mock out ``chromadb`` and
+# free of pylint's ``catching-non-exception`` (E0712) false positive.
+try:
+    from chromadb.errors import ChromaError as _ChromaError
 
-    chromadb's exception taxonomy changed across the supported range
-    (``chromadb>=0.4.0``): older releases raise a bare ``ValueError`` for a
-    missing collection, while newer releases raise subclasses of
-    ``chromadb.errors.ChromaError`` (e.g. ``NotFoundError``). We always treat
-    ``ValueError`` / ``KeyError`` as recoverable and add ``ChromaError`` when it
-    is importable *and* a genuine exception class.
+    if not (isinstance(_ChromaError, type) and issubclass(_ChromaError, BaseException)):
+        raise ImportError("chromadb.errors.ChromaError is not an exception type")
+except Exception:  # pragma: no cover - chromadb optional / version-dependent
 
-    Filtering to real ``BaseException`` subclasses keeps the result safe to use
-    in an ``except`` clause even under test doubles, where ``chromadb`` is
-    replaced by a ``MagicMock`` and ``ChromaError`` would otherwise resolve to a
-    non-exception mock attribute (which Python rejects at ``except`` time).
-    """
-    candidates: List[Any] = [ValueError, KeyError]
-    try:
-        from chromadb.errors import ChromaError
-
-        candidates.append(ChromaError)
-    except Exception:  # pragma: no cover - defensive across chromadb versions
-        pass
-    return tuple(
-        exc
-        for exc in candidates
-        if isinstance(exc, type) and issubclass(exc, BaseException)
-    )
+    class _ChromaError(Exception):
+        """Fallback used when chromadb.errors.ChromaError is unavailable."""
 
 
 # Exceptions that represent an expected, recoverable Chroma lookup/query
 # failure (missing collection, backend lookup error). Anything outside this set
 # (e.g. a programming bug) is intentionally allowed to propagate instead of
-# being silently swallowed — see AUDIT #5.
-_CHROMA_LOOKUP_ERRORS = _resolve_chroma_lookup_errors()
+# being silently swallowed -- see AUDIT #5.
+_CHROMA_LOOKUP_ERRORS = (ValueError, KeyError, _ChromaError)
 
 
 def configure_utf8_output() -> None:
