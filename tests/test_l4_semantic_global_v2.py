@@ -245,6 +245,38 @@ class TestSearchAllOutput:
         assert results[0]["source"] == "C__BAT_CUSTOMWGMSFS"
         assert results[0]["key"] == "[C_BAT_CUSTOMWGMSFS] handoff.md"
 
+    def test_search_project_prefers_existing_raw_collection_name(self):
+        memory = GlobalSemanticMemory.__new__(GlobalSemanticMemory)
+        memory.model = MagicMock()
+        emb_mock = MagicMock()
+        emb_mock.tolist.return_value = [0.1, 0.2]
+        memory.model.encode.return_value = [emb_mock]
+        memory.collection_prefix = "memory_"
+        memory.global_collection = "memory_global"
+
+        target_collection = MagicMock()
+        target_collection.query.return_value = {
+            "ids": [["id1"]],
+            "documents": [["project note"]],
+            "metadatas": [[{"file": "handoff.md"}]],
+            "distances": [[0.1]],
+        }
+        memory.client = MagicMock()
+
+        def get_collection(name):
+            if name == "memory_C--BAT-claude-4layer-memory":
+                return target_collection
+            raise ValueError(name)
+
+        memory.client.get_collection.side_effect = get_collection
+        memory.client.list_collections.return_value = []
+
+        results = memory.search_project("C--BAT-claude-4layer-memory", "handoff")
+
+        memory.client.get_collection.assert_any_call("memory_C--BAT-claude-4layer-memory")
+        assert results[0]["source"] == "C--BAT-claude-4layer-memory"
+        assert results[0]["key"] == "[C_BAT_claude_4layer_memory] handoff.md"
+
     def test_print_results_json_handles_raw_chunk_without_key(self, capsys):
         results = [
             {

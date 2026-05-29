@@ -5,7 +5,7 @@
 - `tests/test_memory_lint_helpers.py` — intentional mojibake fixtures, DO NOT modify encoding
 - `scripts/__init__.py` — required by `tests/test_architecture.py`, DO NOT delete
 - pylint must stay 10.00/10
-- All tests must pass (currently 374, 1 skipped)
+- All tests must pass (currently 429, 1 skipped)
 - No `git commit --no-verify` to bypass pre-commit hooks
 
 ## Python Interpreter
@@ -31,9 +31,16 @@ py -3.13 -m pylint scripts/*.py audit.py `
 py -3.13 scripts/scan_repo_encoding.py
 ```
 
-Pass criteria: 374 tests green, pylint no new errors, encoding clean.
+Pass criteria: 429 tests green, pylint no new errors, encoding clean.
 
 ## Recent Decisions
+
+**2026-05-29** - Runtime project search resolver hotfix:
+- Review after local/GitHub/runtime sync found one live regression: `l4_semantic_global.py search-project C--BAT-claude-4layer-memory ...` returned `[]` because resolver tried normalized `memory_C__BAT_claude_4layer_memory` before the raw collection name, while existing/indexed runtime collections are `memory_C--BAT-claude-4layer-memory`.
+- Fixed repo `scripts/l4_semantic_global.py`: `_resolve_project_collection_name()` now prefers exact raw `memory_<project>` collection, then normalized name, then raw/normalized prefix matches. Added regression test in `tests/test_l4_semantic_global_v2.py`.
+- Deployed fixed `l4_semantic_global.py` to `C:\Users\MYRIG\.claude\hooks` and `C:\Users\MYRIG\.claude\scripts`. Backups: `C:\Users\MYRIG\.claude\backups\l4_semantic_global.py.codex_20260529_project_search_fix.hooks.bak` and `.scripts.bak`.
+- Validation: focused semantic tests `41 passed`; full pytest `429 passed, 1 skipped`; encoding gate clean; pylint `10.00/10`; runtime `py_compile` passed; runtime `search-project C--BAT-claude-4layer-memory memory --json` now returns project results.
+- Drift check after deploy: critical modules match repo in both `.claude\hooks` and `.claude\scripts` (`cost_tracker.py`, `l4_fts5_search.py`, `l4_semantic_global.py`, `l4_bm25_search.py`, `ranking.py`, `memory_lint.py`, `memory_lint_helpers.py`, `semantic_search.py`, `scan_repo_encoding.py`, `skill_creator.py`; plus hook `stop_handoff_universal.py`).
 
 **2026-05-29** - Live `.claude` runtime sync from GitHub:
 - Used clean deploy worktree `C:\tmp\claude-4layer-memory-deploy-main` at `origin/main` `5afd331`; local repo remained dirty/behind and was not merged.

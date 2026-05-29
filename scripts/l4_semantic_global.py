@@ -229,17 +229,22 @@ class GlobalSemanticMemory:
 
     def _resolve_project_collection_name(self, project_name: str) -> str:
         """Resolve a user project argument to an existing Chroma collection name."""
+        raw_candidate = self.collection_prefix + project_name
+        if self._get_collection(raw_candidate) is not None:
+            return raw_candidate
+
         normalized_suffix = self._normalize_collection_suffix(project_name)
         candidate = self.collection_prefix + normalized_suffix
 
         if self._get_collection(candidate) is not None:
             return candidate
 
-        prefix = self.collection_prefix + normalized_suffix
+        prefixes = (raw_candidate, candidate)
         matches = sorted(
             c.name
             for c in self.client.list_collections()
-            if c.name.startswith(prefix) and c.name != self.global_collection
+            if c.name != self.global_collection
+            and any(c.name.startswith(prefix) for prefix in prefixes)
         )
         return matches[0] if matches else candidate
 
