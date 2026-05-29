@@ -422,17 +422,6 @@ class GlobalSemanticMemory:
         return final
 
     # ----------------------------
-    # RRF STUB (future BM25)
-    # ----------------------------
-
-    def _rrf_stub(self, sources: Dict[str, List[Dict[str, Any]]]):
-        """Placeholder for real RRF fusion."""
-        merged = []
-        for _, items in sources.items():
-            merged.extend(items)
-        return merged
-
-    # ----------------------------
     # INDEXING (with chunking)
     # ----------------------------
 
