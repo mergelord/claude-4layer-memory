@@ -108,7 +108,13 @@ class CostTracker:
             try:
                 with open(prices_file, 'r', encoding='utf-8') as f:
                     return json.load(f)
-            except Exception as e:
+            # AUDIT #5: narrowed from a blanket ``except Exception`` to the
+            # realistic config-load failures — unreadable/locked file
+            # (OSError), malformed JSON (json.JSONDecodeError) or non-UTF-8
+            # bytes (UnicodeDecodeError). Pricing config must never break
+            # tracker construction, so these degrade to DEFAULT_PRICES; any
+            # other error now propagates instead of being silently swallowed.
+            except (OSError, json.JSONDecodeError, UnicodeDecodeError) as e:
                 print(f"[WARN] Failed to load prices.json: {e}", file=sys.stderr)
                 print("[WARN] Using default prices", file=sys.stderr)
 

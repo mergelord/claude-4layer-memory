@@ -205,7 +205,11 @@ class L4FTS5Search:
                 conn.commit()
                 logging.info("FTS5 table initialized")
                 return True
-        except Exception as e:  # nosec
+        # AUDIT #5: narrowed from a blanket ``except Exception`` to
+        # ``sqlite3.Error``. Only SQLite-level failures (locked/corrupt DB,
+        # malformed DDL) are expected here and degrade to ``False``; any other
+        # error now propagates instead of being silently swallowed.
+        except sqlite3.Error as e:
             logging.error("FTS5 initialization failed: %s", e)
             return False
 
@@ -235,7 +239,11 @@ class L4FTS5Search:
                     )
                 conn.commit()
             return True
-        except Exception as e:  # nosec
+        # AUDIT #5: narrowed from a blanket ``except Exception``. File reads
+        # can fail with OSError / UnicodeDecodeError and the FTS writes with
+        # sqlite3.Error; those degrade to ``False`` (skip this file) while any
+        # unexpected error propagates instead of being silently swallowed.
+        except (OSError, UnicodeDecodeError, sqlite3.Error) as e:
             logging.warning("Failed to index %s: %s", md_file.name, e)
             return False
 
@@ -282,7 +290,11 @@ class L4FTS5Search:
             self.clear_cache()
             return indexed_count
 
-        except Exception as e:  # nosec
+        # AUDIT #5: narrowed from a blanket ``except Exception`` to the
+        # realistic failure modes — sqlite3.Error from the DELETE/commit and
+        # OSError while walking the memory directories. Unexpected errors now
+        # propagate instead of being silently swallowed.
+        except (OSError, sqlite3.Error) as e:
             logging.error("Reindex failed: %s", e)
             return 0
 
@@ -333,7 +345,11 @@ class L4FTS5Search:
                 self.clear_cache()
                 return True
 
-        except Exception as e:  # nosec
+        # AUDIT #5: narrowed from a blanket ``except Exception``. File reads
+        # can raise OSError / UnicodeDecodeError and the FTS writes raise
+        # sqlite3.Error; those degrade to ``False`` while any unexpected error
+        # propagates instead of being silently swallowed.
+        except (OSError, UnicodeDecodeError, sqlite3.Error) as e:
             logging.error("Failed to index %s: %s", file_path, e)
             return False
 
@@ -417,8 +433,14 @@ class L4FTS5Search:
                     model="embedding",
                     metadata=f"results: {len(results)}",
                 )
-            except Exception:  # nosec
-                logging.debug("Cost tracking failed")
+            # AUDIT #5: narrowed from a blanket ``except Exception``. Cost
+            # tracking is best-effort telemetry that must never break search,
+            # so only its realistic failure modes are swallowed (cost-DB
+            # sqlite3.Error / OSError and CostTracker path-validation
+            # ValueError); the error detail is now logged and any unexpected
+            # error propagates instead of being silently swallowed.
+            except (sqlite3.Error, OSError, ValueError) as exc:
+                logging.debug("Cost tracking failed: %s", exc)
 
         return results
 
@@ -444,7 +466,11 @@ class L4FTS5Search:
                         else 0
                     ),
                 }
-        except Exception as e:  # nosec
+        # AUDIT #5: narrowed from a blanket ``except Exception`` to the
+        # realistic failure modes — sqlite3.Error from the COUNT/GROUP BY
+        # queries and OSError from the DB-size stat() — which degrade to an
+        # empty-stats payload. Unexpected errors now propagate.
+        except (OSError, sqlite3.Error) as e:
             logging.error("Stats failed: %s", e)
             return {
                 "total_documents": 0,
@@ -660,7 +686,14 @@ def cmd_hybrid_parallel(fts: L4FTS5Search, query: str, enable_rerank: bool = Tru
     import time
     start_time = time.time()
 
-    # Функции-обертки для параллельного выполнения
+    # Функции-обертки для параллельного выполнения.
+    # AUDIT #5: каждый wrapper намеренно ловит широкий ``except Exception`` —
+    # это per-engine граница изоляции отказов: каждый поиск исполняется в
+    # своём потоке, и падение одного движка (в т.ч. неожиданной ошибкой) не
+    # должно ронять остальные движки или общий результат. Сбой логируется
+    # (не глотается молча), а движок просто не даёт хитов. Поведение
+    # зафиксировано тестом
+    # test_cmd_hybrid_parallel_engine_failure_degrades_to_remaining_streams.
     def fetch_fts():
         try:
             return fts.search(query, limit=20)
@@ -782,7 +815,10 @@ def cmd_hybrid(fts: L4FTS5Search, query: str, enable_rerank: bool = True) -> Non
     fts_results = fts.search(query, limit=20)
     semantic_results = _fetch_semantic_results(query)
 
-    # BM25 (optional module)
+    # BM25 (optional module).
+    # AUDIT #5: широкий ``except Exception`` здесь намеренный — bm25 это
+    # опциональный внешний движок, и его сбой (в т.ч. неожиданный) не должен
+    # ронять гибридный поиск; ошибка логируется, а bm25 просто не участвует.
     bm25_results: list[dict] = []  # type: ignore
     if fetch_bm25_results is not None:
         try:
