@@ -12,12 +12,6 @@ import sys
 import subprocess
 from pathlib import Path
 
-# Исправление кодировки для Windows
-if sys.platform == 'win32':
-    import io
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
-
 
 class PrivacyControlsTest:
     """Тестирование защиты приватных данных."""
@@ -240,6 +234,16 @@ class PrivacyControlsTest:
 
 def main():
     """Главная функция."""
+    # Исправление кодировки для Windows (только при прямом запуске скрипта,
+    # чтобы не ломать перехват stdout/stderr в pytest на Windows).
+    if sys.platform == 'win32':
+        import io
+        try:
+            sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+            sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+        except (AttributeError, ValueError):
+            pass
+
     project_root = os.path.dirname(os.path.abspath(__file__))
 
     tester = PrivacyControlsTest(project_root)
