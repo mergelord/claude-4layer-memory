@@ -1,11 +1,11 @@
 # Claude 4-Layer Memory System
 
-**Version 1.4.0**
+**Version 1.5.0**
 
 **Enterprise-grade memory management system for Claude Code with hybrid search, automatic skill discovery, and comprehensive quality assurance.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-1.4.0-blue.svg)](https://github.com/mergelord/claude-4layer-memory/releases)
+[![Version](https://img.shields.io/badge/version-1.5.0-blue.svg)](https://github.com/mergelord/claude-4layer-memory/releases)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)](https://github.com/mergelord/claude-4layer-memory)
 [![CI/CD](https://img.shields.io/badge/CI%2FCD-passing-brightgreen.svg)](https://github.com/mergelord/claude-4layer-memory/actions)
