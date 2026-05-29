@@ -45,6 +45,42 @@ EMBED_BATCH_SIZE = max(1, int(os.getenv("L4_EMBED_BATCH_SIZE", "64")))
 _COLLECTION_NON_ALNUM = re.compile(r"[^a-zA-Z0-9_]")
 
 
+def _resolve_chroma_lookup_errors() -> tuple:
+    """Build the tuple of exceptions treated as recoverable Chroma failures.
+
+    chromadb's exception taxonomy changed across the supported range
+    (``chromadb>=0.4.0``): older releases raise a bare ``ValueError`` for a
+    missing collection, while newer releases raise subclasses of
+    ``chromadb.errors.ChromaError`` (e.g. ``NotFoundError``). We always treat
+    ``ValueError`` / ``KeyError`` as recoverable and add ``ChromaError`` when it
+    is importable *and* a genuine exception class.
+
+    Filtering to real ``BaseException`` subclasses keeps the result safe to use
+    in an ``except`` clause even under test doubles, where ``chromadb`` is
+    replaced by a ``MagicMock`` and ``ChromaError`` would otherwise resolve to a
+    non-exception mock attribute (which Python rejects at ``except`` time).
+    """
+    candidates: List[Any] = [ValueError, KeyError]
+    try:
+        from chromadb.errors import ChromaError
+
+        candidates.append(ChromaError)
+    except Exception:  # pragma: no cover - defensive across chromadb versions
+        pass
+    return tuple(
+        exc
+        for exc in candidates
+        if isinstance(exc, type) and issubclass(exc, BaseException)
+    )
+
+
+# Exceptions that represent an expected, recoverable Chroma lookup/query
+# failure (missing collection, backend lookup error). Anything outside this set
+# (e.g. a programming bug) is intentionally allowed to propagate instead of
+# being silently swallowed — see AUDIT #5.
+_CHROMA_LOOKUP_ERRORS = _resolve_chroma_lookup_errors()
+
+
 def configure_utf8_output() -> None:
     """Force UTF-8 console output on Windows when the script runs as a CLI."""
     if sys.platform != "win32":
@@ -176,10 +212,15 @@ class GlobalSemanticMemory:
     # ----------------------------
 
     def _get_collection(self, name: str):
-        """Безопасное получение коллекции с логированием ошибок."""
+        """Безопасное получение коллекции с логированием ошибок.
+
+        AUDIT #5 (semantic slice): сужено с бланкетного ``except Exception`` до
+        ``_CHROMA_LOOKUP_ERRORS``. Отсутствующая коллекция / ошибка lookup
+        деградируют до ``None`` с логом; неожиданные ошибки теперь пробрасываются.
+        """
         try:
             return self.client.get_collection(name)
-        except Exception as e:  # nosec
+        except _CHROMA_LOOKUP_ERRORS as e:
             logging.error("Failed to get collection %s: %s", name, e)
             return None
 
@@ -298,8 +339,11 @@ class GlobalSemanticMemory:
             results_by_source["semantic"].extend(
                 self._search_collection(global_col, embedding, n_results, "global")
             )
-        except Exception:  # nosec
-            pass
+        except _CHROMA_LOOKUP_ERRORS as e:
+            # Graceful degradation: a broken global collection must not sink the
+            # whole search. AUDIT #5: log instead of silently swallowing, and
+            # let non-Chroma errors propagate.
+            logging.warning("Global collection search failed: %s", e)
 
         # ------------------------
         # PROJECTS
@@ -324,7 +368,10 @@ class GlobalSemanticMemory:
                 results_by_source["semantic"].extend(
                     self._search_collection(col, embedding, per_col, project_name)
                 )
-            except Exception:  # nosec
+            except _CHROMA_LOOKUP_ERRORS as e:
+                # Per-collection isolation: skip the failing project and keep
+                # going. AUDIT #5: log the skip; unexpected errors propagate.
+                logging.warning("Project collection %s search failed: %s", c.name, e)
                 continue
 
         # ------------------------
@@ -415,7 +462,11 @@ class GlobalSemanticMemory:
         for md_file in path.rglob("*.md"):
             try:
                 text = md_file.read_text(encoding="utf-8")
-            except Exception:  # nosec
+            except (OSError, UnicodeDecodeError) as e:
+                # AUDIT #5: narrowed from a blanket ``except Exception``. Only
+                # unreadable / undecodable files are skipped (with a log);
+                # anything else propagates.
+                logging.warning("Failed to read %s: %s", md_file, e)
                 continue
 
             chunks = chunk_text(text)
