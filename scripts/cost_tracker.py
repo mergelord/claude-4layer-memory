@@ -13,7 +13,7 @@ import json
 import os
 import tempfile
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 from contextlib import contextmanager
 
@@ -198,7 +198,8 @@ class CostTracker:
         output_cost = (output_tokens / 1_000_000) * prices['output']
         total_cost = input_cost + output_cost
 
-        timestamp = datetime.now().isoformat()
+        # timezone-aware UTC: явное смещение в ISO-строке, не зависит от хоста
+        timestamp = datetime.now(timezone.utc).isoformat()
 
         with self._get_connection() as conn:
             cursor = conn.execute("""
@@ -232,12 +233,18 @@ class CostTracker:
     def get_stats(self, days: int = 7) -> Dict[str, Any]:
         """Статистика за последние N дней.
 
-        Note on timezones: timestamps are stored as ``datetime.now().isoformat()``
-        (i.e. the host's local time), so the ``WHERE`` clauses use
-        ``datetime('now', 'localtime', ...)`` — without the ``'localtime'``
-        modifier SQLite returns UTC, which would skew the cutoff by the
-        local UTC offset and silently include/exclude operations from
-        the last few hours.
+        Timestamps хранятся как timezone-aware UTC
+        (``datetime.now(timezone.utc).isoformat()``). В ``WHERE`` колонка
+        оборачивается в ``datetime(timestamp)``, что нормализует ISO-строку
+        со смещением в UTC ``YYYY-MM-DD HH:MM:SS`` и корректно сравнивается
+        с ``datetime('now', ...)`` (тоже UTC). Модификатор ``'localtime'``
+        убран намеренно: теперь и хранение, и сравнение в UTC,
+        поэтому окно отсечения не зависит от часового пояса хоста.
+
+        Замечание о миграции: строки, записанные старой версией в наивном
+        локальном времени (без смещения), ``datetime()`` интерпретирует
+        как UTC, поэтому такие записи могут быть смещены на величину
+        локального оффсета.
         """
         with self._get_connection() as conn:
             # Общая статистика
@@ -248,7 +255,7 @@ class CostTracker:
                     SUM(output_tokens) as total_output_tokens,
                     SUM(total_cost) as total_cost
                 FROM operations
-                WHERE timestamp >= datetime('now', 'localtime', '-' || ? || ' days')
+                WHERE datetime(timestamp) >= datetime('now', '-' || ? || ' days')
             """, (days,)).fetchone()
 
             # По типам операций
@@ -259,7 +266,7 @@ class CostTracker:
                     COUNT(*) as count,
                     SUM(total_cost) as cost
                 FROM operations
-                WHERE timestamp >= datetime('now', 'localtime', '-' || ? || ' days')
+                WHERE datetime(timestamp) >= datetime('now', '-' || ? || ' days')
                 GROUP BY operation_type
                 ORDER BY cost DESC
             """, (days,)):
