@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.5.1] - 2026-05-29
+
+### Documentation
+- README обновлён: актуализированы факты и добавлен раздел
+  «Reliability & Hardening», отражающий фиксы 1.5.0 (commit c6353d9).
+
+### Maintenance
+- **AUDIT #11 (repo hygiene):** из репозитория удалены one-off скрипты
+  (`apply_*.py`, `clean_artifacts.py`, `paste_to_file.py`, `write_docs.py`,
+  `analyze_project.py`), PyInstaller-спека `PasteToFile.spec`, RAR-архив и
+  файл со сломанным именем, `temp_code.txt`, а также transient-отчёты
+  (`ANTIPATTERNS_FIX.md`, `ARCHITECTURE_ANALYSIS.md`, `CODE_QUALITY_REPORT.md`,
+  `FINAL_SUMMARY.md`, `PROJECT_STATUS.md`); тест приватности перенесён в
+  `tests/` (PR #40).
+- Версия проекта поднята до 1.5.1 (`VERSION`, `package.json`).
+
+### Note
+- Только документация и гигиена репозитория — изменений в рантайм-коде нет.
+  Шаги апгрейда из 1.5.0 (reindex FTS5 + пересборка ChromaDB) остаются
+  актуальны только при переходе с версий ниже 1.5.0.
+
 ## [1.5.0] - 2026-05-29
 
 ### Fixed
