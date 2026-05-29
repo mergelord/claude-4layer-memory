@@ -13,6 +13,7 @@
 | #34 | Per-chunk embedding during indexing | `e8ed1eb` |
 | #35 | Windows UTF-8 guard in cost_tracker | `92961cb` |
 | #36 | Naive timestamps in cost_tracker (UTC) | `0bdeb6d` |
+| #37 | `@lru_cache` on instance methods (per-instance lazy cache) | `6800c4e` |
 
 ## High severity
 
@@ -22,7 +23,7 @@
 ## Medium severity
 
 - [x] **3. Per-chunk embedding during indexing** — `index_directory` кодировал каждый чанк отдельным вызовом `model.encode([chunk])`. Исправлено батч-кодированием всех чанков файла через `_encode_documents()` (настраиваемый `L4_EMBED_BATCH_SIZE`). (PR #34)
-- [ ] **4. `@lru_cache` на методах экземпляра** — `_cached_search` / `_encode_query` декорированы `lru_cache` на методах: это удерживает экземпляры в памяти и делает кэш фактически глобальным. Перевести на per-instance кэш или явный keyed-cache.
+- [x] **4. `@lru_cache` на методах экземпляра** — было: `_cached_search` / `_encode_query` декорированы `lru_cache` на методах, что удерживало экземпляры в памяти и делало кэш фактически глобальным. Исправлено: методы остаются на классе, а per-instance `lru_cache` создаётся лениво при первом вызове и хранится на экземпляре (`self._search_cache` / `self._encode_query_cache`) — кэш привязан к экземпляру, собирается GC вместе с ним и не шарится между экземплярами; работает и для объектов, созданных в обход `__init__`. (PR #37)
 - [ ] **5. Широкий `except Exception`, глотающий ошибки** — несколько блоков `except Exception: # nosec` молча глотают ошибки, скрывая реальные сбои. Сузить исключения и/или логировать.
 - [ ] **6. Несинхронизированные параллельные записи в SQLite** — одновременные записи в SQLite-базы могут привести к лок-контеншену/повреждению. Добавить сериализацию или WAL + retry.
 - [x] **7. Naive timestamps в cost_tracker** — хранение переведено на timezone-aware UTC (`datetime.now(timezone.utc).isoformat()`); в `get_stats` колонка оборачивается в `datetime(timestamp)`, модификатор `'localtime'` убран — окно отсечения больше не зависит от часового пояса хоста. (PR #36)
