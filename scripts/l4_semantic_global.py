@@ -28,6 +28,27 @@ from typing import Any, Dict, List
 import chromadb
 from chromadb.config import Settings
 
+# chromadb's exception taxonomy differs across the supported range
+# (``chromadb>=0.4.0``): older releases raise a bare ``ValueError`` for a
+# missing collection, while newer releases raise ``chromadb.errors.ChromaError``
+# subclasses (e.g. ``NotFoundError``). Import ``ChromaError`` when it is
+# available *and* a genuine exception class, otherwise fall back to a local
+# definition. This keeps ``_CHROMA_LOOKUP_ERRORS`` (defined below) a static
+# tuple of real exception classes -- safe under test doubles that mock out
+# ``chromadb`` and free of pylint's ``catching-non-exception`` (E0712) false
+# positive. Kept adjacent to the other ``chromadb`` imports so pylint's
+# ``ungrouped-imports`` (C0412) stays satisfied.
+try:
+    from chromadb.errors import ChromaError as _ChromaError
+
+    if not (isinstance(_ChromaError, type) and issubclass(_ChromaError, BaseException)):
+        raise ImportError("chromadb.errors.ChromaError is not an exception type")
+except Exception:  # pragma: no cover - chromadb optional / version-dependent
+
+    class _ChromaError(Exception):  # type: ignore[no-redef]
+        """Fallback used when chromadb.errors.ChromaError is unavailable."""
+
+
 # Common chunker (shared with FTS5 and future BM25)
 # pylint: disable=import-error
 from chunking import chunk_text  # noqa: E402
@@ -43,6 +64,13 @@ MAX_CHUNKS_PER_DOC = 3  # for future aggregation if needed
 # improve throughput at the cost of memory; override via L4_EMBED_BATCH_SIZE.
 EMBED_BATCH_SIZE = max(1, int(os.getenv("L4_EMBED_BATCH_SIZE", "64")))
 _COLLECTION_NON_ALNUM = re.compile(r"[^a-zA-Z0-9_]")
+
+
+# Exceptions that represent an expected, recoverable Chroma lookup/query
+# failure (missing collection, backend lookup error). Anything outside this set
+# (e.g. a programming bug) is intentionally allowed to propagate instead of
+# being silently swallowed -- see AUDIT #5.
+_CHROMA_LOOKUP_ERRORS = (ValueError, KeyError, _ChromaError)
 
 
 def configure_utf8_output() -> None:
@@ -176,10 +204,15 @@ class GlobalSemanticMemory:
     # ----------------------------
 
     def _get_collection(self, name: str):
-        """Безопасное получение коллекции с логированием ошибок."""
+        """Безопасное получение коллекции с логированием ошибок.
+
+        AUDIT #5 (semantic slice): сужено с бланкетного ``except Exception`` до
+        ``_CHROMA_LOOKUP_ERRORS``. Отсутствующая коллекция / ошибка lookup
+        деградируют до ``None`` с логом; неожиданные ошибки теперь пробрасываются.
+        """
         try:
             return self.client.get_collection(name)
-        except Exception as e:  # nosec
+        except _CHROMA_LOOKUP_ERRORS as e:
             logging.error("Failed to get collection %s: %s", name, e)
             return None
 
@@ -298,8 +331,11 @@ class GlobalSemanticMemory:
             results_by_source["semantic"].extend(
                 self._search_collection(global_col, embedding, n_results, "global")
             )
-        except Exception:  # nosec
-            pass
+        except _CHROMA_LOOKUP_ERRORS as e:
+            # Graceful degradation: a broken global collection must not sink the
+            # whole search. AUDIT #5: log instead of silently swallowing, and
+            # let non-Chroma errors propagate.
+            logging.warning("Global collection search failed: %s", e)
 
         # ------------------------
         # PROJECTS
@@ -324,7 +360,10 @@ class GlobalSemanticMemory:
                 results_by_source["semantic"].extend(
                     self._search_collection(col, embedding, per_col, project_name)
                 )
-            except Exception:  # nosec
+            except _CHROMA_LOOKUP_ERRORS as e:
+                # Per-collection isolation: skip the failing project and keep
+                # going. AUDIT #5: log the skip; unexpected errors propagate.
+                logging.warning("Project collection %s search failed: %s", c.name, e)
                 continue
 
         # ------------------------
@@ -415,7 +454,11 @@ class GlobalSemanticMemory:
         for md_file in path.rglob("*.md"):
             try:
                 text = md_file.read_text(encoding="utf-8")
-            except Exception:  # nosec
+            except (OSError, UnicodeDecodeError) as e:
+                # AUDIT #5: narrowed from a blanket ``except Exception``. Only
+                # unreadable / undecodable files are skipped (with a log);
+                # anything else propagates.
+                logging.warning("Failed to read %s: %s", md_file, e)
                 continue
 
             chunks = chunk_text(text)
