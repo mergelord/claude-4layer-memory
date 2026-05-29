@@ -34,6 +34,9 @@ class CostTracker:
         'embedding': {'input': 0.1, 'output': 0.0}  # sentence-transformers локально
     }
 
+    # Модель, используемая как fallback, когда запрошенная модель не найдена.
+    FALLBACK_MODEL = 'claude-sonnet-4'
+
     def __init__(self, db_path: Optional[Path] = None):
         if db_path is None:
             claude_dir = Path.home() / ".claude"
@@ -82,6 +85,31 @@ class CostTracker:
                 print("[WARN] Using default prices", file=sys.stderr)
 
         return self.DEFAULT_PRICES
+
+    def _resolve_price(self, model: str) -> Dict[str, float]:
+        """Возвращает цены для модели с безопасными фоллбэками.
+
+        Порядок: точное совпадение модели → ``FALLBACK_MODEL`` из загруженного
+        конфига → ``FALLBACK_MODEL`` из ``DEFAULT_PRICES`` → нулевые цены.
+
+        Раньше использовался ``self.prices.get(model, self.prices['claude-sonnet-4'])``,
+        и если кастомный ``config/prices.json`` не содержал ключа
+        ``claude-sonnet-4``, само выражение-фоллбэк бросало ``KeyError``.
+        Каждое поле читается через ``.get()``, поэтому неполная запись
+        тоже не приводит к ошибке.
+        """
+        fallback = self.DEFAULT_PRICES.get(
+            self.FALLBACK_MODEL, {'input': 0.0, 'output': 0.0}
+        )
+        price = (
+            self.prices.get(model)
+            or self.prices.get(self.FALLBACK_MODEL)
+            or fallback
+        )
+        return {
+            'input': float(price.get('input', fallback.get('input', 0.0))),
+            'output': float(price.get('output', fallback.get('output', 0.0))),
+        }
 
     def _init_db(self):
         """Инициализация БД"""
@@ -136,8 +164,8 @@ class CostTracker:
     ) -> Dict[str, Any]:
         """Записывает операцию и возвращает стоимость"""
 
-        # Вычисляем стоимость
-        prices = self.prices.get(model, self.prices['claude-sonnet-4'])
+        # Вычисляем стоимость (с безопасными фоллбэками по ценам)
+        prices = self._resolve_price(model)
         input_cost = (input_tokens / 1_000_000) * prices['input']
         output_cost = (output_tokens / 1_000_000) * prices['output']
         total_cost = input_cost + output_cost
@@ -241,7 +269,9 @@ class CostTracker:
         if verbose:
             print("\n[VERBOSE] Price configuration:")
             for model, prices in self.prices.items():
-                print(f"  {model:20s} Input: ${prices['input']:.2f}/M  Output: ${prices['output']:.2f}/M")
+                inp = prices.get('input', 0.0)
+                out = prices.get('output', 0.0)
+                print(f"  {model:20s} Input: ${inp:.2f}/M  Output: ${out:.2f}/M")
 
 
 def main():
