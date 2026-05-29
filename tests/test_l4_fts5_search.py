@@ -12,6 +12,7 @@ fakes, so the suite can run with no DB, no network, and no model weights.
 from __future__ import annotations
 
 import importlib
+import logging
 import sqlite3
 import subprocess
 import sys
@@ -591,3 +592,58 @@ def test_search_treats_fts5_operators_as_literals_current_contract(
         module, tmp_path, monkeypatch, "cats and dogs are here"
     )
     assert engine.search("cats OR dogs", limit=10) == []
+
+
+# ---------------------------------------------------------------------------
+# 12. _cached_search_impl exception narrowing (AUDIT #5, first slice).
+#
+#     The cached-search except block was narrowed from a blanket
+#     ``except Exception`` to ``except sqlite3.Error``. These tests target
+#     that except *directly* by patching the instance's _get_connection so it
+#     raises from inside _cached_search_impl (rather than breaking the public
+#     search() setup indirectly):
+#       - an expected SQLite error degrades gracefully to [] and is logged;
+#       - an unexpected non-SQLite error is NOT swallowed and propagates, so
+#         real bugs stay visible instead of being masked as an empty result.
+#     This is the actual bug class #5 is about — replacing one silent swallow
+#     with a narrower one would defeat the point, so both directions are
+#     pinned.
+# ---------------------------------------------------------------------------
+
+
+def test_cached_search_degrades_gracefully_on_sqlite_error(
+    module, tmp_path, monkeypatch, caplog
+):
+    engine = module.L4FTS5Search(db_path=tmp_path / "fts.db")
+
+    def boom():
+        raise sqlite3.OperationalError("forced sqlite failure")
+
+    # Patch on the instance so _cached_search_impl's `self._get_connection()`
+    # raises a SQLite error from within the targeted try/except.
+    monkeypatch.setattr(engine, "_get_connection", boom)
+
+    with caplog.at_level(logging.ERROR):
+        results = engine.search("alpha", limit=10)
+
+    assert results == []
+    assert any(
+        "Cached search failed" in rec.getMessage() for rec in caplog.records
+    )
+
+
+def test_cached_search_propagates_unexpected_non_sqlite_error(
+    module, tmp_path, monkeypatch
+):
+    engine = module.L4FTS5Search(db_path=tmp_path / "fts.db")
+
+    def boom():
+        raise RuntimeError("unexpected non-sqlite failure")
+
+    # A non-sqlite3.Error raised inside _cached_search_impl must NOT be caught
+    # by the narrowed `except sqlite3.Error` block — it must propagate so real
+    # bugs stay visible instead of being masked as an empty result.
+    monkeypatch.setattr(engine, "_get_connection", boom)
+
+    with pytest.raises(RuntimeError, match="unexpected non-sqlite failure"):
+        engine.search("alpha", limit=10)

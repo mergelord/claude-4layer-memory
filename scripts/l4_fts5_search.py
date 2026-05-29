@@ -390,7 +390,12 @@ class L4FTS5Search:
                 )
                 return results
 
-        except Exception as e:  # nosec
+        # AUDIT #5 (first slice): narrowed from a blanket ``except Exception``
+        # to ``sqlite3.Error``. Only SQLite-level failures (malformed MATCH,
+        # locked/corrupt DB) are expected here and degrade gracefully to an
+        # empty result; any non-SQLite error (e.g. a programming bug) now
+        # propagates instead of being silently swallowed.
+        except sqlite3.Error as e:
             logging.error("Cached search failed: %s", e)
             return tuple()
 
