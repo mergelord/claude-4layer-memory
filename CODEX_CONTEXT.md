@@ -39,6 +39,7 @@ Pass criteria: 431 tests green, pylint no new errors, encoding clean.
 - Fixed `hooks/stop_handoff_universal.py` so `main()` exits cleanly when `detect_project()` returns `None` for system/blacklisted paths, instead of building `.claude\projects\None` paths.
 - Added regression coverage in `tests/test_hooks_encoding_gate.py`.
 - Validation: focused hook tests `10 passed`; full pytest `431 passed, 1 skipped`; encoding gate clean; `py_compile` clean for the touched hook/test files.
+- Committed and pushed to GitHub/GitLab as `796cf33 fix: skip stop hook when project detection fails`; synced live `C:\Users\MYRIG\.claude\hooks\stop_handoff_universal.py`. Backup: `C:\Users\MYRIG\.claude\backups\stop_handoff_universal.py.codex_20260529_none_project_guard.bak`. Repo/live hashes match and live `py_compile` passed.
 
 **2026-05-29** - Git-clone-only install docs:
 - README already had the top-level warning that the project is git-clone-only and not published to npm, but `cli/README.md` still recommended `npm install -g claude-memory-cli` / `npm install claude-memory-cli`.
