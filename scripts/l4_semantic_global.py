@@ -28,6 +28,27 @@ from typing import Any, Dict, List
 import chromadb
 from chromadb.config import Settings
 
+# chromadb's exception taxonomy differs across the supported range
+# (``chromadb>=0.4.0``): older releases raise a bare ``ValueError`` for a
+# missing collection, while newer releases raise ``chromadb.errors.ChromaError``
+# subclasses (e.g. ``NotFoundError``). Import ``ChromaError`` when it is
+# available *and* a genuine exception class, otherwise fall back to a local
+# definition. This keeps ``_CHROMA_LOOKUP_ERRORS`` (defined below) a static
+# tuple of real exception classes -- safe under test doubles that mock out
+# ``chromadb`` and free of pylint's ``catching-non-exception`` (E0712) false
+# positive. Kept adjacent to the other ``chromadb`` imports so pylint's
+# ``ungrouped-imports`` (C0412) stays satisfied.
+try:
+    from chromadb.errors import ChromaError as _ChromaError
+
+    if not (isinstance(_ChromaError, type) and issubclass(_ChromaError, BaseException)):
+        raise ImportError("chromadb.errors.ChromaError is not an exception type")
+except Exception:  # pragma: no cover - chromadb optional / version-dependent
+
+    class _ChromaError(Exception):  # type: ignore[no-redef]
+        """Fallback used when chromadb.errors.ChromaError is unavailable."""
+
+
 # Common chunker (shared with FTS5 and future BM25)
 # pylint: disable=import-error
 from chunking import chunk_text  # noqa: E402
@@ -43,25 +64,6 @@ MAX_CHUNKS_PER_DOC = 3  # for future aggregation if needed
 # improve throughput at the cost of memory; override via L4_EMBED_BATCH_SIZE.
 EMBED_BATCH_SIZE = max(1, int(os.getenv("L4_EMBED_BATCH_SIZE", "64")))
 _COLLECTION_NON_ALNUM = re.compile(r"[^a-zA-Z0-9_]")
-
-
-# chromadb's exception taxonomy differs across the supported range
-# (``chromadb>=0.4.0``): older releases raise a bare ``ValueError`` for a
-# missing collection, while newer releases raise ``chromadb.errors.ChromaError``
-# subclasses (e.g. ``NotFoundError``). Import ``ChromaError`` when it is
-# available *and* a genuine exception class, otherwise fall back to a local
-# definition. This keeps ``_CHROMA_LOOKUP_ERRORS`` a static tuple of real
-# exception classes -- safe under test doubles that mock out ``chromadb`` and
-# free of pylint's ``catching-non-exception`` (E0712) false positive.
-try:
-    from chromadb.errors import ChromaError as _ChromaError
-
-    if not (isinstance(_ChromaError, type) and issubclass(_ChromaError, BaseException)):
-        raise ImportError("chromadb.errors.ChromaError is not an exception type")
-except Exception:  # pragma: no cover - chromadb optional / version-dependent
-
-    class _ChromaError(Exception):
-        """Fallback used when chromadb.errors.ChromaError is unavailable."""
 
 
 # Exceptions that represent an expected, recoverable Chroma lookup/query
