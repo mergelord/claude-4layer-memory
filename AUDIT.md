@@ -12,6 +12,7 @@
 | #33 | cost_tracker KeyError on unknown model | `ced899d` |
 | #34 | Per-chunk embedding during indexing | `e8ed1eb` |
 | #35 | Windows UTF-8 guard in cost_tracker | `92961cb` |
+| #36 | Naive timestamps in cost_tracker (UTC) | `0bdeb6d` |
 
 ## High severity
 
@@ -24,7 +25,7 @@
 - [ ] **4. `@lru_cache` на методах экземпляра** — `_cached_search` / `_encode_query` декорированы `lru_cache` на методах: это удерживает экземпляры в памяти и делает кэш фактически глобальным. Перевести на per-instance кэш или явный keyed-cache.
 - [ ] **5. Широкий `except Exception`, глотающий ошибки** — несколько блоков `except Exception: # nosec` молча глотают ошибки, скрывая реальные сбои. Сузить исключения и/или логировать.
 - [ ] **6. Несинхронизированные параллельные записи в SQLite** — одновременные записи в SQLite-базы могут привести к лок-контеншену/повреждению. Добавить сериализацию или WAL + retry.
-- [ ] **7. Naive timestamps в cost_tracker** — используется `datetime.now()` без таймзоны (отмечено в docstring). Перейти на timezone-aware UTC.
+- [x] **7. Naive timestamps в cost_tracker** — хранение переведено на timezone-aware UTC (`datetime.now(timezone.utc).isoformat()`); в `get_stats` колонка оборачивается в `datetime(timestamp)`, модификатор `'localtime'` убран — окно отсечения больше не зависит от часового пояса хоста. (PR #36)
 
 ## Low / hygiene
 
