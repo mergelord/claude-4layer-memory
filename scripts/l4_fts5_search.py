@@ -160,6 +160,14 @@ class L4FTS5Search:
         self.global_memory = self.home / ".claude" / "memory"
         self.projects_base = self.home / ".claude" / "projects"
 
+        # Per-instance search cache. Binding ``lru_cache`` here — instead of
+        # decorating the method — keeps the cache scoped to this instance and
+        # lets it be garbage-collected together with the instance. Decorating
+        # an instance method with ``@lru_cache`` stores ``self`` in a cache that
+        # lives on the class object, which pins every instance in memory and
+        # shares cache entries across unrelated instances.
+        self._cached_search = lru_cache(maxsize=128)(self._cached_search_impl)
+
     def clear_cache(self) -> None:
         """Очистить кэш поиска (вызывать после reindex/index_file)"""
         self._cached_search.cache_clear()
@@ -326,11 +334,13 @@ class L4FTS5Search:
             logging.error("Failed to index %s: %s", file_path, e)
             return False
 
-    @lru_cache(maxsize=128)
-    def _cached_search(self, query: str, limit: int) -> Tuple[SearchResult, ...]:
+    def _cached_search_impl(self, query: str, limit: int) -> Tuple[SearchResult, ...]:
         """
         Кэшируемый поиск. Возвращает результаты для каждого чанка,
         путь имеет вид "[source] rel_path" (без чанк-суффикса).
+
+        Оборачивается в per-instance ``lru_cache`` в ``__init__`` (атрибут
+        ``self._cached_search``); напрямую вызывать не нужно.
         """
         match_query = sanitize_fts5_query(query)
         if not match_query:
