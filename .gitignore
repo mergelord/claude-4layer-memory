@@ -99,6 +99,7 @@ desktop.ini
 *.backup
 temp/
 tmp/
+.codex-temp/
 
 # User-specific configs
 GLOBAL_PROJECTS.md

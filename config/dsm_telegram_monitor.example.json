@@ -1,0 +1,21 @@
+{
+  "ssh": {
+    "host": "DSM_HOST_OR_IP",
+    "user": "DSM_SSH_USER",
+    "port": 22756,
+    "key_path": "C:/path/to/private_key",
+    "known_hosts": ".codex-temp/dsm_known_hosts",
+    "strict_host_key_checking": true,
+    "connect_timeout": 10
+  },
+  "telegram": {
+    "bot_token": "123456:replace_with_bot_token",
+    "chat_id": "123456789"
+  },
+  "containers": [
+    "codex-lab"
+  ],
+  "interval_seconds": 300,
+  "state_file": ".codex-temp/dsm_telegram_monitor_state.json",
+  "docker_path": "/usr/local/bin/docker"
+}
