@@ -12,6 +12,7 @@ fakes, so the suite can run with no DB, no network, and no model weights.
 from __future__ import annotations
 
 import importlib
+import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -460,3 +461,133 @@ def test_fetch_semantic_results_timeout_nonzero_bad_json(
     # `subprocess` symbol — patching the stdlib attribute is enough because
     # the module didn't `from subprocess import run`.
     assert module._fetch_semantic_results("alpha") == []
+
+
+# ---------------------------------------------------------------------------
+# 10. sanitize_fts5_query(): current contract (AUDIT #1 regression lock).
+#
+#     These pin the *current* behaviour of the FTS5 query sanitiser (the
+#     runtime fix from PR #32): every word token is individually wrapped in
+#     double quotes (an implicit AND of single-token phrases), punctuation-
+#     only input collapses to "", and FTS5 operators / special chars are kept
+#     as literal tokens rather than honoured as query syntax. This asserts the
+#     *existing* contract, NOT a desired v2 (operators / prefix / phrase).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("C++", '"C"'),
+        ("foo:bar", '"foo" "bar"'),
+        ('"exact phrase"', '"exact" "phrase"'),
+        ("cats OR dogs", '"cats" "OR" "dogs"'),
+        ("!!!", ""),
+        ("???", ""),
+        ("foo*", '"foo"'),
+        ("привет мир", '"привет" "мир"'),
+        ("", ""),
+        ("   ", ""),
+    ],
+)
+def test_sanitize_fts5_query_current_contract(module, raw, expected):
+    assert module.sanitize_fts5_query(raw) == expected
+
+
+def test_sanitize_fts5_query_treats_operators_as_literals_current_contract(module):
+    # CURRENT contract: a bare FTS5 operator is quoted into a literal token,
+    # i.e. an implicit AND of three single-token phrases, NOT a boolean OR.
+    # A future v2 sanitiser that honours OR must update this assertion on
+    # purpose — a deliberate contract change, not a broken test.
+    assert module.sanitize_fts5_query("cats OR dogs") == '"cats" "OR" "dogs"'
+
+
+# ---------------------------------------------------------------------------
+# 11. Live FTS5: search() over a tmp DB must survive adversarial input and
+#     never raise sqlite3.OperationalError. A positive C++ hit and a negative
+#     operators-as-literals case make the integration coverage meaningful
+#     (they prove the sanitised MATCH actually executes and current operator
+#     semantics hold), since the public search() boundary alone is a weak
+#     guard while _cached_search_impl still wraps MATCH in a broad except.
+#     All tests use tmp_path and disable cost tracking so ~/.claude is never
+#     touched.
+# ---------------------------------------------------------------------------
+
+
+def _build_indexed_engine(module, tmp_path, monkeypatch, content):
+    """Build an L4FTS5Search over a temp DB and index one small md document.
+
+    Cost tracking is disabled so search() never instantiates CostTracker and
+    the test stays fully inside tmp_path (no writes to ~/.claude).
+    """
+    monkeypatch.setattr(module, "COST_TRACKING_ENABLED", False)
+    engine = module.L4FTS5Search(db_path=tmp_path / "fts.db")
+    assert engine.init_fts() is True
+    doc = tmp_path / "notes.md"
+    doc.write_text(content, encoding="utf-8")
+    assert engine.index_file(doc, source="global") is True
+    return engine
+
+
+def test_search_special_chars_never_raise_operational_error(
+    module, tmp_path, monkeypatch
+):
+    engine = _build_indexed_engine(
+        module, tmp_path, monkeypatch, "Learning C++ and Python. cats and dogs."
+    )
+    adversarial = [
+        "C++",
+        "foo:bar",
+        '"exact phrase"',
+        "cats OR dogs",
+        "!!!",
+        "???",
+        "foo*",
+        "привет мир",
+    ]
+    for query in adversarial:
+        try:
+            results = engine.search(query, limit=10)
+        except sqlite3.OperationalError as exc:  # pragma: no cover
+            pytest.fail(f"search({query!r}) raised OperationalError: {exc}")
+        assert isinstance(results, list)
+        assert all(isinstance(r, module.SearchResult) for r in results)
+
+
+def test_search_punctuation_only_returns_empty_list(module, tmp_path, monkeypatch):
+    engine = _build_indexed_engine(
+        module, tmp_path, monkeypatch, "some indexed content here"
+    )
+    assert engine.search("!!!", limit=10) == []
+    assert engine.search("???", limit=10) == []
+
+
+def test_search_special_char_token_still_matches_document(
+    module, tmp_path, monkeypatch
+):
+    # "C++" sanitises to '"C"'; the unicode61 tokenizer also reduces the
+    # indexed "C++" to the token "c", so a real MATCH must succeed and return
+    # the document — proving the sanitised query is valid FTS5 and actually
+    # executed, not merely swallowed by the broad except.
+    engine = _build_indexed_engine(
+        module, tmp_path, monkeypatch, "Learning C++ and Python today."
+    )
+    results = engine.search("C++", limit=10)
+    assert len(results) >= 1
+    assert results[0].source == "fts5"
+    assert results[0].path.startswith("[global]")
+    assert results[0].path.endswith("notes.md")
+
+
+def test_search_treats_fts5_operators_as_literals_current_contract(
+    module, tmp_path, monkeypatch
+):
+    # Integration counterpart to the unit operator test: because OR is a
+    # literal token AND-ed with the others, a document containing "cats" and
+    # "dogs" but not the literal token "or" yields no hit. This locks the
+    # CURRENT operator semantics; a future v2 that honours OR must change this
+    # on purpose.
+    engine = _build_indexed_engine(
+        module, tmp_path, monkeypatch, "cats and dogs are here"
+    )
+    assert engine.search("cats OR dogs", limit=10) == []
