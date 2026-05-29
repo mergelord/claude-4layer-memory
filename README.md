@@ -43,13 +43,23 @@
 - **System Artifacts Cleanup** - Intelligent removal of C--WINDOWS-system32 and similar artifacts
 - **Skill Creator** - Automatic discovery and documentation of recurring patterns
 
+### Reliability & Hardening
+- **Sanitized FTS5 Queries** - Raw user input is sanitized before `MATCH`, preventing crashes on special characters and quotes
+- **Graceful Search Degradation** - SQLite failures in cached search are caught narrowly (`sqlite3.Error`) and logged, while unexpected errors propagate instead of being silently swallowed
+- **Per-Instance Caching** - Reranker caching is scoped per instance to avoid cross-instance state leakage
+- **Timezone-Aware Cost Tracking** - All cost and usage timestamps are stored as timezone-aware UTC
+- **Robust Cost Fallback** - Missing model prices no longer raise `KeyError`; pricing falls back safely
+- **Unified Windows UTF-8 Guard** - Consistent UTF-8 stdout/stderr setup across all modules
+- **BOM-Free UTF-8 Sources** - All sources are clean UTF-8 (no BOM), enforced by the EncodingGate
+- **Path-Traversal Protection** - Unified key contract with path-traversal hardening for memory operations
+
 ### Developer Experience
 - **Cross-Platform** - Windows, Linux, macOS support with platform-specific optimizations
 - **MCP Server** - Model Context Protocol integration for IDE extensions
 - **CLI Tools** - Comprehensive command-line interface for all operations
 - **Cost Tracking** - Built-in token usage and cost monitoring
 - **Code Quality** - Automated CI/CD with Pylint (10.0/10), MyPy, Ruff, Bandit, and Radon
-  - 324 automated tests with 100% pass rate
+  - Comprehensive automated test suite across Python 3.10-3.13 on Windows, Linux, and macOS (12 CI jobs)
   - Type safety with MyPy strict mode
   - Security scanning with Bandit
   - Complexity analysis with Radon
@@ -154,23 +164,23 @@ See [INSTALL.md](docs/INSTALL.md) for detailed instructions.
 ### 4-Layer Memory System
 
 ```
-┌──────────────────────────────────────────────────────────┐
+┌──────────────────────────────────────────────┐
 │ Layer 4: SEMANTIC (Vector Search)                       │
 │ ├─ ChromaDB + sentence-transformers                     │
 │ └─ Multilingual semantic search                         │
-├──────────────────────────────────────────────────────────┤
+├──────────────────────────────────────────────┤
 │ Layer 3: COLD (Permanent Archive)                       │
 │ ├─ archive/ directory                                   │
 │ └─ Long-term storage                                    │
-├──────────────────────────────────────────────────────────┤
+├──────────────────────────────────────────────┤
 │ Layer 2: WARM (14 days)                                 │
 │ ├─ decisions.md                                         │
 │ └─ Important decisions, architectural choices           │
-├──────────────────────────────────────────────────────────┤
+├──────────────────────────────────────────────┤
 │ Layer 1: HOT (24 hours)                                 │
 │ ├─ handoff.md                                           │
 │ └─ Recent events, quick context recovery                │
-└──────────────────────────────────────────────────────────┘
+└──────────────────────────────────────────────┘
 ```
 
 ### Dual-Level System
