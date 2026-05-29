@@ -127,13 +127,17 @@ class GlobalSemanticMemory:
         result = self.model.encode([query])[0]
         return result.tolist() if hasattr(result, "tolist") else result
 
-    def _encode_documents(self, documents: List[str]) -> List[List[float]]:
+    def _encode_documents(self, documents: List[str]) -> List[Any]:
         """Batch-encode chunk documents into embedding vectors.
 
         Все чанки кодируются одним батч-вызовом ``model.encode`` вместо
         отдельного вызова на каждый чанк — это убирает основную стоимость
-        индексации больших директорий. Нормализует результат к спискам,
-        поддерживая и ndarray, и список векторов.
+        индексации больших директорий.
+
+        Возвращает список float-векторов (по одному на чанк). Тип элемента
+        намеренно оставлен ``Any``: ``list`` в mypy инвариантен, и более точный
+        ``List[List[float]]`` не принимается ``Collection.upsert(embeddings=...)``,
+        который ждёт ``list[Sequence[float] | Sequence[int]]``.
         """
         if not documents:
             return []
