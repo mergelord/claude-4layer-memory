@@ -12,6 +12,7 @@ import sqlite3
 import json
 import os
 import tempfile
+import time
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
@@ -175,17 +176,74 @@ class CostTracker:
 
     @contextmanager
     def _get_connection(self):
-        """Context manager для SQLite соединения"""
-        conn = sqlite3.connect(str(self.db_path))
+        """Context manager для SQLite соединения.
+
+        AUDIT #6: раньше тут открывался голый
+        ``sqlite3.connect(str(self.db_path))`` без какой-либо обработки
+        блокировок, поэтому любой конкурентный писатель (FTS5-трекер,
+        параллельный запуск CLI, бэкап БД) мог сразу получить
+        ``sqlite3.OperationalError: database is locked``. Теперь, по образцу
+        ``l4_fts5_search.py``:
+
+        * соединение открывается с ``timeout=30`` — SQLite ждёт, а не падает;
+        * включаются WAL-журналирование (читатели и один писатель не
+          блокируют друг друга), ``busy_timeout=30000`` и
+          ``synchronous=NORMAL`` (под WAL достаточно надёжно и заметно
+          дешевле);
+        * финальный ``commit()`` оборачивается в ``_commit_with_retry`` —
+          ограниченный retry на транзиентную ошибку «database is locked».
+
+        Применение PRAGMA — best-effort: read-only FS (например, когда WAL
+        невозможен) не должен ронять конструкцию трекера, как и в
+        ``l4_fts5_search.py``. Семантика commit/rollback сохранена:
+        ``track_operation`` / ``_init_db`` полагаются на авто-commit при
+        выходе из контекста и rollback при ошибке.
+        """
+        conn = sqlite3.connect(str(self.db_path), timeout=30)
         conn.row_factory = sqlite3.Row
         try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA busy_timeout=30000")
+            conn.execute("PRAGMA synchronous=NORMAL")
+        except sqlite3.OperationalError:  # nosec
+            pass
+        try:
             yield conn
-            conn.commit()
+            self._commit_with_retry(conn)
         except Exception:
             conn.rollback()
             raise
         finally:
             conn.close()
+
+    @staticmethod
+    def _commit_with_retry(
+        conn: sqlite3.Connection,
+        *,
+        retries: int = 3,
+        delay: float = 0.1,
+    ) -> None:
+        """Commit с retry транзиентной ошибки «database is locked» (AUDIT #6).
+
+        WAL + ``busy_timeout`` уже заставляют SQLite ждать при большинстве
+        конфликтов; этот цикл — последний рубеж на редкий случай, когда
+        блокировка переживает окно ``busy_timeout``. Не-lock
+        ``OperationalError`` (и любое другое исключение) пробрасывается
+        немедленно, чтобы реальные баги не маскировались.
+        """
+        for attempt in range(retries):
+            try:
+                conn.commit()
+                return
+            except sqlite3.OperationalError as exc:
+                message = str(exc).lower()
+                is_locked = (
+                    "database is locked" in message
+                    or "database is busy" in message
+                )
+                if not is_locked or attempt == retries - 1:
+                    raise
+                time.sleep(delay)
 
     def track_operation(
         self,
