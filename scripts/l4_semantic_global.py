@@ -99,14 +99,14 @@ class GlobalSemanticMemory:
         self.collection_prefix = "memory_"
         self.global_collection = "memory_global"
 
-        # Per-instance query-embedding cache. Binding ``lru_cache`` here —
-        # instead of decorating the method — keeps the cache scoped to this
-        # instance and lets it be garbage-collected together with the
-        # instance. Decorating an instance method with ``@lru_cache`` stores
-        # ``self`` in a cache that lives on the class object, which pins every
-        # instance in memory and shares cache entries across unrelated
-        # instances.
-        self._encode_query = lru_cache(maxsize=128)(self._encode_query_impl)
+        # Per-instance query-embedding cache, created lazily on first use (see
+        # _encode_query). Storing the lru_cache on the instance — instead of
+        # decorating the method — keeps the cache scoped to this instance and
+        # lets it be garbage-collected together with the instance. Decorating
+        # an instance method with @lru_cache stores ``self`` in a cache that
+        # lives on the class object, which pins every instance in memory and
+        # shares cache entries across unrelated instances.
+        self._encode_query_cache: Any = None
 
     @property
     def model(self):
@@ -130,12 +130,23 @@ class GlobalSemanticMemory:
     # =====================================================
     # EMBEDDING GATEWAY (P1)
     # =====================================================
-    def _encode_query_impl(self, query: str):
-        """Возвращает embedding для запроса. Результат кэшируется.
+    def _encode_query(self, query: str):
+        """Возвращает embedding для запроса (per-instance LRU-кэш).
 
-        Оборачивается в per-instance ``lru_cache`` в ``__init__`` (атрибут
-        ``self._encode_query``); напрямую вызывать не нужно.
+        Кэш создаётся лениво при первом вызове и хранится на экземпляре
+        (``self._encode_query_cache``), поэтому собирается GC вместе с
+        экземпляром и не шарится между разными экземплярами. Работает и для
+        экземпляров, созданных в обход ``__init__`` (например, через ``__new__``
+        в тестах).
         """
+        cache = getattr(self, "_encode_query_cache", None)
+        if cache is None:
+            cache = lru_cache(maxsize=128)(self._encode_query_impl)
+            self._encode_query_cache = cache
+        return cache(query)
+
+    def _encode_query_impl(self, query: str):
+        """Реальная реализация encode (вызывается через self._encode_query)."""
         result = self.model.encode([query])[0]
         return result.tolist() if hasattr(result, "tolist") else result
 
