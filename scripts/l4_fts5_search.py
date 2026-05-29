@@ -19,6 +19,7 @@ L4 FTS5 Search - Fast keyword search for memory system
 import json
 import logging
 import os
+import re
 import sqlite3
 import subprocess
 import sys
@@ -70,6 +71,39 @@ if sys.platform == "win32":
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
+
+
+# ---------------------------------------------------------------------------
+# FTS5 query sanitization
+# ---------------------------------------------------------------------------
+
+# Токены-слова из произвольного пользовательского ввода. \w в Python 3 по
+# умолчанию Unicode-aware, поэтому кириллица и другие алфавиты сохраняются.
+_FTS5_TOKEN_RE = re.compile(r"\w+", re.UNICODE)
+
+
+def sanitize_fts5_query(query: str) -> str:
+    """Преобразует сырой пользовательский ввод в безопасный FTS5 MATCH-запрос.
+
+    FTS5 трактует ряд символов как синтаксис запроса: двойные кавычки,
+    ``*``, ``:``, ``^``, ``-``, ``(`` / ``)``, а также ключевые слова
+    ``AND`` / ``OR`` / ``NOT`` / ``NEAR``. Из-за этого сырой ввод вроде
+    ``C++``, ``the "bug"`` или ``foo:bar`` приводит к
+    ``sqlite3.OperationalError``.
+
+    Мы извлекаем из запроса только токены-слова и оборачиваем каждый в
+    двойные кавычки, превращая его в литеральную фразу. Токены соединяются
+    пробелом (неявный AND в FTS5). Поскольку токены содержат только
+    word-символы, любые спецсимволы и операторы FTS5 нейтрализуются.
+
+    Возвращает пустую строку, если во вводе нет ни одного значимого токена;
+    вызывающий код в этом случае должен вернуть пустой результат, не
+    выполняя MATCH.
+    """
+    tokens = _FTS5_TOKEN_RE.findall(query)
+    if not tokens:
+        return ""
+    return " ".join(f'"{token}"' for token in tokens)
 
 
 @lru_cache(maxsize=1)
@@ -298,6 +332,10 @@ class L4FTS5Search:
         Кэшируемый поиск. Возвращает результаты для каждого чанка,
         путь имеет вид "[source] rel_path" (без чанк-суффикса).
         """
+        match_query = sanitize_fts5_query(query)
+        if not match_query:
+            return tuple()
+
         try:
             with self._get_connection() as conn:
                 rows = conn.execute(
@@ -312,7 +350,7 @@ class L4FTS5Search:
                     ORDER BY rank
                     LIMIT ?
                     """,
-                    (query, limit),
+                    (match_query, limit),
                 ).fetchall()
 
                 results = tuple(
