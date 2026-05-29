@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.5.0] - 2026-05-29
+
+### Fixed
+- **AUDIT #1:** runtime fix с регрессионным покрытием.
+- **AUDIT #5 (first slice):** broad `except` в `_cached_search_impl` (FTS5)
+  сужен до `sqlite3.Error` — ожидаемые SQLite-ошибки по-прежнему
+  мягко деградируют в `tuple()` (с логированием), а неожиданные
+  пробрасываются. Добавлены регрессионные тесты (PR #39).
+  Остальные broad-except (semantic / cost / hybrid wrappers,
+  `l4_semantic_global.py`) отложены — AUDIT #5 остаётся открытым.
+- См. запись 2026-05-27 (N-4, RRF basename collision) — вошла в этот релиз.
+
+### Maintenance
+- Убран UTF-8 BOM из `package.json` (AUDIT #9).
+- Версия проекта поднята до 1.5.0 (`VERSION`, `package.json`).
+
+### Operational requirement after upgrade
+- **`l4_search.bat reindex`** (или `python scripts/l4_fts5_search.py reindex`) и
+  **пересборка ChromaDB коллекций** (`python scripts/l4_semantic_global.py index-all`)
+  — нужны, чтобы N-4 RRF-фикс применился к уже-проиндексированным данным.
+
 ## 2026-05-27
 
 ### Fixed
@@ -12,7 +33,7 @@
 - Добавлена централизованная функция `ranking.normalize_document_path()`,
   и `ranking.make_join_key()` теперь сам её вызывает — callers больше не
   могут забыть нормализацию.
-- `_index_single_file` в FTS5 перешёл с `str(path)` на `.as_posix()` —
+- `_index_single_file` в FTS5 перешел с `str(path)` на `.as_posix()` —
   исправлены Windows-style backslash ключи (`archive\notes.md`).
 
 ### Operational requirement after upgrade
