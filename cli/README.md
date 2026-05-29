@@ -4,17 +4,10 @@ CLI tool for Claude 4-Layer Memory System - intelligent memory management with s
 
 ## Installation
 
-### Global installation (recommended)
-
-```bash
-npm install -g claude-memory-cli
-```
-
-### Local installation
-
-```bash
-npm install claude-memory-cli
-```
+> Install from a git clone only. This project is not published to npm.
+> Do not install `claude-memory-cli` or `cm` from the npm registry: the
+> Python backend is intentionally part of this repository, so a registry-only
+> install would be non-functional.
 
 ### From source
 
@@ -22,7 +15,15 @@ npm install claude-memory-cli
 git clone https://github.com/mergelord/claude-4layer-memory.git
 cd claude-4layer-memory
 npm install
+
+# Optional: expose local commands as claude-memory-cli / cm on your PATH
 npm link
+```
+
+You can also run the CLI directly from the cloned repository:
+
+```bash
+node cli/index.js --help
 ```
 
 ## Usage
@@ -30,11 +31,14 @@ npm link
 ### Quick start
 
 ```bash
-# Show help
+# Show help after npm link
 claude-memory-cli --help
 
 # Or use short alias
 cm --help
+
+# Or run directly from the cloned repository
+node cli/index.js --help
 ```
 
 ### Commands
@@ -130,8 +134,11 @@ claude-memory-cli lint --quick || exit 1
 ```yaml
 - name: Validate memory
   run: |
-    npm install -g claude-memory-cli
-    claude-memory-cli lint --checklist
+    git clone https://github.com/mergelord/claude-4layer-memory.git
+    cd claude-4layer-memory
+    npm install
+    python -m pip install -r requirements.txt
+    node cli/index.js lint --checklist
 ```
 
 ## License

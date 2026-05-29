@@ -35,6 +35,12 @@ Pass criteria: 430 tests green, pylint no new errors, encoding clean.
 
 ## Recent Decisions
 
+**2026-05-29** - Git-clone-only install docs:
+- README already had the top-level warning that the project is git-clone-only and not published to npm, but `cli/README.md` still recommended `npm install -g claude-memory-cli` / `npm install claude-memory-cli`.
+- Updated `cli/README.md` to document only the clone + `npm install` / optional `npm link` flow and changed the CI snippet to run from the cloned repo with `node cli/index.js`.
+- Aligned `README.md` visible version badge/text with `VERSION` and `package.json`: `1.5.1`.
+- Validation: encoding gate clean; no remaining registry-install recommendations in `README.md` / `cli/README.md`.
+
 **2026-05-29** - GitHub CI Bandit follow-up:
 - After pushing `cabadeb`, GitHub Actions started for the commit. `Shellcheck` passed, but `Code Quality / Bandit Security Check` failed on existing `scripts/dsm_telegram_monitor.py` with B310 at `urllib.request.urlopen()`.
 - Fixed the monitor instead of broad-skipping the rule: added HTTPS-only Telegram `api_base` validation without credentials, kept a targeted `# nosec B310` only on the validated `urlopen` call, and added `test_load_config_rejects_non_https_telegram_api_base`.
