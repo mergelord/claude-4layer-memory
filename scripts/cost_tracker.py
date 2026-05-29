@@ -6,6 +6,7 @@ Cost Tracker для Memory Operations
 """
 
 import argparse
+import codecs
 import sys
 import sqlite3
 import json
@@ -16,11 +17,38 @@ from datetime import datetime
 from typing import Optional, Dict, Any
 from contextlib import contextmanager
 
-# Настройка UTF-8 для Windows
-if sys.platform == 'win32':
-    import codecs
-    sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
-    sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'strict')
+
+def configure_utf8_output() -> None:
+    """Force UTF-8 console output on Windows when the script runs as a CLI.
+
+    Mirrors the guarded helper used in ``l4_fts5_search.py`` /
+    ``l4_semantic_global.py``. The previous import-time block accessed
+    ``sys.stdout.buffer`` / ``sys.stderr.buffer`` unconditionally, which
+    raised ``AttributeError`` whenever the streams were replaced by objects
+    without a ``buffer`` attribute (e.g. pytest capture or redirected
+    streams). Here we skip when output is already UTF-8, prefer
+    ``stream.reconfigure()``, and only fall back to a ``codecs`` writer when
+    a real buffer is available.
+    """
+    if sys.platform != "win32":
+        return
+
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name)
+        encoding = str(getattr(stream, "encoding", None) or "").lower()
+        if encoding.replace("-", "") == "utf8":
+            continue
+
+        if hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="strict")
+                continue
+            except (AttributeError, OSError, ValueError):
+                pass
+
+        buffer = getattr(stream, "buffer", None)
+        if buffer is not None:
+            setattr(sys, stream_name, codecs.getwriter("utf-8")(buffer, "strict"))
 
 
 class CostTracker:
@@ -276,6 +304,8 @@ class CostTracker:
 
 def main():
     """CLI интерфейс"""
+    configure_utf8_output()
+
     parser = argparse.ArgumentParser(description='Memory Cost Tracker')
     parser.add_argument('command', choices=['stats', 'track'],
                         help='Command to execute')
