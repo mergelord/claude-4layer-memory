@@ -31,7 +31,7 @@
 ## Low / hygiene
 
 - [x] **8. Несогласованная обработка UTF-8 на Windows** — в `cost_tracker.py` не было гарда `hasattr(stream, "buffer")`, который есть в `l4_fts5_search.py` / `l4_semantic_global.py`. Унифицировано общим `configure_utf8_output()` (пропуск если уже UTF-8 → `reconfigure()` → фоллбэк на `codecs` только при наличии `buffer`), вызов из `main()`. (PR #35)
-- [ ] **9. BOM в `package.json`** — ведущий byte-order mark; убрать.
+- [x] **9. BOM в `package.json`** — `package.json` начинался с ведущего UTF-8 byte-order mark (`U+FEFF`), который ломает некоторые JSON/npm-парсеры и зашумляет diff/grep. Файл перезаписан как чистый UTF-8 без BOM; само содержимое JSON не изменено. Находка закрыта._
 - [ ] **10. Мёртвый код: `_rrf_stub`** — неиспользуемый placeholder; удалить или подключить.
 - [ ] **11. Мусор в репо и пакетирование** — RAR-архив, одноразовые скрипты, process-доки `.md`, файл с пробелом в имени, а также двойное пакетирование и статичные badges. Почистить и консолидировать.
 
