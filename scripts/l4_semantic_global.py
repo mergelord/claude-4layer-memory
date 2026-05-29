@@ -63,6 +63,13 @@ MAX_CHUNKS_PER_DOC = 3  # for future aggregation if needed
 # Batch size for embedding encode calls during indexing. Larger batches
 # improve throughput at the cost of memory; override via L4_EMBED_BATCH_SIZE.
 EMBED_BATCH_SIZE = max(1, int(os.getenv("L4_EMBED_BATCH_SIZE", "64")))
+# Skip indexing any single markdown file larger than this many bytes. A
+# pathologically large file would otherwise be read fully into memory and
+# chunked/encoded in one pass (AUDIT HIGH-4). Override via
+# L4_MAX_INDEX_FILE_BYTES; defaults to 10 MiB.
+MAX_INDEX_FILE_BYTES = max(
+    1, int(os.getenv("L4_MAX_INDEX_FILE_BYTES", str(10 * 1024 * 1024)))
+)
 _COLLECTION_NON_ALNUM = re.compile(r"[^a-zA-Z0-9_]")
 
 
@@ -441,6 +448,20 @@ class GlobalSemanticMemory:
         collection = self.client.get_or_create_collection(collection_name)
 
         for md_file in path.rglob("*.md"):
+            # AUDIT HIGH-4: skip pathologically large files before reading them
+            # fully into memory. A stat() failure is treated like a read skip.
+            try:
+                if md_file.stat().st_size > MAX_INDEX_FILE_BYTES:
+                    logging.warning(
+                        "Skipping %s: exceeds %d-byte index size limit",
+                        md_file,
+                        MAX_INDEX_FILE_BYTES,
+                    )
+                    continue
+            except OSError as e:
+                logging.warning("Failed to stat %s: %s", md_file, e)
+                continue
+
             try:
                 text = md_file.read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError) as e:
