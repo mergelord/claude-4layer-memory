@@ -4,6 +4,8 @@
 
 **Enterprise-grade memory management system for Claude Code with hybrid search, automatic skill discovery, and comprehensive quality assurance.**
 
+> ⚠️ **Installation: git-clone only.** This project is **not published to npm**. Install it from a git clone as shown in [Quick Start](#quick-start) — the `cm` CLI runs from the cloned repository. Installing `claude-memory-cli` / `cm` from the npm registry is **not supported**: the Python backend is intentionally excluded from any npm package, so a registry install would be non-functional.
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Version](https://img.shields.io/badge/version-1.5.0-blue.svg)](https://github.com/mergelord/claude-4layer-memory/releases)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
@@ -111,6 +113,8 @@ python scripts/l4_semantic_global.py stats
 
 ## 📦 Installation
 
+> **Install from a git clone only.** This package is **not published to npm** (`"private": true` in `package.json`). All commands below assume you have cloned the repository and run them from its root. There is no `npm install` path.
+
 ### Prerequisites
 
 - Python 3.10 or higher
@@ -164,23 +168,23 @@ See [INSTALL.md](docs/INSTALL.md) for detailed instructions.
 ### 4-Layer Memory System
 
 ```
-┌──────────────────────────────────────────────┐
+┌────────────────────────────────────────────┐
 │ Layer 4: SEMANTIC (Vector Search)                       │
 │ ├─ ChromaDB + sentence-transformers                     │
 │ └─ Multilingual semantic search                         │
-├──────────────────────────────────────────────┤
+├────────────────────────────────────────────┤
 │ Layer 3: COLD (Permanent Archive)                       │
 │ ├─ archive/ directory                                   │
 │ └─ Long-term storage                                    │
-├──────────────────────────────────────────────┤
+├────────────────────────────────────────────┤
 │ Layer 2: WARM (14 days)                                 │
 │ ├─ decisions.md                                         │
 │ └─ Important decisions, architectural choices           │
-├──────────────────────────────────────────────┤
+├────────────────────────────────────────────┤
 │ Layer 1: HOT (24 hours)                                 │
 │ ├─ handoff.md                                           │
 │ └─ Recent events, quick context recovery                │
-└──────────────────────────────────────────────┘
+└────────────────────────────────────────────┘
 ```
 
 ### Dual-Level System
