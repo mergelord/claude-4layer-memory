@@ -11,6 +11,7 @@
 | #32 | FTS5 MATCH crash on raw user input | `c69efab` |
 | #33 | cost_tracker KeyError on unknown model | `ced899d` |
 | #34 | Per-chunk embedding during indexing | `e8ed1eb` |
+| #35 | Windows UTF-8 guard in cost_tracker | `92961cb` |
 
 ## High severity
 
@@ -27,7 +28,7 @@
 
 ## Low / hygiene
 
-- [ ] **8. Несогласованная обработка UTF-8 на Windows** — в `cost_tracker.py` нет гарда `hasattr(stream, "buffer")`, который есть в `l4_fts5_search.py` / `l4_semantic_global.py`. Унифицировать настройку консоли.
+- [x] **8. Несогласованная обработка UTF-8 на Windows** — в `cost_tracker.py` не было гарда `hasattr(stream, "buffer")`, который есть в `l4_fts5_search.py` / `l4_semantic_global.py`. Унифицировано общим `configure_utf8_output()` (пропуск если уже UTF-8 → `reconfigure()` → фоллбэк на `codecs` только при наличии `buffer`), вызов из `main()`. (PR #35)
 - [ ] **9. BOM в `package.json`** — ведущий byte-order mark; убрать.
 - [ ] **10. Мёртвый код: `_rrf_stub`** — неиспользуемый placeholder; удалить или подключить.
 - [ ] **11. Мусор в репо и пакетирование** — RAR-архив, одноразовые скрипты, process-доки `.md`, файл с пробелом в имени, а также двойное пакетирование и статичные badges. Почистить и консолидировать.
