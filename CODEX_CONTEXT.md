@@ -5,7 +5,7 @@
 - `tests/test_memory_lint_helpers.py` — intentional mojibake fixtures, DO NOT modify encoding
 - `scripts/__init__.py` — required by `tests/test_architecture.py`, DO NOT delete
 - pylint must stay 10.00/10
-- All tests must pass (currently 430, 1 skipped)
+- All tests must pass (currently 431, 1 skipped)
 - No `git commit --no-verify` to bypass pre-commit hooks
 
 ## Python Interpreter
@@ -31,9 +31,14 @@ py -3.13 -m pylint scripts/*.py audit.py `
 py -3.13 scripts/scan_repo_encoding.py
 ```
 
-Pass criteria: 430 tests green, pylint no new errors, encoding clean.
+Pass criteria: 431 tests green, pylint no new errors, encoding clean.
 
 ## Recent Decisions
+
+**2026-05-29** - Stop hook skipped-project guard:
+- Fixed `hooks/stop_handoff_universal.py` so `main()` exits cleanly when `detect_project()` returns `None` for system/blacklisted paths, instead of building `.claude\projects\None` paths.
+- Added regression coverage in `tests/test_hooks_encoding_gate.py`.
+- Validation: focused hook tests `10 passed`; full pytest `431 passed, 1 skipped`; encoding gate clean; `py_compile` clean for the touched hook/test files.
 
 **2026-05-29** - Git-clone-only install docs:
 - README already had the top-level warning that the project is git-clone-only and not published to npm, but `cli/README.md` still recommended `npm install -g claude-memory-cli` / `npm install claude-memory-cli`.

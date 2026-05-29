@@ -459,6 +459,9 @@ def main():
     """Main entry point."""
     # Detect current project
     project_path = detect_project()
+    if project_path is None:
+        sys.exit(0)
+
     paths = get_memory_paths(project_path)
 
     # Check if memory directory exists

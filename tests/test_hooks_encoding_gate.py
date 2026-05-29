@@ -120,6 +120,23 @@ def test_update_handoff_rejects_cp1251_mojibake(
     assert not handoff.exists()
 
 
+def test_stop_hook_main_exits_when_project_detection_is_skipped(
+    stop_hook: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """System/blacklisted paths must skip before building project memory paths."""
+    monkeypatch.setattr(stop_hook, "detect_project", lambda: None)
+
+    def fail_get_memory_paths(_project_path: object) -> None:
+        raise AssertionError("get_memory_paths must not run for a skipped project")
+
+    monkeypatch.setattr(stop_hook, "get_memory_paths", fail_get_memory_paths)
+
+    with pytest.raises(SystemExit) as exc_info:
+        stop_hook.main()
+
+    assert exc_info.value.code == 0
+
+
 # --- git-activity-detector hook: update_memory --------------------------------
 
 
