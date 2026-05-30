@@ -5,7 +5,7 @@ MCP Server для Claude 4-Layer Memory System
 
 Предоставляет доступ к памяти через Model Context Protocol:
 - FTS5 keyword search
-- Semantic search
+- Hybrid search (FTS5 + semantic + BM25, RRF + cross-encoder rerank)
 - Memory statistics
 - Cost tracking
 """
@@ -26,15 +26,28 @@ logging.basicConfig(
 
 # Импорт наших модулей
 sys.path.insert(0, str(Path(__file__).parent))
-from l4_fts5_search import L4FTS5Search  # noqa: E402
+from l4_fts5_search import L4FTS5Search, hybrid_search  # noqa: E402
 from cost_tracker import CostTracker  # noqa: E402
 
 # Инициализация MCP сервера
 mcp = FastMCP("claude-4layer-memory")
 
-# Инициализация компонентов
-fts5_search = L4FTS5Search()
-cost_tracker = CostTracker()
+# Инициализация компонентов.
+# Конструирование обёрнуто в try/except, чтобы импорт модуля и регистрация
+# MCP-инструментов не падали, если БД временно недоступна/залочена в момент
+# старта сервера. Если компонент создать не удалось, соответствующие
+# инструменты вернут аккуратную ошибку вместо падения всего сервера.
+try:
+    fts5_search = L4FTS5Search()
+except Exception as e:
+    logging.error("Failed to initialize FTS5 search: %s", e)
+    fts5_search = None
+
+try:
+    cost_tracker = CostTracker()
+except Exception as e:
+    logging.error("Failed to initialize cost tracker: %s", e)
+    cost_tracker = None
 
 
 @mcp.tool()
@@ -49,16 +62,18 @@ def search_memory(
     Args:
         query: Поисковый запрос.
         limit: Максимум результатов (default: 10).
-        debug: Если True, ответ содержит дополнительный блок ``meta`` со
+        debug: Если True, ответ содержит дополнительный блок `meta` со
             structured explanation (query tokens, candidate count,
             engine identification). Это first-class explainability — не
             текстовое логирование.
 
     Returns:
-        ``{"success": True, "query": str, "count": int, "results": [...]}``.
-        При ``debug=True`` добавляется ``"meta": {...}`` с полями
-        ``engine``, ``query_tokens``, ``total_candidates``, ``limit``.
+        `{"success": True, "query": str, "count": int, "results": [...]}`.
+        При `debug=True` добавляется `"meta": {...}` с полями
+        `engine`, `query_tokens`, `total_candidates`, `limit`.
     """
+    if fts5_search is None:
+        return {"success": False, "error": "FTS5 search is unavailable"}
     try:
         results = fts5_search.search(query, limit)
 
@@ -96,6 +111,69 @@ def search_memory(
 
 
 @mcp.tool()
+def hybrid_search_memory(
+    query: str,
+    limit: int = 10,
+    rerank: bool = True,
+) -> dict[str, Any]:
+    """
+    Гибридный поиск по памяти: FTS5 + semantic (ChromaDB) + BM25, объединённые
+    через Reciprocal Rank Fusion, с опциональным cross-encoder реранкингом.
+
+    В отличие от ``search_memory`` (только FTS5), использует все движки и
+    обычно даёт более релевантную выдачу.
+
+    Args:
+        query: Поисковый запрос.
+        limit: Максимум результатов (default: 10).
+        rerank: Применять ли cross-encoder реранкинг (default: True).
+
+    Returns:
+        `{"success": True, "query": str, "count": int, "results": [...]}`, где
+        каждый результат содержит `key`, `score`, `normalized_score`,
+        `sources` и короткий `snippet`.
+    """
+    if fts5_search is None:
+        return {"success": False, "error": "Hybrid search is unavailable"}
+    try:
+        merged = hybrid_search(fts5_search, query, enable_rerank=rerank)
+
+        results = []
+        for entry in merged[:limit]:
+            sources = sorted(entry.sources.keys())
+            snippet = ""
+            for source_name in sources:
+                for hit in entry.sources[source_name]:
+                    snippet = (hit.get("snippet") or hit.get("text") or "").strip()
+                    if snippet:
+                        break
+                if snippet:
+                    break
+            results.append(
+                {
+                    "key": entry.key,
+                    "score": entry.score,
+                    "normalized_score": entry.normalized_score,
+                    "sources": sources,
+                    "snippet": snippet[:200],
+                }
+            )
+
+        return {
+            "success": True,
+            "query": query,
+            "count": len(results),
+            "results": results,
+        }
+    except Exception as e:
+        logging.error("Hybrid search failed: %s", e)
+        return {
+            "success": False,
+            "error": str(e),
+        }
+
+
+@mcp.tool()
 def get_memory_stats() -> dict[str, Any]:
     """
     Получить статистику FTS5 индекса
@@ -103,6 +181,8 @@ def get_memory_stats() -> dict[str, Any]:
     Returns:
         Статистика: количество документов, размер БД, источники
     """
+    if fts5_search is None:
+        return {"success": False, "error": "FTS5 search is unavailable"}
     try:
         stats = fts5_search.stats()
         return {
@@ -128,6 +208,8 @@ def get_cost_stats(days: int = 7) -> dict[str, Any]:
     Returns:
         Статистика: операции, токены, стоимость
     """
+    if cost_tracker is None:
+        return {"success": False, "error": "Cost tracker is unavailable"}
     try:
         stats = cost_tracker.get_stats(days)
         return {
@@ -150,6 +232,8 @@ def reindex_memory() -> dict[str, Any]:
     Returns:
         Результат переиндексации
     """
+    if fts5_search is None:
+        return {"success": False, "error": "FTS5 search is unavailable"}
     try:
         indexed_count = fts5_search.reindex_all()
         return {
