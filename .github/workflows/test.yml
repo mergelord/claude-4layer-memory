@@ -8,7 +8,7 @@ on:
 
 jobs:
   test:
-    runs-on: ${{ matrix.os }}
+    runs-on: $ matrix.os 
     strategy:
       fail-fast: false
       matrix:
@@ -18,10 +18,10 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Set up Python ${{ matrix.python-version }}
+    - name: Set up Python $ matrix.python-version 
       uses: actions/setup-python@v5
       with:
-        python-version: ${{ matrix.python-version }}
+        python-version: $ matrix.python-version 
 
     - name: Install dependencies
       run: |
@@ -29,9 +29,14 @@ jobs:
         pip install -r requirements.txt
         pip install -r requirements-dev.txt
 
+    # Measure coverage with an enforced, ratchetable floor.
+    # Start at 0 (never fails) and raise --cov-fail-under as coverage improves.
     - name: Run pytest
       run: |
-        pytest tests/ -v --tb=short
+        pytest tests/ -v --tb=short \
+          --cov=. \
+          --cov-report=term-missing \
+          --cov-fail-under=0
 
     - name: Run health check
       run: |
