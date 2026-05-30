@@ -35,6 +35,14 @@ Pass criteria: 431 tests green, pylint no new errors, encoding clean.
 
 ## Recent Decisions
 
+**2026-05-30** — Working agreement + GitHub workflow-write limitation:
+- AGENT COMMUNICATION RULE (per user request): before creating or changing any config that requires special access/permissions or new connections (e.g. CI/workflow files, tokens, integrations), explain UP FRONT *why* it is needed and *what* access/setup the user must provide — do NOT surface this only after hitting an error mid-task.
+- GitHub workflow-file writes are BLOCKED via the hosted Notion GitHub MCP connector (api.githubcopilot.com): writing `.github/workflows/*.yml` returns `403 Resource not accessible by integration`, while normal file writes (code/docs/CODEX_CONTEXT.md) work fine. Root cause: the hosted connector authenticates via its own OAuth app (fixed scopes, no workflow-write) and IGNORES any user PAT — so adding `repo`+`workflow` to a classic token does NOT help, and registering a custom OAuth app does NOT help either.
+- Running CI is unaffected: pushing code / opening PRs still auto-triggers existing workflows (no special scope needed). Only EDITING workflow definitions is blocked.
+- Workarounds: (1) user commits `.github/workflows/*` manually (agent supplies exact YAML), or (2) run a self-hosted token-based GitHub MCP server (`GITHUB_PERSONAL_ACCESS_TOKEN` with repo+workflow) and connect THAT instead of the hosted connector.
+- Note: an extra (3rd) "GitHub" connector was created while trying the PAT route; it did not help and can be removed in Notion integration settings.
+- The intended (still un-applied) `test.yml` change is a ratchetable coverage floor: replace the `Run pytest` step `pytest tests/ -v --tb=short` with `pytest tests/ -v --tb=short --cov=. --cov-report=term-missing --cov-fail-under=0` (raise the floor as coverage improves). It is optional — PR/CI/merge all work without it.
+
 **2026-05-30** — Code review hardening branch (`fix/code-review-hardening`):
 - Created branch `fix/code-review-hardening` off `main` (`417e9f1`); 7 commits, **no PR opened yet** (PR deferred per user — record context only for now).
 - In-process hybrid semantic search: `scripts/l4_fts5_search.py` no longer shells out to `l4_semantic_global.py search-all` on every query (which reloaded sentence-transformers + ChromaDB each time and risked a 30s timeout). Now reuses a single cached `GlobalSemanticMemory` via `_get_semantic_memory()` (lru-cached) and normalises results to the documented `{key,text,distance,metadata,source}` contract (drops `id`/`_chunks`). Added an importable `hybrid_search()` so the MCP server can consume the fused ranking directly (previously only the CLI printed it).
