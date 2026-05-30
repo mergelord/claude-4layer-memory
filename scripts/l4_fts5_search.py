@@ -16,12 +16,10 @@ L4 FTS5 Search - Fast keyword search for memory system
     python l4_fts5_search.py hybrid --parallel "query"  # Параллельный поиск (2-3x faster)
 """
 
-import json
 import logging
 import os
 import re
 import sqlite3
-import subprocess
 import sys
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -520,45 +518,70 @@ def cmd_stats(fts: L4FTS5Search) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Helper: fetch semantic results via subprocess
+# Helper: fetch semantic results in-process
 # ---------------------------------------------------------------------------
 
 
-def _fetch_semantic_results(query: str, timeout: int = 30) -> list[dict]:
-    """Запускает семантический поиск и возвращает результаты в JSON."""
-    semantic_script = Path(__file__).parent / "l4_semantic_global.py"
-    if not semantic_script.exists():
+@lru_cache(maxsize=1)
+def _get_semantic_memory():
+    """Lazily construct (and cache) the in-process semantic memory engine.
+
+    Importing :mod:`l4_semantic_global` pulls in ChromaDB and, on first
+    search, sentence-transformers — heavy dependencies that must not be loaded
+    at import time. Constructing ``GlobalSemanticMemory`` once and caching it
+    here means the embedding model is loaded a single time per process and
+    reused across every hybrid query, instead of paying a full cold start
+    (model + ChromaDB) on every search the way the old per-query subprocess
+    shell-out did. Returns ``None`` (cached) if the optional module/engine is
+    unavailable, so callers degrade to FTS5 + BM25 only.
+    """
+    try:
+        # pylint: disable-next=import-outside-toplevel,import-error
+        from l4_semantic_global import GlobalSemanticMemory
+    except ImportError as exc:
+        logging.warning("Semantic memory module unavailable: %s", exc)
+        return None
+
+    try:
+        return GlobalSemanticMemory()
+    except Exception as exc:
+        logging.warning("Failed to initialize semantic memory: %s", exc)
+        return None
+
+
+def _fetch_semantic_results(query: str) -> list[dict]:
+    """Запускает семантический поиск in-process и возвращает нормализованные dict'ы.
+
+    Сохраняет тот же document-level JSON-контракт, что и прежняя subprocess-
+    интеграция — каждый результат нормализуется до
+    ``{key, text, distance, metadata, source}`` — но переиспользует один
+    долгоживущий :class:`GlobalSemanticMemory` (и его загруженную модель
+    эмбеддингов) вместо запуска ``python l4_semantic_global.py`` на каждый
+    запрос. Любой сбой деградирует до пустого списка, чтобы гибридный
+    поиск продолжал работать на остальных движках.
+    """
+    memory = _get_semantic_memory()
+    if memory is None:
         return []
 
     try:
-        result = subprocess.run(
-            [sys.executable, str(semantic_script), "search-all", query, "--json"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=timeout,
-            check=False,
+        raw_results = memory.search_all(query)
+    except Exception as exc:
+        logging.warning("Semantic search failed: %s", exc)
+        return []
+
+    normalized: list[dict] = []
+    for hit in raw_results:
+        normalized.append(
+            {
+                "key": hit.get("key", ""),
+                "text": hit.get("text", ""),
+                "distance": hit.get("distance", 999),
+                "metadata": hit.get("metadata", {}),
+                "source": hit.get("source", "semantic"),
+            }
         )
-    except (subprocess.TimeoutExpired, OSError) as exc:
-        logging.warning("Semantic search subprocess failed: %s", exc)
-        return []
-
-    if result.returncode != 0:
-        logging.warning(
-            "Semantic search exited %s: %s",
-            result.returncode,
-            result.stderr.strip(),
-        )
-        return []
-
-    try:
-        payload = json.loads(result.stdout)
-    except json.JSONDecodeError as exc:
-        logging.warning("Semantic JSON parse failed: %s", exc)
-        return []
-
-    return payload.get("results", []) if isinstance(payload, dict) else []
+    return normalized
 
 
 # ---------------------------------------------------------------------------
@@ -887,6 +910,84 @@ def cmd_hybrid(fts: L4FTS5Search, query: str, enable_rerank: bool = True) -> Non
         merged = reranker(query, merged[:20])
 
     _print_merged_results(merged)
+
+
+def hybrid_search(
+    fts: L4FTS5Search, query: str, *, enable_rerank: bool = True
+) -> list:
+    """Programmatic hybrid search: FTS5 + semantic + BM25 via RRF.
+
+    This is the importable counterpart to :func:`cmd_hybrid` (which only
+    prints). It returns the merged, normalised ``RankedResult`` list — with
+    optional cross-encoder reranking applied — so in-process callers such as
+    the MCP server (``hybrid_search_memory``) can consume the fused ranking
+    directly instead of scraping stdout. Returns an empty list when no engine
+    produced a hit.
+    """
+    fts_results = fts.search(query, limit=20)
+    semantic_results = _fetch_semantic_results(query)
+
+    # BM25 (optional module). Its failure must never sink hybrid search.
+    bm25_results: list[dict] = []
+    if fetch_bm25_results is not None:
+        try:
+            bm25_results = fetch_bm25_results(query)  # type: ignore
+        except Exception as exc:
+            logging.warning("BM25 search failed: %s", exc)
+
+    fts_stream = [
+        {
+            "key": res.key,
+            "display_path": res.path,
+            "snippet": res.snippet,
+            "rank": res.rank,
+            "source_type": "fts",
+        }
+        for res in fts_results
+    ]
+
+    semantic_stream = [
+        {
+            **hit,
+            "key": normalize_existing_key(hit.get("key", "")),
+            "source_type": "semantic",
+        }
+        for hit in semantic_results
+    ]
+
+    bm25_stream = [
+        {
+            "key": normalize_existing_key(item["key"]),
+            "snippet": item["snippet"],
+            "rank": item.get("rank", 0),
+            "bm25_score": item.get("bm25_score"),
+            "source_type": "bm25",
+        }
+        for item in bm25_results
+    ]
+
+    _validate_stream_source_type(fts_stream, "fts", "FTS")
+    _validate_stream_source_type(semantic_stream, "semantic", "Semantic")
+    _validate_stream_source_type(bm25_stream, "bm25", "BM25")
+
+    fts_stream = collapse_to_best_per_doc(fts_stream)
+    semantic_stream = collapse_to_best_per_doc(semantic_stream)
+    bm25_stream = collapse_to_best_per_doc(bm25_stream)
+
+    if not fts_stream and not semantic_stream and not bm25_stream:
+        return []
+
+    merged = normalize_scores(
+        rrf_merge(
+            ("fts", fts_stream), ("semantic", semantic_stream), ("bm25", bm25_stream)
+        )
+    )
+
+    reranker = _get_l4_rerank() if enable_rerank and merged else None
+    if reranker is not None:
+        merged = reranker(query, merged[:20])
+
+    return merged
 
 
 def main() -> None:
