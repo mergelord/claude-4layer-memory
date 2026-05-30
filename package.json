@@ -1,15 +1,15 @@
 {
-  "private": true,
   "name": "claude-memory-cli",
   "version": "1.5.1",
   "description": "CLI tool for Claude 4-Layer Memory System - intelligent memory management with semantic search",
   "main": "cli/index.js",
+  "private": true,
   "bin": {
     "claude-memory-cli": "./cli/index.js",
     "cm": "./cli/index.js"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Tests are Python-based. Run: python -m pytest tests/\" && exit 0"
   },
   "keywords": [
     "claude",

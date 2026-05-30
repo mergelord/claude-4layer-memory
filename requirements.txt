@@ -1,5 +1,12 @@
-chromadb>=0.4.0
-sentence-transformers>=2.2.0
-mcp[cli]>=1.2.0
-pyyaml>=6.0
-types-PyYAML>=6.0
+# Runtime dependencies.
+#
+# Pinned with upper bounds to prevent silent drift onto an incompatible
+# upstream release. The previous unbounded ">=" specifiers allowed e.g. a new
+# ChromaDB or sentence-transformers major to be installed automatically and
+# break indexing/search. Bump these deliberately and re-test when upgrading;
+# consider a lock file (pip-tools / uv) for fully reproducible installs.
+chromadb>=0.4.0,<2.0.0
+sentence-transformers>=2.2.0,<4.0.0
+mcp[cli]>=1.2.0,<2.0.0
+pyyaml>=6.0,<7.0
+types-PyYAML>=6.0,<7.0
