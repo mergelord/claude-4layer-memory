@@ -35,6 +35,20 @@ Pass criteria: 431 tests green, pylint no new errors, encoding clean.
 
 ## Recent Decisions
 
+**2026-05-30** — Code review hardening branch (`fix/code-review-hardening`):
+- Created branch `fix/code-review-hardening` off `main` (`417e9f1`); 7 commits, **no PR opened yet** (PR deferred per user — record context only for now).
+- In-process hybrid semantic search: `scripts/l4_fts5_search.py` no longer shells out to `l4_semantic_global.py search-all` on every query (which reloaded sentence-transformers + ChromaDB each time and risked a 30s timeout). Now reuses a single cached `GlobalSemanticMemory` via `_get_semantic_memory()` (lru-cached) and normalises results to the documented `{key,text,distance,metadata,source}` contract (drops `id`/`_chunks`). Added an importable `hybrid_search()` so the MCP server can consume the fused ranking directly (previously only the CLI printed it).
+- MCP server hardening: `mcp_server.py` module-level component init is guarded so import never crashes when the DB is locked/unavailable; added a `hybrid_search_memory` tool exposing the full FTS5+semantic+BM25+RRF+rerank pipeline (previously only raw FTS5 was exposed).
+- Dependencies: pinned upper bounds in `requirements*.txt` to prevent silent dependency drift.
+- `package.json`: `npm test` no longer fails — it now points to the Python test suite.
+- `install.sh`: copies ALL `scripts/*.py` (hybrid loads `l4_semantic_global` next to `l4_fts5_search`); fixed the stale "Python 3.7+" prompt to 3.10+.
+- `.github/workflows/test.yml`: coverage measured with an enforced (ratchetable) floor.
+- README: replaced static/inaccurate shields.io badges with live Actions workflow badges (`lint.yml`, `test.yml`); dropped the unverified "(10.0/10)" and "MyPy strict mode" claims that CI does not enforce.
+- Tests: replaced the subprocess-based hybrid semantic test with in-process tests (monkeypatch `_get_semantic_memory`: `None` and raising engines degrade to `[]`, real hits normalise to the documented contract); added `hybrid_search()` return-contract tests (RETURNS merged ranking, `[]` when no engine hits) and an MCP `hybrid_search_memory` wrapper smoke + failure test.
+- Branch commits (newest→oldest): `2c98f28`, `3485fb9`, `2b266bf`, `d0c776d`, `a3fb41`, `e7225f5`, `d3980689`.
+- NEXT STEPS: (1) re-run full gates on the branch before opening the PR — pytest, pylint 10.00, ruff, mypy, bandit, encoding scan (see Test Protocol + CLAUDE.md "Full PR Validation"); (2) open PR `fix/code-review-hardening` → `main`; (3) after merge, the last open audit item is AUDIT #11 (repo junk / packaging cleanup).
+- This handoff entry is committed to `main` only — intentionally kept out of the feature branch so it does not pollute the PR review diff.
+
 **2026-05-29** - Stop hook skipped-project guard:
 - Fixed `hooks/stop_handoff_universal.py` so `main()` exits cleanly when `detect_project()` returns `None` for system/blacklisted paths, instead of building `.claude\projects\None` paths.
 - Added regression coverage in `tests/test_hooks_encoding_gate.py`.
