@@ -2,7 +2,7 @@
 
 **Version 1.5.1**
 
-**Enterprise-grade memory management system for Claude Code with hybrid search, automatic skill discovery, and comprehensive quality assurance.**
+**Memory management system for Claude Code with hybrid search, automatic skill discovery, and comprehensive quality assurance.**
 
 > ⚠️ **Installation: git-clone only.** This project is **not published to npm**. Install it from a git clone as shown in [Quick Start](#quick-start) — the `cm` CLI runs from the cloned repository. Installing `claude-memory-cli` / `cm` from the npm registry is **not supported**: the Python backend is intentionally excluded from any npm package, so a registry install would be non-functional.
 
@@ -10,8 +10,8 @@
 [![Version](https://img.shields.io/badge/version-1.5.1-blue.svg)](https://github.com/mergelord/claude-4layer-memory/releases)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)](https://github.com/mergelord/claude-4layer-memory)
-[![CI/CD](https://img.shields.io/badge/CI%2FCD-passing-brightgreen.svg)](https://github.com/mergelord/claude-4layer-memory/actions)
-[![Code Quality](https://img.shields.io/badge/code%20quality-10.0%2F10-brightgreen.svg)](https://github.com/mergelord/claude-4layer-memory)
+[![Lint](https://github.com/mergelord/claude-4layer-memory/actions/workflows/lint.yml/badge.svg)](https://github.com/mergelord/claude-4layer-memory/actions/workflows/lint.yml)
+[![Tests](https://github.com/mergelord/claude-4layer-memory/actions/workflows/test.yml/badge.svg)](https://github.com/mergelord/claude-4layer-memory/actions/workflows/test.yml)
 
 ---
 
@@ -60,9 +60,9 @@
 - **MCP Server** - Model Context Protocol integration for IDE extensions
 - **CLI Tools** - Comprehensive command-line interface for all operations
 - **Cost Tracking** - Built-in token usage and cost monitoring
-- **Code Quality** - Automated CI/CD with Pylint (10.0/10), MyPy, Ruff, Bandit, and Radon
+- **Code Quality** - Automated CI/CD with Pylint, MyPy, Ruff, Bandit, and Radon
   - Comprehensive automated test suite across Python 3.10-3.13 on Windows, Linux, and macOS (12 CI jobs)
-  - Type safety with MyPy strict mode
+  - Static type checking with MyPy
   - Security scanning with Bandit
   - Complexity analysis with Radon
   - [See Code Quality Guide](docs/CODE_QUALITY.md)
@@ -168,23 +168,23 @@ See [INSTALL.md](docs/INSTALL.md) for detailed instructions.
 ### 4-Layer Memory System
 
 ```
-┌────────────────────────────────────────────────────────┐
+┌───────────────────────────────────────────┐
 │ Layer 4: SEMANTIC (Vector Search)                       │
 │ ├─ ChromaDB + sentence-transformers                     │
 │ └─ Multilingual semantic search                         │
-├───────────────────────────────────────────────────────┤
+├───────────────────────────────────────────┤
 │ Layer 3: COLD (Permanent Archive)                       │
 │ ├─ archive/ directory                                   │
 │ └─ Long-term storage                                    │
-├───────────────────────────────────────────────────────┤
+├───────────────────────────────────────────┤
 │ Layer 2: WARM (14 days)                                 │
 │ ├─ decisions.md                                         │
 │ └─ Important decisions, architectural choices           │
-├───────────────────────────────────────────────────────┤
+├───────────────────────────────────────────┤
 │ Layer 1: HOT (24 hours)                                 │
 │ ├─ handoff.md                                           │
 │ └─ Recent events, quick context recovery                │
-└───────────────────────────────────────────────────────┘
+└───────────────────────────────────────────┘
 ```
 
 ### Dual-Level System
