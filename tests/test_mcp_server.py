@@ -103,3 +103,55 @@ def test_search_memory_meta_total_candidates_zero_for_empty_results():
 
     assert result["meta"]["total_candidates"] == 0
     assert result["meta"]["query_tokens"] == ["nothing"]
+
+
+class _FakeEntry:  # pylint: disable=too-few-public-methods
+    """Minimal stand-in for a ranking.RankedResult used by hybrid_search()."""
+
+    def __init__(self, key, score, normalized_score, sources):
+        self.key = key
+        self.score = score
+        self.normalized_score = normalized_score
+        self.sources = sources
+
+
+def test_hybrid_search_memory_wraps_merged_results():
+    """hybrid_search_memory must wrap hybrid_search() entries into dicts."""
+    fake_merged = [
+        _FakeEntry(
+            key=make_join_key("global", "notes.md"),
+            score=0.123,
+            normalized_score=1.0,
+            sources={
+                # Unsorted on purpose: the wrapper must sort the source names
+                # and pick the snippet from the first non-empty source.
+                "semantic": [{"text": "semantic text"}],
+                "fts": [{"snippet": "fts snippet"}],
+            },
+        )
+    ]
+    with patch.object(mcp_server, "hybrid_search", return_value=fake_merged):
+        result = mcp_server.hybrid_search_memory("hello", limit=5)
+
+    assert result["success"] is True
+    assert result["count"] == 1
+    entry = result["results"][0]
+    assert entry["key"] == make_join_key("global", "notes.md")
+    assert entry["score"] == 0.123
+    assert entry["normalized_score"] == 1.0
+    # Source names are returned sorted alphabetically.
+    assert entry["sources"] == ["fts", "semantic"]
+    # Snippet is the first non-empty snippet/text across the sorted sources
+    # ("fts" comes before "semantic").
+    assert entry["snippet"] == "fts snippet"
+
+
+def test_hybrid_search_memory_handles_failure():
+    """hybrid_search_memory must return success=False with error on exception."""
+    with patch.object(
+        mcp_server, "hybrid_search", side_effect=RuntimeError("boom")
+    ):
+        result = mcp_server.hybrid_search_memory("hello")
+
+    assert result["success"] is False
+    assert "boom" in result["error"]
