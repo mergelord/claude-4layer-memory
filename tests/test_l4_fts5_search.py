@@ -6,7 +6,7 @@ The previous version of this file was a stale snapshot of scripts/l4_fts5_search
 with no test_* functions — pytest collected zero tests, which masked a regression
 risk in the parallel hybrid search code path. These tests exercise the actual
 target module via importlib and stub out all external collaborators (FTS engine,
-semantic subprocess, BM25 module, cross-encoder reranker) with deterministic
+semantic engine, BM25 module, cross-encoder reranker) with deterministic
 fakes, so the suite can run with no DB, no network, and no model weights.
 """
 from __future__ import annotations
@@ -14,7 +14,6 @@ from __future__ import annotations
 import importlib
 import logging
 import sqlite3
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -428,40 +427,109 @@ def test_cmd_hybrid_parity_with_cmd_hybrid_parallel(module, monkeypatch, capsys)
 
 
 # ---------------------------------------------------------------------------
-# 9. _fetch_semantic_results returns [] under three subprocess failure modes:
-#    TimeoutExpired, non-zero exit, and invalid JSON output.
+# 9. _fetch_semantic_results now runs the semantic engine in-process via
+#    _get_semantic_memory() instead of shelling out to a subprocess. It must:
+#      - return [] when the engine is unavailable (_get_semantic_memory None);
+#      - return [] when the engine's search_all() raises;
+#      - otherwise normalise each hit to the documented
+#        {key, text, distance, metadata, source} contract, dropping engine
+#        internals such as id/_chunks.
 # ---------------------------------------------------------------------------
 
 
-class _FakeCompleted:  # pylint: disable=too-few-public-methods
-    """Minimal stand-in for subprocess.CompletedProcess."""
-
-    def __init__(self, returncode, stdout="", stderr=""):
-        self.returncode = returncode
-        self.stdout = stdout
-        self.stderr = stderr
-
-
-@pytest.mark.parametrize("scenario", ["timeout", "nonzero", "bad_json"])
-def test_fetch_semantic_results_timeout_nonzero_bad_json(
-    scenario, module, monkeypatch
+def test_fetch_semantic_results_returns_empty_when_engine_unavailable(
+    module, monkeypatch
 ):
-    if scenario == "timeout":
-        def fake_run(*args, **kwargs):  # noqa: ARG001
-            raise subprocess.TimeoutExpired(cmd=["x"], timeout=kwargs.get("timeout", 30))
-    elif scenario == "nonzero":
-        def fake_run(*args, **kwargs):  # noqa: ARG001
-            return _FakeCompleted(returncode=2, stderr="oops")
-    else:  # bad_json
-        def fake_run(*args, **kwargs):  # noqa: ARG001
-            return _FakeCompleted(returncode=0, stdout="this is not json")
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
-
-    # The l4_fts5_search module references `subprocess.run` via its imported
-    # `subprocess` symbol — patching the stdlib attribute is enough because
-    # the module didn't `from subprocess import run`.
+    # _get_semantic_memory() returns None (optional module/engine missing).
+    monkeypatch.setattr(module, "_get_semantic_memory", lambda: None)
     assert module._fetch_semantic_results("alpha") == []
+
+
+def test_fetch_semantic_results_returns_empty_when_search_raises(
+    module, monkeypatch
+):
+    class _BoomMemory:  # pylint: disable=too-few-public-methods
+        def search_all(self, query):  # noqa: ARG002
+            raise RuntimeError("semantic boom")
+
+    monkeypatch.setattr(module, "_get_semantic_memory", lambda: _BoomMemory())
+    assert module._fetch_semantic_results("alpha") == []
+
+
+def test_fetch_semantic_results_normalizes_hits(module, monkeypatch):
+    class _Memory:  # pylint: disable=too-few-public-methods
+        def search_all(self, query):  # noqa: ARG002
+            return [
+                {
+                    "id": "chunk-1",
+                    "key": "[global] notes.md",
+                    "text": "alpha semantic",
+                    "distance": 0.12,
+                    "metadata": {"source": "global"},
+                    "source": "global",
+                    "_chunks": ["a", "b"],
+                }
+            ]
+
+    monkeypatch.setattr(module, "_get_semantic_memory", lambda: _Memory())
+    results = module._fetch_semantic_results("alpha")
+
+    assert results == [
+        {
+            "key": "[global] notes.md",
+            "text": "alpha semantic",
+            "distance": 0.12,
+            "metadata": {"source": "global"},
+            "source": "global",
+        }
+    ]
+    # Engine internals must not leak through normalisation.
+    assert "id" not in results[0]
+    assert "_chunks" not in results[0]
+
+
+# ---------------------------------------------------------------------------
+# 9b. hybrid_search() is the importable counterpart to cmd_hybrid(): it must
+#     RETURN the merged ranking (so in-process callers like the MCP server can
+#     consume it) rather than print it, and return [] when no engine has a
+#     hit.
+# ---------------------------------------------------------------------------
+
+
+def test_hybrid_search_returns_merged_ranking(module, monkeypatch):
+    fts_results = [
+        _make_search_result(module, "global", "notes.md", snippet="alpha fts", rank=-1.0)
+    ]
+    semantic_results = [
+        {"key": "[global] notes.md", "text": "alpha sem", "distance": 0.1, "rank": 0}
+    ]
+
+    fts_mock, _ = _patch_streams(
+        monkeypatch,
+        module,
+        fts_results=fts_results,
+        semantic_results=semantic_results,
+        bm25_results=None,  # BM25 module unavailable
+    )
+
+    merged = module.hybrid_search(fts_mock, "alpha", enable_rerank=False)
+
+    assert len(merged) == 1
+    entry = merged[0]
+    assert entry.key == make_join_key("global", "notes.md")
+    assert set(entry.sources.keys()) == {"fts", "semantic"}
+
+
+def test_hybrid_search_returns_empty_when_no_engine_has_hits(module, monkeypatch):
+    fts_mock, _ = _patch_streams(
+        monkeypatch,
+        module,
+        fts_results=[],
+        semantic_results=[],
+        bm25_results=None,
+    )
+
+    assert module.hybrid_search(fts_mock, "nothing", enable_rerank=False) == []
 
 
 # ---------------------------------------------------------------------------
