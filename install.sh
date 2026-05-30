@@ -20,7 +20,7 @@ NC='\033[0m' # No Color
 # Check Python installation
 if ! command -v python3 &> /dev/null; then
     echo -e "${RED}[ERROR]${NC} Python 3 is not installed"
-    echo "Please install Python 3.7+ first"
+    echo "Please install Python 3.10+ first"
     exit 1
 fi
 
@@ -56,11 +56,12 @@ mkdir -p "$HOME/.claude/memory/outputs"
 echo -e "${GREEN}[OK]${NC} Directories created"
 
 # Copy scripts
+# Copy every Python module under scripts/ (not just a hand-picked subset) so
+# that l4_fts5_search.py, cost_tracker.py and friends are available in the
+# hooks directory alongside l4_semantic_global.py.
 echo ""
 echo "Copying scripts..."
-cp -f scripts/l4_semantic_global.py "$HOME/.claude/hooks/"
-cp -f scripts/chunking.py "$HOME/.claude/hooks/"
-cp -f scripts/ranking.py "$HOME/.claude/hooks/"
+cp -f scripts/*.py "$HOME/.claude/hooks/"
 chmod +x "$HOME/.claude/hooks/l4_semantic_global.py"
 
 cp -f scripts/linux/*.sh "$HOME/.claude/hooks/"
