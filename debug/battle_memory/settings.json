@@ -1,0 +1,101 @@
+{
+    "env": {
+        "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "400000"
+    },
+    "model": "claude-opus-4-8",
+    "hooks": {
+        "SessionStart": [
+            {
+                "matcher": "",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "\"C:/Program Files/Python313/python.exe\" C:/Users/MYRIG/.claude/hooks/routing-protocol-injector.py"
+                    },
+                    {
+                        "type": "command",
+                        "command": "\"C:/Program Files/Python313/python.exe\" C:/Users/MYRIG/.claude/hooks/inject-verified-facts.py"
+                    },
+                    {
+                        "type": "command",
+                        "command": "\"C:/Program Files/Python313/python.exe\" C:/Users/MYRIG/.claude/hooks/crash-recovery.py"
+                    },
+                    {
+                        "type": "command",
+                        "command": "\"C:/Program Files/Python313/python.exe\" C:/Users/MYRIG/.claude/hooks/load-context-on-start.py"
+                    },
+                    {
+                        "type": "command",
+                        "command": "\"C:/Program Files/Python313/python.exe\" C:/Users/MYRIG/.claude/hooks/memory_lint.py --layer 1 --quick"
+                    },
+                    {
+                        "type": "command",
+                        "command": "\"C:/Program Files/Python313/python.exe\" C:/Users/MYRIG/.claude/hooks/routing-coordinator.py"
+                    }
+                ]
+            }
+        ],
+        "PreCompact": [
+            {
+                "matcher": "",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "\"C:/Program Files/Python313/python.exe\" C:/Users/MYRIG/.claude/hooks/precompact-flush-l4.py"
+                    }
+                ]
+            }
+        ],
+        "PreToolUse": [
+            {
+                "matcher": "",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "\"C:/Program Files/Python313/python.exe\" C:/Users/MYRIG/.claude/hooks/pre-tool-call-routing-enforcer.py"
+                    },
+                    {
+                        "type": "command",
+                        "command": "\"C:/Program Files/Python313/python.exe\" C:/Users/MYRIG/.claude/hooks/auto-remember.py"
+                    },
+                    {
+                        "type": "command",
+                        "command": "\"C:/Program Files/Python313/python.exe\" C:/Users/MYRIG/.claude/hooks/semantic_search.py"
+                    }
+                ]
+            }
+        ],
+        "Stop": [
+            {
+                "matcher": "",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "\"C:/Program Files/Python313/python.exe\" C:/Users/MYRIG/.claude/hooks/routing-compliance-reporter.py"
+                    },
+                    {
+                        "type": "command",
+                        "command": "\"C:/Program Files/Python313/python.exe\" C:/Users/MYRIG/.claude/hooks/session-usage-logger.py"
+                    },
+                    {
+                        "type": "command",
+                        "command": "\"C:/Program Files/Python313/python.exe\" C:/Users/MYRIG/.claude/hooks/graceful-shutdown-wrapper.py"
+                    }
+                ]
+            }
+        ]
+    },
+    "enabledPlugins": {
+        "skill-security-auditor@claude-code-skills": true
+    },
+    "extraKnownMarketplaces": {
+        "claude-code-skills": {
+            "source": {
+                "source": "github",
+                "repo": "alirezarezvani/claude-skills"
+            }
+        }
+    },
+    "effortLevel": "high",
+    "theme": "dark"
+}
