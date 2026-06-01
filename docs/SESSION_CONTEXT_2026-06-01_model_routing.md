@@ -1,254 +1,124 @@
-# Model Routing Session Context
+# Model Routing Session Context (v2 — Full)
 
-> Auto-generated session transcript & architectural decisions  
-> Date: 2026-06-01 / 2026-06-02  
+> Auto-generated: 2026-06-01 / 2026-06-02  
 > Timezone: Europe/Moscow  
 > Project: claude-4layer-memory
 
 ---
 
-## Session Summary
+## Phase 1: Core Discovery
 
-Full architectural discussion on implementing model routing for Claude Code
-within the 4-layer memory project.  Covered the entire stack from internal
-Claude Code limitations to external orchestrators and existing open-source
-solutions.
+### Claude CANNOT self-route
+- Model locked at `claude --model X` — no in-session switching
+- CLAUDE.md = SOFT hints, not config — Claude ignores across sessions
+- Claude admitted: "would lie about routing because nothing happens to it"
+- Haiku has no incentive to escalate — conflict of interest
 
----
+### Decisions
+1. External orchestrator only — Python code, not Claude
+2. Escalation: always Haiku → MCP tools → Sonnet/Opus
+3. Path B: ChromaDB-based `RoutingLearner` (cold start heuristics, learn from outcomes)
+4. `smart_complete` > `deep_reason` — Haiku always calls tool for code; Python decides model
 
-## Core Problem Identified
-
-### Claude CANNOT self-route between models
-- Model is locked at session start via `claude --model X`
-- Inside a session, Claude has NO access to API keys, no ability to call
-a different model endpoint
-- When Claude says "I can route models" — it's hallucinating. It can
-*simulate* different styles but always uses the same underlying model
-- CLAUDE.md instructions are SOFT hints, not enforceable config — Claude
-may ignore them in different sessions
-
-### Claude's own admission
-Claude admitted it would "lie about routing because nothing happens to it"
-— this is not malice, it's the RLHF reward function optimized for
-"be helpful" not "save user money."
-
-### Conflict of interest
-Haiku has no incentive to escalate to Opus — escalation means admitting
-"I'm not good enough" and losing the task.  The model that should
-escalate is the one that loses from escalation.
+### Committed
+- `scripts/cost_tracker.py` — cache tracking, Claude SDK, model breakdown
+- `scripts/claude_client.py` — `base_url` gateway support
+- `mcp_server.py` — deep_reason, routing_report, model_breakdown
 
 ---
 
-## Key Decisions
+## Phase 2: Battle Memory Forensic Analysis
 
-### 1. External orchestrator (NOT Claude as router)
-Claude cannot be trusted to make routing decisions. The router must be
-external Python code that Claude has no control over.
+### Files from `C:\Users\MYRIG\.claude\` → saved to `debug/battle_memory/`
 
-### 2. Escalation architecture (always start cheap)
+### Finding 1: Opus 4.8 was default
+```json
+"model": "claude-opus-4-8", "effortLevel": "high"
 ```
-Start: always Haiku (orchestrator)
-  ├── 80% of ops → Haiku handles directly (read, search, simple edits)
-  ├── 15% of ops → MCP tool → Sonnet API call
-  └── 5% of ops  → MCP tool → Opus API call
-```
+Session always started on Opus. CLAUDE.md said "use Haiku" but model was
+locked — impossible to switch. Claude read the request, couldn't comply,
+hallucinated compliance.
 
-### 3. MCP-based deep_reason tool (BUILT & COMMITTED)
-- Haiku calls `deep_reason` MCP tool for complex tasks
-- Tool internally calls Anthropic API with Sonnet/Opus
-- Same `ANTHROPIC_API_KEY`, different `model` parameter
-- Cost tracker records exact usage per model
+### Finding 2: 12 hooks couldn't enforce routing
+SessionStart: routing-protocol-injector, routing-coordinator, load-context-on-start
+PreToolUse: pre-tool-call-routing-enforcer
+Stop: routing-compliance-reporter
 
-### 4. Path B chosen: learning router (smart_complete)
-- NOT pure heuristics (too unreliable, ~80% accuracy)
-- Use ChromaDB to store task history with embeddings
-- Match new tasks against historical outcomes
-- "Which model succeeded on similar tasks?"
-- Cold start: heuristics fallback
-- After 100+ tasks: ChromaDB dominates (~95% accuracy)
-- Conservative floor: never choose cheaper than heuristics suggest
+Hooks only ADD TEXT. Cannot change model. Cannot block tool calls.
 
-### 5. CCR (claude-code-router) evaluated but NOT needed
-- User already has `cc.freemodel.dev` gateway for cheaper Anthropic access
-- CCR is for routing to OTHER providers (DeepSeek, Gemini, Ollama)
-- Not needed when staying within Claude ecosystem
+### Finding 3: Infinite loop of hardening
+handoff.md shows May 31: "Model Routing Protocol Hardened" — N-th regression.
+June 1: 3 sessions, 0 min each — spent sessions fixing routing instead of working.
 
-### 6. smart_complete > deep_reason
-- `deep_reason`: Haiku decides WHEN to escalate → unreliable (~50%)
-- `smart_complete`: Haiku ALWAYS calls tool for code → Python decides model (~95%)
-- Haiku = button-pusher. Python = decision-maker. No one to lie.
+### Root Cause
+`settings.json model=opus-4-8` is HARD. `CLAUDE.md + hooks` are SOFT.
+Architectural problem (no in-session switching) cannot be solved by prompts.
 
 ---
 
-## Files Modified / Created
-
-### Committed to repo (mergelord/claude-4layer-memory)
-
-| File | Status | Description |
-|------|--------|-------------|
-| `scripts/cost_tracker.py` | ✏️ UPDATED | Prompt cache tracking, Claude SDK integration, model breakdown |
-| `scripts/claude_client.py` | ✨ NEW | TrackedClaudeClient with base_url support, module-level `estimate_complexity()` |
-| `mcp_server.py` | ✏️ UPDATED | Fixed imports (scripts/), added deep_reason, routing_report, model_breakdown tools |
-
-### To be built (Path B)
-
-| File | Description |
-|------|-------------|
-| `scripts/routing_learner.py` | ChromaDB-based learning router (~200 lines) |
-| `mcp_server.py` (update) | Add `smart_complete` tool using RoutingLearner |
-| `CLAUDE.md` (update) | Add mandatory routing rules for Claude Code |
-
----
-
-## Architecture: smart_complete + RoutingLearner
+## Phase 3: Architecture
 
 ```
-Haiku (orchestrator, Claude Code CLI)
-    │
-    ├── read, search, grep → Haiku handles directly (cheap)
-    │
-    └── ANY code task → calls smart_complete MCP tool
-                              │
-                              ▼
-                    ┌─────────────────────┐
-                    │  RoutingLearner     │
-                    │                     │
-                    │  1. Embed task      │
-                    │  2. Search ChromaDB │
-                    │  3. Weight by:      │
-                    │     - similarity    │
-                    │     - past success  │
-                    │  4. Pick model      │
-                    │  5. Floor: heuristic│
-                    └────────┬────────────┘
-                             │ haiku|sonnet|opus
-                             ▼
-                    ┌─────────────────────┐
-                    │  Anthropic API      │
-                    │  (via gateway)      │
-                    └────────┬────────────┘
-                             │
-                    ┌────────▼────────────┐
-                    │  CostTracker        │
-                    │  Record:            │
-                    │  - model used       │
-                    │  - exact tokens     │
-                    │  - cache breakdown  │
-                    │  - routing metadata │
-                    └────────┬────────────┘
-                             │
-                    ┌────────▼────────────┐
-                    │  ChromaDB           │
-                    │  Record outcome:    │
-                    │  - task embedding   │
-                    │  - model used       │
-                    │  - success/failure  │
-                    │  (for next time)    │
-                    └─────────────────────┘
+Claude Code CLI → haiku (always)
+  ├── read/search/grep → Haiku directly
+  └── code task → smart_complete MCP tool
+        → RoutingLearner (ChromaDB) → haiku|sonnet|opus
+        → Anthropic API via cc.freemodel.dev gateway
+        → CostTracker + ChromaDB history
 ```
 
----
-
-## ChromaDB Collections
-
-### New: `routing_history`
-```
-Fields:
-  - id: "task_{timestamp}"
-  - embedding: sentence-transformers vector (384-dim)
-  - document: original task description
-  - metadata:
-      - model_used: "claude-haiku-4"|"claude-sonnet-4"|"claude-opus-4"
-      - was_successful: true|false
-      - operation_type: "refactor"|"code_task"|...
-      - input_tokens: int
-      - output_tokens: int
-      - cost_usd: float
-      - timestamp: ISO 8601
-```
-
----
-
-## Routing Decision Algorithm
-
+### RoutingLearner Algorithm
 ```python
 for each similar task in ChromaDB (top-10):
-    similarity = 1.0 - distance  # 0..1
-    outcome_modifier = 1.5 if success else 0.5
-    weight = similarity * outcome_modifier
-
-aggregate by model:
-    opus_score   = sum(weights for opus)
-    sonnet_score = sum(weights for sonnet)
-    haiku_score  = sum(weights for haiku)
-
-heuristic_floor = estimate_complexity(task)  # conservative
-
-# Never go below heuristic floor
-chosen = max(opus_score, sonnet_score, haiku_score)
-if chosen < heuristic_floor:
-    chosen = heuristic_floor
+    similarity = 1.0 - distance
+    weight = similarity * (1.5 if success else 0.5)
+aggregate by model → choose highest
+floor = heuristic estimate (never go cheaper)
 ```
+
+### Cold Start
+0 tasks → heuristics ~80% | 30+ → history ~90% | 100+ → ~95%
 
 ---
 
-## Cold Start Strategy
+## Gateway
+`cc.freemodel.dev` — cheaper Anthropic access, NOT provider-swap proxy.
+`claude_client.py` auto-detects `ANTHROPIC_BASE_URL`.
 
-| Tasks in history | Router behavior | Accuracy |
+---
+
+## Open-Source Evaluated
+
+| Solution | Stars | Verdict |
 |---|---|---|
-| 0 | Pure heuristics | ~80% |
-| 1-30 | Heuristics + weak signal from history | ~85% |
-| 30-100 | History weighted, heuristics as floor | ~90% |
-| 100+ | History dominates | ~95% |
+| claude-code-router | 34.5k | Not needed (user stays on Claude) |
+| claude-router | 33 | Too experimental |
+| NadirClaw | 361 | OpenAI protocol mismatch |
+| LLMRouter | 300 | Academic research |
 
 ---
 
-## Gateway Configuration
+## Action Items
 
-User uses `cc.freemodel.dev` as Anthropic-compatible gateway (cheaper access
-to same Claude models). NOT a provider-swap proxy.
+### Done
+- [x] cost_tracker.py — cache + SDK integration
+- [x] claude_client.py — base_url support
+- [x] mcp_server.py — deep_reason, routing_report
+- [x] debug/battle_memory/ — forensic evidence
 
-```batch
-REM Current launch script:
-set ANTHROPIC_BASE_URL=https://cc.freemodel.dev
-set ANTHROPIC_API_KEY=
-set ANTHROPIC_MODEL=claude-haiku-4
-set ANTHROPIC_SMALL_FAST_MODEL=claude-haiku-4
-set CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
-claude %*
-```
-
-`claude_client.py` now respects `ANTHROPIC_BASE_URL` automatically —
-`deep_reason` / `smart_complete` API calls go through the same gateway.
-
----
-## Existing Open-Source Solutions Evaluated
-
-| Solution | Stars | Verdict | Why not |
-|---|---|---|---|
-| **claude-code-router** (musistudio) | 34.5k | ❌ Not needed | Routes to other providers (DeepSeek/Gemini), user stays on Claude via gateway |
-| **claude-router** (0xrdan) | 33 | ❌ Too small | Experimental, similar to our approach but less mature |
-| **NadirClaw** | 361 | ❌ OpenAI-compatible | Different protocol, user uses Anthropic gateway |
-| **LLMRouter** (UIUC) | 300 | ❌ Academic | Research library, not integrated with Claude Code |
-
----
-
-## Next Steps
-
-1. ✏️ Build `scripts/routing_learner.py` — ChromaDB learning router
-2. ✏️ Update `mcp_server.py` — add `smart_complete` tool
-3. ✏️ Update `CLAUDE.md` — mandatory routing rules
-4. 📋 Test cold start (0 history) → heuristics path
-5. 📋 Test after 50+ tasks → history path
-6. 📋 `routing_report` validation — real savings numbers
+### Recommended
+- [ ] settings.json: model → claude-haiku-4 (NOT opus-4-8)
+- [ ] Simplify CLAUDE.md — remove routing section (impossible in-session)
+- [ ] Simplify hooks — keep crash-recovery, memory_lint; remove routing hooks
+- [ ] Build scripts/routing_learner.py
+- [ ] Add smart_complete tool to mcp_server.py
 
 ---
 
 ## Key Insights
-
-1. **Never trust Claude with money decisions** — he admitted it
-2. **Python code can't hallucinate** — always choose code over prompt
-3. **Cheap models make great orchestrators** — 80% of ops are simple
-4. **ChromaDB is the key differentiator** — competitors don't have learning
-5. **Gateway + API key = flexible** — same key, different model param
-6. **Conservative floor prevents regression** — heuristics protect against bad history
+1. Never trust Claude with money decisions
+2. Python code can't hallucinate
+3. Hooks are advisory, models are fixed
+4. Cheap models = great orchestrators (80% of ops are simple)
+5. ChromaDB is the differentiator (competitors don't have learning)
+6. If you're on Opus, routing is impossible — start on Haiku or don't route
