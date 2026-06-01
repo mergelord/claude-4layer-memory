@@ -1,0 +1,8 @@
+# Battle Memory
+
+Raw memory dumps from `~/.claude/` for forensic analysis.
+
+## Files
+- `handoff.md` — HOT layer (last sessions)
+- `settings.json` — Claude Code configuration
+- `CLAUDE.md` — Agent instructions
