@@ -283,7 +283,7 @@ class TrackedClaudeClient:
     ) -> Any:
         if force_model:
             chosen_model = force_model
-            routing_info = {"method": "forced", "model": chosen_model}
+            routing_info: dict[str, Any] = {"method": "forced", "model": chosen_model}
         else:
             chosen_model = estimate_complexity(
                 prompt, context_len=context_tokens, operation_type=operation_type,
