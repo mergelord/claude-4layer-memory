@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """Tests for l4_bm25_search module (BM25 retrieval layer)."""
 
+import sqlite3
 import sys
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -40,11 +41,15 @@ def mock_connection():
 
 
 # ---------------------------------------------------------------------------
-# _sanitize_query tests (pure function)
+# _sanitize_query tests (now delegates to sanitize_fts5_query)
+#
+# sanitize_fts5_query extracts \w+ tokens and wraps each in double quotes,
+# e.g. "memory system" → '"memory" "system"'.  This neutralises ALL FTS5
+# syntax (*, :, ^, -, AND, OR, NOT, NEAR, quotes, parens).
 # ---------------------------------------------------------------------------
 
 class TestSanitizeQuery:
-    """Tests for _sanitize_query function."""
+    """Tests for _sanitize_query (delegates to l4_fts5_search.sanitize_fts5_query)."""
 
     def test_empty_query_returns_empty_string(self):
         assert _sanitize_query("") == ""
@@ -52,55 +57,81 @@ class TestSanitizeQuery:
     def test_whitespace_query_returns_empty_string(self):
         assert _sanitize_query("   ") == ""
 
-    def test_normal_query_passes_through(self):
-        assert _sanitize_query("memory system") == "memory system"
+    def test_normal_query_quotes_tokens(self):
+        """Tokens are individually double-quoted to prevent FTS5 syntax."""
+        assert _sanitize_query("memory system") == '"memory" "system"'
 
     def test_removes_fts_operators(self):
+        """AND/OR are no longer operators — just regular tokens, quoted."""
         sanitized = _sanitize_query("test AND query OR something")
-        assert "AND" not in sanitized
-        assert "OR" not in sanitized
-        assert "test" in sanitized
-        assert "query" in sanitized
+        assert sanitized == '"test" "AND" "query" "OR" "something"'
 
     def test_removes_not_operator(self):
-        sanitized = _sanitize_query("NOT memory")
-        assert "NOT" not in sanitized
-        assert "memory" in sanitized
+        """NOT becomes a quoted literal token, not an operator."""
+        assert _sanitize_query("NOT memory") == '"NOT" "memory"'
 
     def test_removes_near_operator(self):
-        sanitized = _sanitize_query("memory NEAR system")
-        assert "NEAR" not in sanitized
-        assert "memory" in sanitized
+        """NEAR becomes a quoted literal token, not an operator."""
+        assert _sanitize_query("memory NEAR system") == '"memory" "NEAR" "system"'
 
     def test_removes_quotes(self):
+        """Double quotes in input are non-word chars, so they are stripped."""
         sanitized = _sanitize_query('"exact phrase"')
-        assert '"' not in sanitized
-        assert "exact phrase" in sanitized
+        assert "exact" in sanitized
+        assert "phrase" in sanitized
+        # The surrounding quotes from input are stripped (non-word),
+        # and each token is re-quoted.
+        assert 'exact' in sanitized and 'phrase' in sanitized
 
     def test_removes_parentheses(self):
+        """Parens are non-word chars and stripped."""
         sanitized = _sanitize_query("(memory OR system)")
+        assert "memory" in sanitized
+        assert "system" in sanitized
         assert "(" not in sanitized
         assert ")" not in sanitized
-        assert "memory" in sanitized
 
-    def test_preserves_special_characters(self):
-        """C++, C#, email, paths should survive sanitization."""
-        assert "C++" in _sanitize_query("C++ programming")
-        assert "C#" in _sanitize_query("C# language")
-        assert "test@example.com" in _sanitize_query("test@example.com")
-        assert "path/file.py" in _sanitize_query("path/file.py")
+    def test_strips_fts5_special_chars(self):
+        """Colons, asterisks, carets, and hyphens are FTS5 syntax — stripped."""
+        assert _sanitize_query("config:port") == '"config" "port"'
+        assert _sanitize_query("warn*") == '"warn"'
+        assert _sanitize_query("^prefix") == '"prefix"'
+        assert _sanitize_query("a -b") == '"a" "b"'
+
+    def test_handles_cjk_and_cyrillic(self):
+        """\\w+ is Unicode-aware — CJK and Cyrillic tokens are preserved."""
+        assert "память" in _sanitize_query("память системы")
+        assert "記憶" in _sanitize_query("記憶システム")
 
     def test_collapses_multiple_spaces(self):
+        """Multiple spaces are collapsed because they are non-word chars."""
         sanitized = _sanitize_query("memory    system")
         assert "  " not in sanitized
-        assert sanitized == "memory system"
+        assert sanitized == '"memory" "system"'
 
     def test_operator_case_insensitive(self):
+        """Operators are just tokens now — case is irrelevant."""
         sanitized = _sanitize_query("AND OR NOT NEAR")
-        assert "AND" not in sanitized
-        assert "OR" not in sanitized
-        assert "NOT" not in sanitized
-        assert "NEAR" not in sanitized
+        assert '"AND"' in sanitized
+        assert '"OR"' in sanitized
+        assert '"NOT"' in sanitized
+        assert '"NEAR"' in sanitized
+
+    def test_only_special_chars_returns_empty(self):
+        """Query with no word characters at all → empty string."""
+        assert _sanitize_query(":-*^()") == ""
+
+    def test_fallback_produces_same_result(self):
+        """Both the imported and fallback sanitize produce the same output."""
+        result = _sanitize_query("config:port AND warn*")
+        # Tokens extracted: config, port, AND, warn
+        assert '"config"' in result
+        assert '"port"' in result
+        assert '"AND"' in result
+        assert '"warn"' in result
+        # No raw special chars leaked through
+        assert ":" not in result
+        assert "*" not in result
 
 
 # ---------------------------------------------------------------------------
@@ -119,8 +150,15 @@ class TestFetchBM25Results:
         assert result == []
 
     def test_unavailable_db_returns_empty_list(self):
+        """Unavailable DB should return [] without crashing.
+
+        The ``except`` clause in ``fetch_bm25_results`` is narrowed to
+        ``(sqlite3.Error, OSError)``; the test therefore raises
+        ``sqlite3.Error`` (rather than a bare ``Exception``) so it
+        exercises the same failure path a real missing/corrupt DB would.
+        """
         with patch("l4_bm25_search._get_fts5_connection") as mock_conn:
-            mock_conn.side_effect = Exception("DB not found")
+            mock_conn.side_effect = sqlite3.Error("DB not found")
             result = fetch_bm25_results("test query")
             assert result == []
 
