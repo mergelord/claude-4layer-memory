@@ -260,7 +260,25 @@ class L4FTS5Search:
                     for md_file, base_path, source in files_to_index
                 }
                 for future in as_completed(futures):
-                    if future.result():
+                    # Bug #3: ``_index_single_file`` already narrows its own
+                    # except to the realistic failure modes and returns False,
+                    # but ``future.result()`` can still raise here — e.g. an
+                    # unexpected error from ``chunk_text``/splitting, or a
+                    # ``CancelledError`` if the pool tears down. A single
+                    # failing file must NOT abort the whole batch (previously
+                    # it bubbled out and reindex silently returned 0 files
+                    # with no per-file diagnosis). This is a per-task
+                    # fault-isolation boundary, mirroring the per-engine
+                    # boundary in cmd_hybrid_parallel's fetch_* wrappers.
+                    try:
+                        succeeded = future.result()
+                    except Exception as e:  # noqa: BLE001
+                        logging.error(
+                            "Reindex worker failed for %s: %s",
+                            futures[future], e,
+                        )
+                        continue
+                    if succeeded:
                         indexed_count += 1
 
             logging.info("Reindexed %s files", indexed_count)

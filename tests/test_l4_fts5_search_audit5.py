@@ -79,6 +79,49 @@ def test_reindex_all_propagates_unexpected_error(module, tmp_path, monkeypatch):
         engine.reindex_all()
 
 
+def test_reindex_all_one_failing_future_does_not_abort_batch(
+    module, tmp_path, monkeypatch, caplog
+):
+    """Bug #3: a single failing worker future must not abort the whole batch.
+
+    Before the fix, an unexpected error raised by a worker (e.g. from
+    ``chunk_text`` or a pool cancellation) bubbled out of
+    ``future.result()``, silently aborting reindex and returning 0 files
+    with no per-file diagnosis. The fix makes each ``future.result()`` a
+    per-task fault-isolation boundary: the failing file is logged and
+    skipped, the rest of the batch still completes.
+    """
+    engine = module.L4FTS5Search(db_path=tmp_path / "fts.db")
+    assert engine.init_fts() is True
+
+    # Two files under the (monkeypatched) global memory root.
+    memory_root = tmp_path / "memory"
+    memory_root.mkdir()
+    good = memory_root / "good.md"
+    bad = memory_root / "bad.md"
+    good.write_text("healthy indexed content", encoding="utf-8")
+    bad.write_text("this file will raise while indexing", encoding="utf-8")
+    monkeypatch.setattr(engine, "global_memory", memory_root)
+    monkeypatch.setattr(engine, "projects_base", tmp_path / "projects")
+
+    real_index = engine._index_single_file
+
+    def flaky_index(md_file, base_path, source):
+        if md_file == bad:
+            raise RuntimeError("unexpected chunk_text failure")
+        return real_index(md_file, base_path, source)
+
+    monkeypatch.setattr(engine, "_index_single_file", flaky_index)
+
+    with caplog.at_level(logging.ERROR):
+        # Only the good file is counted; the bad one is skipped, not fatal.
+        assert engine.reindex_all() == 1
+    assert any(
+        "Reindex worker failed" in r.getMessage() and "bad.md" in r.getMessage()
+        for r in caplog.records
+    )
+
+
 # --- stats -----------------------------------------------------------------
 
 
