@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# pylint: disable=wrong-import-position, import-error
 # -*- coding: utf-8 -*-
 """
 Routing Learner — ChromaDB-based model router with outcome learning.
@@ -35,7 +36,6 @@ Usage::
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import sys
@@ -46,7 +46,10 @@ from typing import Any
 import chromadb
 from chromadb.config import Settings
 
-# ChromaDB exception compatibility (same pattern as l4_semantic_global.py)
+# ChromaDB exception compatibility (same pattern as l4_semantic_global.py):
+# older releases raise a bare ``ValueError`` for a missing collection, newer
+# ones raise ``chromadb.errors.ChromaError`` subclasses. Import when available
+# *and* a genuine exception class, otherwise fall back to a local definition.
 try:
     from chromadb.errors import ChromaError as _ChromaError
     if not (isinstance(_ChromaError, type) and issubclass(_ChromaError, BaseException)):
@@ -54,7 +57,7 @@ try:
 
     _CHROMA_LOOKUP_ERRORS = (ValueError, _ChromaError)
 except Exception:  # pragma: no cover
-    class _ChromaError(Exception):
+    class _ChromaError(Exception):  # type: ignore[no-redef]
         """Fallback for missing chromadb.errors.ChromaError."""
 
     _CHROMA_LOOKUP_ERRORS = (ValueError,)  # type: ignore[assignment]
@@ -66,7 +69,7 @@ _SCRIPTS_DIR = str(Path(__file__).resolve().parent)
 if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)
 
-from claude_client import estimate_complexity  # noqa: E402
+from claude_client import estimate_complexity  # noqa: E402  pylint: disable=wrong-import-position
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -77,6 +80,15 @@ DEFAULT_MODEL = os.getenv("L4_MODEL", "paraphrase-multilingual-MiniLM-L12-v2")
 SIMILAR_K = int(os.getenv("ROUTING_SIMILAR_K", "10"))
 OUTCOME_BONUS = float(os.getenv("ROUTING_OUTCOME_BONUS", "1.5"))
 OUTCOME_PENALTY = float(os.getenv("ROUTING_OUTCOME_PENALTY", "0.5"))
+
+# Model ordering by capability/price tier (0 = cheapest). Used as a
+# conservative floor so history can upgrade but never downgrade below the
+# heuristic recommendation from estimate_complexity.
+MODEL_TIER: dict[str, int] = {
+    "claude-haiku-4": 0,
+    "claude-sonnet-4": 1,
+    "claude-opus-4": 2,
+}
 
 
 class RoutingLearner:
@@ -181,6 +193,7 @@ class RoutingLearner:
     # Public API — prediction
     # ------------------------------------------------------------------
 
+    # pylint: disable=too-many-return-statements
     def predict_model(
         self,
         task: str,
@@ -255,13 +268,8 @@ class RoutingLearner:
         best_model = max(model_scores, key=lambda m: model_scores[m])
 
         # Conservative floor: never go cheaper than heuristics
-        _MODEL_TIER = {
-            "claude-haiku-4": 0,
-            "claude-sonnet-4": 1,
-            "claude-opus-4": 2,
-        }
-        best_tier = _MODEL_TIER.get(best_model, 0)
-        floor_tier = _MODEL_TIER.get(floor_model, 0)
+        best_tier = MODEL_TIER.get(best_model, 0)
+        floor_tier = MODEL_TIER.get(floor_model, 0)
 
         if best_tier < floor_tier:
             logger.debug(
@@ -398,12 +406,12 @@ class RoutingLearner:
 # Module-level singleton factory
 # ---------------------------------------------------------------------------
 
-_learner_instance: RoutingLearner | None = None
+_learner_instance: RoutingLearner | None = None  # pylint: disable=invalid-name
 
 
 def get_learner(**kwargs: Any) -> RoutingLearner:
     """Return a singleton RoutingLearner (created on first call)."""
-    global _learner_instance  # noqa: PLW0603
+    global _learner_instance  # pylint: disable=global-statement
     if _learner_instance is None:
         _learner_instance = RoutingLearner(**kwargs)
     return _learner_instance
