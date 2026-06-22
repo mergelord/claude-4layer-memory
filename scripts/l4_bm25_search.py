@@ -16,7 +16,6 @@ L4 BM25 Search – независимый лексический источни�
 """
 
 import logging
-import re
 import sqlite3
 import sys
 import time
@@ -30,7 +29,15 @@ if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
 # pylint: disable-next=wrong-import-position,import-error
-from ranking import make_join_key  # noqa: E402
+from ranking import make_join_key, sanitize_fts5_query  # noqa: E402
+
+# Safe FTS5 query sanitization — single source of truth, imported from
+# :mod:`ranking` (shared with ``l4_fts5_search``).  Extracts \w+ tokens and
+# double-quotes each, neutralising all FTS5 syntax (*, :, ^, -, AND, OR,
+# NOT, NEAR, quotes, parens).  No circular import: both lexical engines
+# import from ``ranking``; neither imports the other.
+# Alias kept for backward compatibility; internal callers may still use it.
+_sanitize_query = sanitize_fts5_query
 
 # Параметры snippet() функции FTS5
 SNIPPET_COLUMN = 2  # Индекс колонки content в FTS таблице
@@ -50,26 +57,6 @@ class BM25Result(TypedDict):
     bm25_score: float
     snippet: str
     source_type: str
-
-
-# ---------------------------------------------------------------------------
-# Нормализация запроса (защита от MATCH syntax injection)
-# ---------------------------------------------------------------------------
-def _sanitize_query(query: str) -> str:
-    """
-    Убирает из запроса операторы FTS5 MATCH, но сохраняет пунктуацию.
-
-    Удаляются: кавычки, скобки, ключевые слова AND, OR, NOT, NEAR.
-    Остаются: буквы, цифры, пробелы, знаки пунктуации (+, #, @, . и т.д.).
-    """
-    if not query.strip():
-        return ""
-    # Удаляем только FTS-операторы и кавычки/скобки
-    sanitized = re.sub(r'\b(AND|OR|NOT|NEAR)\b', '', query, flags=re.IGNORECASE)
-    sanitized = re.sub(r'["()]', '', sanitized)
-    # Схлопываем множественные пробелы
-    sanitized = re.sub(r'\s+', ' ', sanitized).strip()
-    return sanitized
 
 
 # ---------------------------------------------------------------------------
@@ -166,7 +153,7 @@ def fetch_bm25_results(query: str, limit: int = 20) -> List[BM25Result]:
             normalized, len(results), elapsed_ms,
         )
 
-    except Exception as exc:
+    except (sqlite3.Error, OSError) as exc:
         logging.warning(
             "BM25 search failed (query=%r, limit=%d): %s",
             normalized, limit, exc

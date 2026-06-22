@@ -6,6 +6,7 @@ without requiring the MCP runtime to be active.
 """
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 # Add scripts/ to sys.path so mcp_server can resolve l4_fts5_search / cost_tracker
@@ -103,3 +104,169 @@ def test_search_memory_meta_total_candidates_zero_for_empty_results():
 
     assert result["meta"]["total_candidates"] == 0
     assert result["meta"]["query_tokens"] == ["nothing"]
+
+
+# ---------------------------------------------------------------------------
+# smart_complete: cost & success-signal correctness (regression tests)
+#
+# Before the fix, smart_complete always priced the call as Haiku
+# (0.25/1.25 per 1M tokens) regardless of the model the router chose, and
+# hardcoded was_successful=True. These tests pin the correct behavior:
+# the recorded cost must reflect the chosen model's real price, and the
+# success flag must be derived from the response content.
+# ---------------------------------------------------------------------------
+
+
+def _fake_message(text, *, input_tokens=1000, output_tokens=500,
+                  cache_creation=0, cache_read=0):
+    """Build a lightweight stand-in for an Anthropic message response."""
+    return SimpleNamespace(
+        content=[SimpleNamespace(text=text)],
+        usage=SimpleNamespace(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cache_creation_input_tokens=cache_creation,
+            cache_read_input_tokens=cache_read,
+        ),
+    )
+
+
+def _capture_recorded_outcome():
+    """Patch predict_model + complete and capture what record_outcome receives."""
+    captured = {}
+
+    def fake_record_outcome(**kwargs):
+        captured.update(kwargs)
+        return "task_id"
+
+    return captured, fake_record_outcome
+
+
+def test_smart_complete_prices_opus_at_real_rate_not_haiku():
+    """Opus (15.0/75.0) must NOT be costed at Haiku's 0.25/1.25."""
+    captured, fake_record = _capture_recorded_outcome()
+
+    with patch.object(mcp_server.routing_learner, "predict_model",
+                      return_value="claude-opus-4"), \
+         patch.object(mcp_server.tracked_claude, "complete",
+                      return_value=_fake_message("result body")), \
+         patch.object(mcp_server.routing_learner, "record_outcome",
+                      side_effect=fake_record):
+        mcp_server.smart_complete(task="do something", context="ctx")
+
+    # Real Opus price: 1000 input * 15.0/M + 500 output * 75.0/M = 0.015 + 0.0375
+    assert captured["cost_usd"] == 0.015 + 0.0375
+    assert captured["model_used"] == "claude-opus-4"
+
+
+def test_smart_complete_prices_sonnet_at_real_rate_not_haiku():
+    """Sonnet (3.0/15.0) must NOT be costed at Haiku's 0.25/1.25."""
+    captured, fake_record = _capture_recorded_outcome()
+
+    with patch.object(mcp_server.routing_learner, "predict_model",
+                      return_value="claude-sonnet-4"), \
+         patch.object(mcp_server.tracked_claude, "complete",
+                      return_value=_fake_message("ok")), \
+         patch.object(mcp_server.routing_learner, "record_outcome",
+                      side_effect=fake_record):
+        mcp_server.smart_complete(task="t")
+
+    # 1000 * 3.0/M + 500 * 15.0/M = 0.003 + 0.0075
+    assert captured["cost_usd"] == 0.003 + 0.0075
+    assert captured["model_used"] == "claude-sonnet-4"
+
+
+def test_smart_complete_prices_haiku_at_haiku_rate():
+    """Haiku keeps its own (low) price — no regression for the cheap model."""
+    captured, fake_record = _capture_recorded_outcome()
+
+    with patch.object(mcp_server.routing_learner, "predict_model",
+                      return_value="claude-haiku-4"), \
+         patch.object(mcp_server.tracked_claude, "complete",
+                      return_value=_fake_message("ok")), \
+         patch.object(mcp_server.routing_learner, "record_outcome",
+                      side_effect=fake_record):
+        mcp_server.smart_complete(task="t")
+
+    assert captured["cost_usd"] == 0.00025 + 0.000625
+
+
+def test_smart_complete_cost_includes_cache_tiers():
+    """Cost must account for cache_creation and cache_read tokens, not just I/O."""
+    captured, fake_record = _capture_recorded_outcome()
+
+    with patch.object(mcp_server.routing_learner, "predict_model",
+                      return_value="claude-sonnet-4"), \
+         patch.object(mcp_server.tracked_claude, "complete",
+                      return_value=_fake_message(
+                          "ok", input_tokens=0, output_tokens=0,
+                          cache_creation=1_000_000, cache_read=1_000_000,
+                      )), \
+         patch.object(mcp_server.routing_learner, "record_outcome",
+                      side_effect=fake_record):
+        mcp_server.smart_complete(task="t")
+
+    # Sonnet: cache_creation 3.75/M * 1M = 3.75 ; cache_read 0.30/M * 1M = 0.30
+    assert captured["cost_usd"] == 3.75 + 0.30
+
+
+def test_smart_complete_marks_empty_response_as_failed():
+    """Empty/whitespace reply → was_successful=False (learner gets a real signal)."""
+    captured, fake_record = _capture_recorded_outcome()
+
+    with patch.object(mcp_server.routing_learner, "predict_model",
+                      return_value="claude-sonnet-4"), \
+         patch.object(mcp_server.tracked_claude, "complete",
+                      return_value=_fake_message("   \n  ")), \
+         patch.object(mcp_server.routing_learner, "record_outcome",
+                      side_effect=fake_record):
+        mcp_server.smart_complete(task="t")
+
+    assert captured["was_successful"] is False
+
+
+def test_smart_complete_marks_nonempty_response_as_successful():
+    """A real answer → was_successful=True (sanity check, was the old behavior)."""
+    captured, fake_record = _capture_recorded_outcome()
+
+    with patch.object(mcp_server.routing_learner, "predict_model",
+                      return_value="claude-sonnet-4"), \
+         patch.object(mcp_server.tracked_claude, "complete",
+                      return_value=_fake_message("def f(): pass")), \
+         patch.object(mcp_server.routing_learner, "record_outcome",
+                      side_effect=fake_record):
+        mcp_server.smart_complete(task="t")
+
+    assert captured["was_successful"] is True
+
+
+def test_smart_complete_passes_real_token_counts_to_record_outcome():
+    """record_outcome must receive the actual usage from the API, not zeros."""
+    captured, fake_record = _capture_recorded_outcome()
+
+    with patch.object(mcp_server.routing_learner, "predict_model",
+                      return_value="claude-haiku-4"), \
+         patch.object(mcp_server.tracked_claude, "complete",
+                      return_value=_fake_message(
+                          "ok", input_tokens=4321, output_tokens=1234,
+                      )), \
+         patch.object(mcp_server.routing_learner, "record_outcome",
+                      side_effect=fake_record):
+        mcp_server.smart_complete(task="t")
+
+    assert captured["tokens"] == {"input": 4321, "output": 1234}
+
+
+def test_smart_complete_still_returns_response_to_caller():
+    """The fix must not change the tool's external contract."""
+    msg = _fake_message("hello world", input_tokens=10, output_tokens=5)
+    with patch.object(mcp_server.routing_learner, "predict_model",
+                      return_value="claude-haiku-4"), \
+         patch.object(mcp_server.tracked_claude, "complete", return_value=msg), \
+         patch.object(mcp_server.routing_learner, "record_outcome"):
+        result = mcp_server.smart_complete(task="t", context="c")
+
+    assert result["success"] is True
+    assert result["result"] == "hello world"
+    assert result["usage"]["input_tokens"] == 10
+    assert result["usage"]["output_tokens"] == 5

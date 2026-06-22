@@ -116,6 +116,11 @@ _SOURCE_REPEATED_UNDERSCORE = re.compile(r"_+")
 _CHUNK_PATTERN = re.compile(r"(#\w+|[?&]chunk=)")
 _SEEN_BAD_KEYS: set[str] = set()
 
+# Word-character tokeniser for FTS5 query sanitization. ``\w`` is
+# Unicode-aware in Python 3, so Cyrillic / CJK tokens survive while all
+# FTS5 syntax (``*``, ``:``, ``^``, ``-``, quotes, parens) is stripped.
+_FTS5_TOKEN_RE = re.compile(r"\w+", re.UNICODE)
+
 
 def _normalize_source(source: str) -> str:
     """Apply ChromaDB-style normalisation to a source/scope name.
@@ -201,6 +206,34 @@ def normalize_existing_key(key: str) -> str:
     if not match:
         return key
     return make_join_key(match.group(1), match.group(2))
+
+
+def sanitize_fts5_query(query: str) -> str:
+    """Turn raw user input into a safe FTS5 MATCH expression.
+
+    FTS5 treats a number of characters as query syntax: double quotes,
+    ``*``, ``:``, ``^``, ``-``, ``(`` / ``)`` and the keywords ``AND`` /
+    ``OR`` / ``NOT`` / ``NEAR``. Because of this, raw input such as
+    ``C++``, ``the "bug"`` or ``foo:bar`` raises
+    ``sqlite3.OperationalError``.
+
+    We extract only word-character tokens from the query and wrap each in
+    double quotes, turning it into a literal phrase. Tokens are joined
+    with a space (implicit AND in FTS5). Since tokens contain only word
+    characters, every FTS5 special character and operator is neutralised.
+
+    This lives in ``ranking`` (rather than in ``l4_fts5_search``) so that
+    both ``l4_fts5_search`` and ``l4_bm25_search`` can import it from a
+    single shared module without creating a circular import (``l4_fts5_search``
+    already imports ``l4_bm25_search``).
+
+    Returns an empty string when the input holds no meaningful token; the
+    caller should then return an empty result without issuing a MATCH.
+    """
+    tokens = _FTS5_TOKEN_RE.findall(query)
+    if not tokens:
+        return ""
+    return " ".join(f'"{token}"' for token in tokens)
 
 
 def _validate_key_shape(key: str) -> None:

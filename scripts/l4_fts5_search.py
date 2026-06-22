@@ -19,7 +19,6 @@ L4 FTS5 Search - Fast keyword search for memory system
 import json
 import logging
 import os
-import re
 import sqlite3
 import subprocess
 import sys
@@ -52,6 +51,7 @@ from ranking import (  # noqa: E402
     normalize_existing_key,
     normalize_scores,
     rrf_merge,
+    sanitize_fts5_query,
 )
 
 # BM25 search (optional module)
@@ -76,34 +76,11 @@ logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 # ---------------------------------------------------------------------------
 # FTS5 query sanitization
 # ---------------------------------------------------------------------------
-
-# Токены-слова из произвольного пользовательского ввода. \w в Python 3 по
-# умолчанию Unicode-aware, поэтому кириллица и другие алфавиты сохраняются.
-_FTS5_TOKEN_RE = re.compile(r"\w+", re.UNICODE)
-
-
-def sanitize_fts5_query(query: str) -> str:
-    """Преобразует сырой пользовательский ввод в безопасный FTS5 MATCH-запрос.
-
-    FTS5 трактует ряд символов как синтаксис запроса: двойные кавычки,
-    ``*``, ``:``, ``^``, ``-``, ``(`` / ``)``, а также ключевые слова
-    ``AND`` / ``OR`` / ``NOT`` / ``NEAR``. Из-за этого сырой ввод вроде
-    ``C++``, ``the "bug"`` или ``foo:bar`` приводит к
-    ``sqlite3.OperationalError``.
-
-    Мы извлекаем из запроса только токены-слова и оборачиваем каждый в
-    двойные кавычки, превращая его в литеральную фразу. Токены соединяются
-    пробелом (неявный AND в FTS5). Поскольку токены содержат только
-    word-символы, любые спецсимволы и операторы FTS5 нейтрализуются.
-
-    Возвращает пустую строку, если во вводе нет ни одного значимого токена;
-    вызывающий код в этом случае должен вернуть пустой результат, не
-    выполняя MATCH.
-    """
-    tokens = _FTS5_TOKEN_RE.findall(query)
-    if not tokens:
-        return ""
-    return " ".join(f'"{token}"' for token in tokens)
+# ``sanitize_fts5_query`` is imported from :mod:`ranking` (see the single
+# source-of-truth definition there). It is shared with ``l4_bm25_search``
+# so both lexical engines normalise raw user input identically. Keeping
+# it in ``ranking`` (which both modules already import) avoids a circular
+# import between ``l4_fts5_search`` and ``l4_bm25_search``.
 
 
 @lru_cache(maxsize=1)
@@ -283,7 +260,25 @@ class L4FTS5Search:
                     for md_file, base_path, source in files_to_index
                 }
                 for future in as_completed(futures):
-                    if future.result():
+                    # Bug #3: ``_index_single_file`` already narrows its own
+                    # except to the realistic failure modes and returns False,
+                    # but ``future.result()`` can still raise here — e.g. an
+                    # unexpected error from ``chunk_text``/splitting, or a
+                    # ``CancelledError`` if the pool tears down. A single
+                    # failing file must NOT abort the whole batch (previously
+                    # it bubbled out and reindex silently returned 0 files
+                    # with no per-file diagnosis). This is a per-task
+                    # fault-isolation boundary, mirroring the per-engine
+                    # boundary in cmd_hybrid_parallel's fetch_* wrappers.
+                    try:
+                        succeeded = future.result()
+                    except Exception as e:  # noqa: BLE001
+                        logging.error(
+                            "Reindex worker failed for %s: %s",
+                            futures[future], e,
+                        )
+                        continue
+                    if succeeded:
                         indexed_count += 1
 
             logging.info("Reindexed %s files", indexed_count)
