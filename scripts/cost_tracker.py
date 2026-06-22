@@ -119,8 +119,13 @@ class CostTracker:
 
         return self.DEFAULT_PRICES
 
-    def _resolve_price(self, model: str) -> Dict[str, float]:
-        """Return prices for a model with safe fallbacks."""
+    def resolve_price(self, model: str) -> Dict[str, float]:
+        """Return prices for a model with safe fallbacks.
+
+        Public entry point so other modules (e.g. mcp_server computing a
+        routing-learner cost estimate) reuse the same single source of
+        truth as :meth:`track_operation` — never duplicate price math.
+        """
         fallback = self.DEFAULT_PRICES.get(
             self.FALLBACK_MODEL, {'input': 0.0, 'output': 0.0}
         )
@@ -145,6 +150,9 @@ class CostTracker:
                 )
             ),
         }
+
+    # Deprecated underscore alias kept for backward compatibility.
+    _resolve_price = resolve_price
 
     def _init_db(self):
         """Initialize database schema."""
@@ -251,7 +259,7 @@ class CostTracker:
         metadata: Optional[str] = None
     ) -> Dict[str, Any]:
         """Record an operation and return its cost breakdown."""
-        prices = self._resolve_price(model)
+        prices = self.resolve_price(model)
         input_cost = (input_tokens / 1_000_000) * prices['input']
         output_cost = (output_tokens / 1_000_000) * prices['output']
         cache_creation_cost = (

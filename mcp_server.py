@@ -28,7 +28,11 @@ if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)
 
 from l4_fts5_search import L4FTS5Search  # noqa: E402
-from cost_tracker import CostTracker  # noqa: E402
+from cost_tracker import (  # noqa: E402
+    CACHE_CREATION_PRICE_KEY,
+    CACHE_READ_PRICE_KEY,
+    CostTracker,
+)
 from claude_client import TrackedClaudeClient  # noqa: E402
 from routing_learner import get_learner  # noqa: E402
 
@@ -227,24 +231,45 @@ def smart_complete(
         )
 
         usage = _extract_usage(message)
+        result_text = _extract_text(message)
 
-        # Internal learning — never surfaced to Claude
+        # Internal learning — never surfaced to Claude.
+        #
+        # Cost is computed from the SAME per-model price table the
+        # CostTracker uses (cost_tracker.resolve_price), so Opus and
+        # Sonnet are no longer mis-priced as Haiku. Includes cache tiers
+        # (cache_creation / cache_read) so the recorded cost matches the
+        # authoritative ledger entry persisted by tracked_claude.complete.
+        prices = cost_tracker.resolve_price(chosen_model)
+        input_tokens = usage.get("input_tokens", 0)
+        output_tokens = usage.get("output_tokens", 0)
+        cache_creation = usage.get("cache_creation_input_tokens", 0)
+        cache_read = usage.get("cache_read_input_tokens", 0)
         cost_est = (
-            usage.get("input_tokens", 0) / 1_000_000 * 0.25
-            + usage.get("output_tokens", 0) / 1_000_000 * 1.25
+            input_tokens / 1_000_000 * prices["input"]
+            + output_tokens / 1_000_000 * prices["output"]
+            + cache_creation / 1_000_000 * prices[CACHE_CREATION_PRICE_KEY]
+            + cache_read / 1_000_000 * prices[CACHE_READ_PRICE_KEY]
         )
+
+        # Success is derived from the response, not hard-wired to True:
+        # an empty/refusal reply is treated as a failed task so the
+        # learner gets a real negative signal to route away from that
+        # model for similar tasks.
+        was_successful = bool(result_text.strip())
+
         routing_learner.record_outcome(
             task=task,
             model_used=chosen_model,
-            was_successful=True,
+            was_successful=was_successful,
             operation_type="smart_complete",
-            tokens={"input": usage.get("input_tokens", 0), "output": usage.get("output_tokens", 0)},
+            tokens={"input": input_tokens, "output": output_tokens},
             cost_usd=cost_est,
         )
 
         return {
             "success": True,
-            "result": _extract_text(message),
+            "result": result_text,
             "usage": usage,
         }
 
