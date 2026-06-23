@@ -9,6 +9,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 # Add scripts/ to sys.path so mcp_server can resolve l4_fts5_search / cost_tracker
 SCRIPTS_DIR = Path(__file__).resolve().parent.parent / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
@@ -155,7 +157,7 @@ def test_smart_complete_prices_opus_at_real_rate_not_haiku():
         mcp_server.smart_complete(task="do something", context="ctx")
 
     # Real Opus price: 1000 input * 15.0/M + 500 output * 75.0/M = 0.015 + 0.0375
-    assert captured["cost_usd"] == 0.015 + 0.0375
+    assert captured["cost_usd"] == pytest.approx(0.015 + 0.0375)
     assert captured["model_used"] == "claude-opus-4"
 
 
@@ -172,7 +174,7 @@ def test_smart_complete_prices_sonnet_at_real_rate_not_haiku():
         mcp_server.smart_complete(task="t")
 
     # 1000 * 3.0/M + 500 * 15.0/M = 0.003 + 0.0075
-    assert captured["cost_usd"] == 0.003 + 0.0075
+    assert captured["cost_usd"] == pytest.approx(0.003 + 0.0075)
     assert captured["model_used"] == "claude-sonnet-4"
 
 
@@ -188,7 +190,7 @@ def test_smart_complete_prices_haiku_at_haiku_rate():
                       side_effect=fake_record):
         mcp_server.smart_complete(task="t")
 
-    assert captured["cost_usd"] == 0.00025 + 0.000625
+    assert captured["cost_usd"] == pytest.approx(0.00025 + 0.000625)
 
 
 def test_smart_complete_cost_includes_cache_tiers():
@@ -207,7 +209,7 @@ def test_smart_complete_cost_includes_cache_tiers():
         mcp_server.smart_complete(task="t")
 
     # Sonnet: cache_creation 3.75/M * 1M = 3.75 ; cache_read 0.30/M * 1M = 0.30
-    assert captured["cost_usd"] == 3.75 + 0.30
+    assert captured["cost_usd"] == pytest.approx(3.75 + 0.30)
 
 
 def test_smart_complete_marks_empty_response_as_failed():

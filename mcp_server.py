@@ -213,6 +213,7 @@ def smart_complete(
         context: Relevant code or project context (paste file contents here).
         max_tokens: Max output length (default: 4096).
     """
+    chosen_model: str | None = None
     try:
         prompt = f"Context:\n{context}\n\nTask:\n{task}" if context else task
         context_len = len(context.split()) if context else 0
@@ -275,6 +276,20 @@ def smart_complete(
 
     except Exception as e:
         logging.error("smart_complete failed: %s", e)
+        # Record failure so the routing learner avoids models that
+        # consistently error out (transport timeouts, auth failures, etc.).
+        if chosen_model:
+            try:
+                routing_learner.record_outcome(
+                    task=task,
+                    model_used=chosen_model,
+                    was_successful=False,
+                    operation_type="smart_complete",
+                    tokens={"input": 0, "output": 0},
+                    cost_usd=0.0,
+                )
+            except Exception:
+                logging.debug("Failed to record routing outcome for error", exc_info=True)
         return {"success": False, "error": str(e)}
 
 

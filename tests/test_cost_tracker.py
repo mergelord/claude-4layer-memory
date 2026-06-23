@@ -16,6 +16,7 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -402,6 +403,96 @@ class TestDatabaseIntegrity:
 
         stats = tracker1.get_stats()
         assert stats['total_operations'] == 2
+
+
+class TestResolvePrice:
+    """Test resolve_price: exact alias match, versioned-id prefix match,
+    and safe fallbacks.
+
+    The Anthropic API returns versioned model IDs (e.g.
+    ``claude-opus-4-20250514``) in ``message.model``, while the price
+    table keys are short aliases (``claude-opus-4``).  Without prefix
+    matching the versioned ID misses the table and silently falls back to
+    ``claude-sonnet-4``, mis-pricing Opus calls at Sonnet rates.
+    """
+
+    @pytest.fixture
+    def temp_dir(self):
+        """Create temporary directory"""
+        temp_dir = Path(tempfile.mkdtemp())
+        yield temp_dir
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+    @pytest.fixture
+    def tracker(self, temp_dir):
+        """Create tracker with temp database"""
+        db_path = temp_dir / "test.db"
+        return CostTracker(db_path)
+
+    def test_exact_match_short_alias(self, tracker):
+        """Short alias present in the table resolves to its real price."""
+        price = tracker.resolve_price("claude-opus-4")
+        assert price["input"] == pytest.approx(15.0)
+        assert price["output"] == pytest.approx(75.0)
+
+    def test_versioned_id_matches_opus(self, tracker):
+        """Versioned Opus id resolves to Opus price, not the Sonnet fallback."""
+        price = tracker.resolve_price("claude-opus-4-20250514")
+        assert price["input"] == pytest.approx(15.0)
+        assert price["output"] == pytest.approx(75.0)
+
+    def test_versioned_id_matches_sonnet(self, tracker):
+        """Versioned Sonnet id resolves to Sonnet price."""
+        price = tracker.resolve_price("claude-sonnet-4-20250514")
+        assert price["input"] == pytest.approx(3.0)
+        assert price["output"] == pytest.approx(15.0)
+
+    def test_versioned_id_matches_haiku(self, tracker):
+        """Versioned Haiku id resolves to Haiku price."""
+        price = tracker.resolve_price("claude-haiku-4-20250514")
+        assert price["input"] == pytest.approx(0.25)
+        assert price["output"] == pytest.approx(1.25)
+
+    def test_unknown_model_falls_back(self, tracker):
+        """A genuinely unknown model id falls back to FALLBACK_MODEL (Sonnet)."""
+        price = tracker.resolve_price("gpt-4-turbo")
+        # Sonnet fallback, not zero.
+        assert price["input"] == pytest.approx(3.0)
+        assert price["output"] == pytest.approx(15.0)
+
+    def test_empty_string_falls_back(self, tracker):
+        """Empty model string falls back to FALLBACK_MODEL."""
+        price = tracker.resolve_price("")
+        assert price["input"] == pytest.approx(3.0)
+
+    def test_none_falls_back(self, tracker):
+        """None model falls back to FALLBACK_MODEL without raising."""
+        price = tracker.resolve_price(None)
+        assert price["input"] == pytest.approx(3.0)
+
+    def test_track_claude_message_versioned_opus_id_prices_as_opus(self, tracker):
+        """Regression: a versioned Opus id from the API response must be
+        priced as Opus in the ledger, not silently billed at the Sonnet
+        fallback rate.
+
+        This exercises the real bug path: ``track_claude_message`` reads
+        ``message.model`` (the versioned id) and routes it through
+        ``resolve_price``. Before the prefix-match fix this produced
+        ``total_cost == 3.0`` (Sonnet); it must be ``15.0`` (Opus) for
+        1M input tokens.
+        """
+        msg = SimpleNamespace(
+            model="claude-opus-4-20250514",
+            id="msg_1",
+            usage=SimpleNamespace(
+                input_tokens=1_000_000,
+                output_tokens=0,
+                cache_creation_input_tokens=0,
+                cache_read_input_tokens=0,
+            ),
+        )
+        result = tracker.track_claude_message("smart_complete", msg)
+        assert result["total_cost"] == pytest.approx(15.0)
 
 
 if __name__ == '__main__':

@@ -34,8 +34,8 @@ from ranking import make_join_key, sanitize_fts5_query  # noqa: E402
 # Safe FTS5 query sanitization — single source of truth, imported from
 # :mod:`ranking` (shared with ``l4_fts5_search``).  Extracts \w+ tokens and
 # double-quotes each, neutralising all FTS5 syntax (*, :, ^, -, AND, OR,
-# NOT, NEAR, quotes, parens).  No circular import: both lexical engines
-# import from ``ranking``; neither imports the other.
+# NOT, NEAR, quotes, parens).  No circular import: neither lexical engine
+# imports the sanitizer from the other; the shared copy lives in ranking.
 # Alias kept for backward compatibility; internal callers may still use it.
 _sanitize_query = sanitize_fts5_query
 

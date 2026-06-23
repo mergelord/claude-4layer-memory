@@ -229,6 +229,16 @@ def sanitize_fts5_query(query: str) -> str:
 
     Returns an empty string when the input holds no meaningful token; the
     caller should then return an empty result without issuing a MATCH.
+
+    .. note::
+
+       Code symbols like ``C++`` or ``C#`` collapse to a single quoted
+       token (``"C"``).  This is intentional: the old per-engine sanitizer
+       preserved punctuation but passed FTS5 syntax through unchanged,
+       causing ``sqlite3.OperationalError`` and silently returning ``[]``
+       for queries like ``config:port``.  Neutralising **all** non-word
+       characters is the safe default; a future per-project symbol table
+       could add structured synonyms if needed.
     """
     tokens = _FTS5_TOKEN_RE.findall(query)
     if not tokens:

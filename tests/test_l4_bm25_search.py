@@ -49,7 +49,7 @@ def mock_connection():
 # ---------------------------------------------------------------------------
 
 class TestSanitizeQuery:
-    """Tests for _sanitize_query (delegates to l4_fts5_search.sanitize_fts5_query)."""
+    """Tests for _sanitize_query (delegates to ranking.sanitize_fts5_query)."""
 
     def test_empty_query_returns_empty_string(self):
         assert _sanitize_query("") == ""
