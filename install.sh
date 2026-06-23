@@ -72,7 +72,12 @@ cp -f scripts/ranking.py "$HOME/.claude/hooks/"
 cp -f scripts/memory_lint_helpers.py "$HOME/.claude/hooks/"
 chmod +x "$HOME/.claude/hooks/l4_semantic_global.py"
 
-cp -f scripts/linux/*.sh "$HOME/.claude/hooks/"
+# Only the l4_* search/index wrappers are deployed. memory_lint.sh /
+# memory_lint_project.sh are intentionally NOT deployed: memory_lint.py is a
+# repo/dev tool with a rich dependency tree (antipattern_checkers,
+# consistency_checkers, utils/, config/) that doesn't fit the flat
+# ~/.claude/hooks layout. Run it from the cloned repo instead.
+cp -f scripts/linux/l4_*.sh "$HOME/.claude/hooks/"
 chmod +x "$HOME/.claude/hooks/"*.sh
 
 cp -f hooks/git-activity-detector.py "$HOME/.claude/hooks/"

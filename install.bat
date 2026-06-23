@@ -68,7 +68,12 @@ REM memory_lint_helpers.py provides EncodingGate, imported by the hooks at
 REM runtime. It MUST land next to the hooks (deployed layout is flat), or the
 REM mojibake write-barrier silently disables itself.
 copy /Y "scripts\memory_lint_helpers.py" "%USERPROFILE%\.claude\hooks\" >nul
-copy /Y "scripts\windows\*.bat" "%USERPROFILE%\.claude\hooks\" >nul
+REM Only the l4_* search/index wrappers are deployed. memory_lint.bat /
+REM memory_lint_project.bat are intentionally NOT deployed: memory_lint.py is a
+REM repo/dev tool with a rich dependency tree (antipattern_checkers,
+REM consistency_checkers, utils/, config/) that doesn't fit the flat
+REM ~/.claude/hooks layout. Run it from the cloned repo instead.
+copy /Y "scripts\windows\l4_*.bat" "%USERPROFILE%\.claude\hooks\" >nul
 copy /Y "hooks\git-activity-detector.py" "%USERPROFILE%\.claude\hooks\" >nul
 copy /Y "hooks\stop_handoff_universal.py" "%USERPROFILE%\.claude\hooks\" >nul
 
