@@ -16,6 +16,26 @@ from utils.base_reporter import \
     BaseReporter  # pylint: disable=wrong-import-position
 from utils.colors import Colors  # pylint: disable=wrong-import-position
 
+MIN_PYTHON_VERSION = (3, 10)
+MIN_PYTHON_VERSION_TEXT = "3.10"
+
+
+def format_python_version(version_info):
+    """Format a sys.version_info-like tuple as major.minor.micro."""
+    return f"{version_info[0]}.{version_info[1]}.{version_info[2]}"
+
+
+def python_version_requirement_text():
+    """Return the human-readable Python version requirement."""
+    return f">= {MIN_PYTHON_VERSION_TEXT} required"
+
+
+def get_python_version_check(version_info):
+    """Return (is_supported, audit_message) for a Python version."""
+    python_version = format_python_version(version_info)
+    is_supported = version_info >= MIN_PYTHON_VERSION
+    return is_supported, f"Python {python_version} ({python_version_requirement_text()})"
+
 
 class PreInstallAudit(BaseReporter):
     def __init__(self):
@@ -187,11 +207,11 @@ class PreInstallAudit(BaseReporter):
         self.print_section("Python Dependencies")
 
         # Check Python version
-        python_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
-        if sys.version_info >= (3, 7):
-            self.print_ok(f"Python {python_version} (>= 3.7 required)")
+        is_supported, python_message = get_python_version_check(sys.version_info)
+        if is_supported:
+            self.print_ok(python_message)
         else:
-            self.print_error(f"Python {python_version} (3.7+ required)")
+            self.print_error(python_message)
 
         # Check required packages
         required_packages = {
