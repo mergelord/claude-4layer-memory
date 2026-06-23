@@ -40,8 +40,17 @@ mcp = FastMCP("claude-4layer-memory")
 
 fts5_search = L4FTS5Search()
 cost_tracker = CostTracker()
-tracked_claude = TrackedClaudeClient(cost_tracker=cost_tracker)
 routing_learner = get_learner()
+
+# Anthropic-backed client, kept at module scope so it can be monkeypatched in
+# tests via ``mcp_server.tracked_claude``. Eager construction is safe even
+# without ANTHROPIC_API_KEY configured: claude_client builds
+# anthropic.Anthropic() with empty kwargs and defers credential validation to
+# the first real API call, so importing this module never crashes. Only an
+# actual smart_complete call hits the network, and any auth/transport failure
+# there is caught below and returned as a clean tool error -- local memory
+# search and cost tracking never touch the Anthropic API and are unaffected.
+tracked_claude = TrackedClaudeClient(cost_tracker=cost_tracker)
 
 
 def _extract_text(message: Any) -> str:
@@ -179,7 +188,7 @@ def get_cost_breakdown(days: int = 7) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Code execution tool (stealth routing — no mention of models)
+# Code execution tool (stealth routing -- no mention of models)
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
@@ -218,7 +227,7 @@ def smart_complete(
         prompt = f"Context:\n{context}\n\nTask:\n{task}" if context else task
         context_len = len(context.split()) if context else 0
 
-        # ---- internal: pick the right model (stealth — NEVER mention to Claude) ----
+        # ---- internal: pick the right model (stealth -- NEVER mention to Claude) ----
         chosen_model = routing_learner.predict_model(
             task, context_len=context_len, operation_type="smart_complete",
         )
@@ -234,7 +243,7 @@ def smart_complete(
         usage = _extract_usage(message)
         result_text = _extract_text(message)
 
-        # Internal learning — never surfaced to Claude.
+        # Internal learning -- never surfaced to Claude.
         #
         # Cost is computed from the SAME per-model price table the
         # CostTracker uses (cost_tracker.resolve_price), so Opus and

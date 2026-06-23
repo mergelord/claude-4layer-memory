@@ -12,15 +12,20 @@ from datetime import datetime
 from pathlib import Path
 from collections import Counter
 
-# Make EncodingGate importable in both the source repo layout
-# (``<repo>/hooks/stop_handoff_universal.py`` next to ``<repo>/scripts/``)
-# and the deployed layout (``~/.claude/hooks/`` next to
-# ``~/.claude/scripts/``). Failure to import is non-fatal: the hook
-# still runs without the runtime guard so a missing helper file never
-# blocks a user's session.
-_SCRIPTS_DIR = Path(__file__).resolve().parent.parent / "scripts"
-if str(_SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(_SCRIPTS_DIR))
+# Make EncodingGate importable in both layouts:
+#   * source repo: ``<repo>/hooks/stop_handoff_universal.py`` next to
+#     ``<repo>/scripts/``
+#   * deployed:    every hook dependency installed flat next to the hook in
+#     ``~/.claude/hooks/`` (install.bat / install.sh now copy
+#     memory_lint_helpers.py there)
+# We therefore add BOTH the hook's own directory AND a sibling ``scripts/``
+# directory to sys.path. Failure to import is still non-fatal: the hook runs
+# without the runtime guard so a missing helper file never blocks a session.
+_HOOK_DIR = Path(__file__).resolve().parent
+_SCRIPTS_DIR = _HOOK_DIR.parent / "scripts"
+for _candidate in (_HOOK_DIR, _SCRIPTS_DIR):
+    if str(_candidate) not in sys.path:
+        sys.path.insert(0, str(_candidate))
 
 try:
     from memory_lint_helpers import (  # type: ignore[import-not-found]

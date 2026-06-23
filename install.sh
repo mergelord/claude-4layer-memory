@@ -20,7 +20,7 @@ NC='\033[0m' # No Color
 # Check Python installation
 if ! command -v python3 &> /dev/null; then
     echo -e "${RED}[ERROR]${NC} Python 3 is not installed"
-    echo "Please install Python 3.7+ first"
+    echo "Please install Python 3.10+ first"
     exit 1
 fi
 
@@ -61,6 +61,10 @@ echo "Copying scripts..."
 cp -f scripts/l4_semantic_global.py "$HOME/.claude/hooks/"
 cp -f scripts/chunking.py "$HOME/.claude/hooks/"
 cp -f scripts/ranking.py "$HOME/.claude/hooks/"
+# memory_lint_helpers.py provides EncodingGate, imported by the hooks at
+# runtime. It MUST land next to the hooks (deployed layout is flat), or the
+# mojibake write-barrier silently disables itself.
+cp -f scripts/memory_lint_helpers.py "$HOME/.claude/hooks/"
 chmod +x "$HOME/.claude/hooks/l4_semantic_global.py"
 
 cp -f scripts/linux/*.sh "$HOME/.claude/hooks/"

@@ -13,7 +13,7 @@ REM Check Python installation
 python --version >nul 2>&1
 if errorlevel 1 (
     echo [ERROR] Python is not installed or not in PATH
-    echo Please install Python 3.7+ from https://www.python.org/
+    echo Please install Python 3.10+ from https://www.python.org/
     pause
     exit /b 1
 )
@@ -61,6 +61,10 @@ copy /Y "scripts\chunking.py" "%USERPROFILE%\.claude\hooks\" >nul
 copy /Y "scripts\l4_fts5_search.py" "%USERPROFILE%\.claude\hooks\" >nul
 copy /Y "scripts\l4_rerank.py" "%USERPROFILE%\.claude\hooks\" >nul
 copy /Y "scripts\ranking.py" "%USERPROFILE%\.claude\hooks\" >nul
+REM memory_lint_helpers.py provides EncodingGate, imported by the hooks at
+REM runtime. It MUST land next to the hooks (deployed layout is flat), or the
+REM mojibake write-barrier silently disables itself.
+copy /Y "scripts\memory_lint_helpers.py" "%USERPROFILE%\.claude\hooks\" >nul
 copy /Y "scripts\windows\*.bat" "%USERPROFILE%\.claude\hooks\" >nul
 copy /Y "hooks\git-activity-detector.py" "%USERPROFILE%\.claude\hooks\" >nul
 copy /Y "hooks\stop_handoff_universal.py" "%USERPROFILE%\.claude\hooks\" >nul
