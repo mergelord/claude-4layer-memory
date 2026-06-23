@@ -146,11 +146,11 @@ pip install -r requirements-dev.txt
 ```bash
 # Windows
 copy scripts\*.py %USERPROFILE%\.claude\hooks\
-copy scripts\windows\*.bat %USERPROFILE%\.claude\hooks\
+copy scripts\windows\l4_*.bat %USERPROFILE%\.claude\hooks\
 
 # Linux/Mac
 cp scripts/*.py ~/.claude/hooks/
-cp scripts/linux/*.sh ~/.claude/hooks/
+cp scripts/linux/l4_*.sh ~/.claude/hooks/
 chmod +x ~/.claude/hooks/*.sh
 ```
 
@@ -183,23 +183,23 @@ See [INSTALL.md](docs/INSTALL.md) for detailed instructions.
 ### 4-Layer Memory System
 
 ```
-┌────────────────────────────────────────────────────────┐
+┌──────────────────────────────────────────────┐
 │ Layer 4: SEMANTIC (Vector Search)                       │
 │ ├─ ChromaDB + sentence-transformers                     │
 │ └─ Multilingual semantic search                         │
-├───────────────────────────────────────────────────────┤
+├─────────────────────────────────────────────┤
 │ Layer 3: COLD (Permanent Archive)                       │
 │ ├─ archive/ directory                                   │
 │ └─ Long-term storage                                    │
-├───────────────────────────────────────────────────────┤
+├─────────────────────────────────────────────┤
 │ Layer 2: WARM (14 days)                                 │
 │ ├─ decisions.md                                         │
 │ └─ Important decisions, architectural choices           │
-├───────────────────────────────────────────────────────┤
+├─────────────────────────────────────────────┤
 │ Layer 1: HOT (24 hours)                                 │
 │ ├─ handoff.md                                           │
 │ └─ Recent events, quick context recovery                │
-└───────────────────────────────────────────────────────┘
+└───────────────────────────────────────────────┘
 ```
 
 ### Dual-Level System
@@ -240,9 +240,8 @@ l4_stats.bat
 python l4_semantic_global.py cleanup --dry-run
 python l4_semantic_global.py cleanup
 
-# Validate memory health
-memory_lint.bat  # Windows
-memory_lint.sh   # Linux/Mac
+# Validate memory health (run from the cloned repo)
+python scripts/memory_lint.py --layer 1
 ```
 
 ### Adding New Project
