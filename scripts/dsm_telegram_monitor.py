@@ -590,7 +590,8 @@ def send_telegram_message(telegram: TelegramConfig, text: str, timeout: int = 30
             sanitized = _sanitize_token(str(exc), telegram.token)
             raise TelegramError(f"Telegram send failed: {sanitized}") from exc
         if not response_data.get("ok"):
-            raise TelegramError(f"Telegram API rejected message: {response_data}")
+            sanitized_resp = _sanitize_token(str(response_data), telegram.token)
+            raise TelegramError(f"Telegram API rejected message: {sanitized_resp}")
 
 
 def run_status(config: MonitorConfig, args: argparse.Namespace) -> int:

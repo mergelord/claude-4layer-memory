@@ -52,11 +52,11 @@ def flush_to_l4():
             print("[FLUSH] Indexing global memory...", file=sys.stderr)
             memory.index_global_memory()
 
-        # Индексируем текущий проект
-            project_path = get_current_project()
-            if (project_path / "memory").exists():
-                print(f"[FLUSH] Indexing project: {project_path.name}...", file=sys.stderr)
-                memory.index_project(project_path)
+        # Always index the current project, regardless of index_all availability
+        project_path = get_current_project()
+        if (project_path / "memory").exists():
+            print(f"[FLUSH] Indexing project: {project_path.name}...", file=sys.stderr)
+            memory.index_project(project_path)
 
         print("[FLUSH] Memory saved to L4 SEMANTIC successfully", file=sys.stderr)
         return 0

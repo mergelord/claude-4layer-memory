@@ -138,9 +138,10 @@ class AutoRemember:
                     project = project_dir.name
                     break
 
-        # Fallback: используем system32 проект
+        # Fallback: use global memory (no project match)
         if not project:
-            project = "C--WINDOWS-system32"
+            print("[AUTO-REMEMBER] No matching project found, saving to global memory", file=sys.stderr)
+            return 0
 
         # Сохраняем факты
         saved_count = 0

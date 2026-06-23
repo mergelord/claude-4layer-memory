@@ -26,6 +26,11 @@ hooks/
 - `git-activity-detector.py` and `stop_handoff_universal.py` (from `hooks/`)
 - All `hooks/builtin/*.py` (essential hooks)
 
+> **⚠️ Important:** Copying hooks to `~/.claude/hooks/` does NOT activate them.
+> You must register them in `~/.claude/settings.json` under the appropriate
+> event (SessionStart, Stop, UserPromptSubmit, PreCompact). See
+> [Registering Hooks](#registering-hooks) below.
+
 Optional hooks must be copied manually:
 ```bash
 cp hooks/optional/crash-recovery.py ~/.claude/hooks/
@@ -52,7 +57,39 @@ cp hooks/optional/crash-recovery.py ~/.claude/hooks/
 ## Adding Your Own Hooks
 
 ### Stop Hooks
-Drop a file named `stop-*.py` in `~/.claude/hooks/`. The `graceful-shutdown-wrapper.py` auto-discovers and executes all `stop-*.py` files.
+Drop a file named `stop[-_]*.py` in `~/.claude/hooks/`. The `graceful-shutdown-wrapper.py` auto-discovers and executes all stop hooks (both `stop-*.py` and `stop_*.py` patterns).
+
+### Registering Hooks
+Copying a hook to `~/.claude/hooks/` is not enough — you must register it in
+`~/.claude/settings.json`. Here's a working configuration:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [{
+      "matcher": "",
+      "hooks": [
+        {"type": "command", "command": "\"C:/Program Files/Python313/python.exe\" C:/Users/YOU/.claude/hooks/load-context-on-start.py"},
+        {"type": "command", "command": "\"C:/Program Files/Python313/python.exe\" C:/Users/YOU/.claude/hooks/inject-verified-facts.py"}
+      ]
+    }],
+    "PreCompact": [{
+      "matcher": "",
+      "hooks": [
+        {"type": "command", "command": "\"C:/Program Files/Python313/python.exe\" C:/Users/YOU/.claude/hooks/precompact-flush-l4.py"}
+      ]
+    }],
+    "Stop": [{
+      "matcher": "",
+      "hooks": [
+        {"type": "command", "command": "\"C:/Program Files/Python313/python.exe\" C:/Users/YOU/.claude/hooks/graceful-shutdown-wrapper.py"}
+      ]
+    }]
+  }
+}
+```
+
+Replace `C:/Users/YOU` with your actual home directory path.
 
 ### Other Events
 Configure hooks in `~/.claude/settings.json` under the `hooks` key:

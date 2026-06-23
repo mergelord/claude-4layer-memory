@@ -35,7 +35,7 @@ def discover_stop_hooks() -> List[str]:
     hooks = []
 
     for f in sorted(HOOKS_DIR.iterdir()):
-        if (f.name.startswith("stop-")
+        if (f.name.startswith(("stop-", "stop_"))
                 and f.name.endswith(".py")
                 and f.name != self_name
                 and f.is_file()):

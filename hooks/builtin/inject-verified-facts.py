@@ -15,7 +15,7 @@ import getpass
 import socket
 import platform
 from pathlib import Path
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 
 
 def safe_print(text: str) -> None:
@@ -62,11 +62,10 @@ def get_verified_facts() -> dict:
     except Exception:
         facts["python"] = "UNAVAILABLE"
 
-    # Date/time (UTC+3 Moscow time)
+    # Date/time (local timezone)
     try:
-        tz_moscow = timezone(timedelta(hours=3))
-        now = datetime.now(tz=tz_moscow)
-        facts["datetime"] = now.strftime("%Y-%m-%d %H:%M:%S UTC+3")
+        now = datetime.now(tz=timezone.utc).astimezone()
+        facts["datetime"] = now.strftime("%Y-%m-%d %H:%M:%S %Z")
         facts["date"] = now.strftime("%Y-%m-%d")
     except Exception:
         facts["datetime"] = "UNAVAILABLE"

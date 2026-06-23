@@ -2,7 +2,7 @@
 """
 Load Context on Start Hook
 
-Automatically loads context on Claude startup from C:/Users/MYRIG/.claude/:
+Automatically loads context on Claude startup from ~/.claude/:
 - MEMORY_SYSTEM_GUIDE.md - memory system architecture
 - memory/MEMORY.md - global memory index
 - memory/handoff.md - recent events (HOT)
@@ -122,7 +122,7 @@ def load_context() -> str:
             output.append(f"\n[WARNING] Health check failed: {e}")
 
     output.append("\n" + "=" * 80)
-    output.append("[OK] Context loaded from C:/Users/MYRIG/.claude/")
+    output.append("[OK] Context loaded from ~/.claude/")
     output.append("=" * 80)
 
     return '\n'.join(output)
