@@ -56,10 +56,13 @@ echo [OK] Directories created
 REM Copy scripts
 echo.
 echo Copying scripts...
+REM Deployed runtime is semantic-only: the l4_* wrappers invoke
+REM l4_semantic_global.py (which imports chunking + ranking) and the hooks
+REM import EncodingGate from memory_lint_helpers.py. Keep this set identical to
+REM install.sh. Hybrid FTS5/BM25/rerank runs from the repo, not the flat
+REM ~/.claude/hooks layout, so those modules are intentionally NOT deployed.
 copy /Y "scripts\l4_semantic_global.py" "%USERPROFILE%\.claude\hooks\" >nul
 copy /Y "scripts\chunking.py" "%USERPROFILE%\.claude\hooks\" >nul
-copy /Y "scripts\l4_fts5_search.py" "%USERPROFILE%\.claude\hooks\" >nul
-copy /Y "scripts\l4_rerank.py" "%USERPROFILE%\.claude\hooks\" >nul
 copy /Y "scripts\ranking.py" "%USERPROFILE%\.claude\hooks\" >nul
 REM memory_lint_helpers.py provides EncodingGate, imported by the hooks at
 REM runtime. It MUST land next to the hooks (deployed layout is flat), or the

@@ -154,9 +154,24 @@ cp scripts/linux/*.sh ~/.claude/hooks/
 chmod +x ~/.claude/hooks/*.sh
 ```
 
-3. Initialize memory structure:
+3. Initialize memory structure from the bundled templates:
 ```bash
-python scripts/setup_l4_project.py
+# Windows
+copy templates\GLOBAL_PROJECTS.md.template %USERPROFILE%\.claude\GLOBAL_PROJECTS.md
+copy templates\MEMORY.md.template %USERPROFILE%\.claude\memory\MEMORY.md
+copy templates\handoff.md.template %USERPROFILE%\.claude\memory\handoff.md
+copy templates\decisions.md.template %USERPROFILE%\.claude\memory\decisions.md
+
+# Linux/Mac
+cp templates/GLOBAL_PROJECTS.md.template ~/.claude/GLOBAL_PROJECTS.md
+cp templates/MEMORY.md.template ~/.claude/memory/MEMORY.md
+cp templates/handoff.md.template ~/.claude/memory/handoff.md
+cp templates/decisions.md.template ~/.claude/memory/decisions.md
+```
+
+4. Build the semantic index:
+```bash
+python scripts/l4_semantic_global.py index-all
 ```
 
 See [INSTALL.md](docs/INSTALL.md) for detailed instructions.
@@ -299,8 +314,8 @@ l4_search_all.bat "how to handle Unicode errors"
 ### Example 2: Project-Specific Search
 
 ```bash
-# Search only in current project
-l4_search.bat "API integration"
+# Search within a single project's memory
+python scripts/l4_semantic_global.py search-project my-project "API integration"
 ```
 
 ### Example 3: Parallel Hybrid Search
@@ -338,13 +353,8 @@ python scripts/memory_lint.py --layer all
 ### Example 5: Health Check
 
 ```bash
-# Check memory system health
-python memory_health_check.py
-
-# Output:
-# ✓ HOT memory: 3 entries (within 24h window)
-# ✓ WARM memory: 12 entries (within 14d window)
-# ✓ L4 index: 489 chunks across 3 collections
+# Check memory size / rotation health
+python scripts/health_memory_size.py
 ```
 
 See [examples/](examples/) directory for more.
