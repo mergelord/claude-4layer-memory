@@ -42,38 +42,15 @@ fts5_search = L4FTS5Search()
 cost_tracker = CostTracker()
 routing_learner = get_learner()
 
-# Lazy Anthropic-backed client.
-#
-# Constructing TrackedClaudeClient() eagerly builds an anthropic.Anthropic()
-# instance, which raises at import time when no ANTHROPIC_API_KEY (and no
-# explicit api_key) is configured. Doing that at module scope took down the
-# ENTIRE MCP server -- including search_memory / get_memory_stats /
-# reindex_memory and every cost-tracking tool, none of which touch the
-# Anthropic API. Defer construction until smart_complete actually needs it so
-# a missing key only disables smart_complete, not local memory search.
-_tracked_claude: TrackedClaudeClient | None = None
-
-
-def get_tracked_claude() -> TrackedClaudeClient:
-    """Return a process-wide TrackedClaudeClient, building it on first use.
-
-    Raises:
-        RuntimeError: If the Anthropic client cannot be constructed (e.g. no
-            ANTHROPIC_API_KEY configured). Callers should translate this into
-            a clean tool-level error rather than letting it propagate and
-            crash the server.
-    """
-    global _tracked_claude
-    if _tracked_claude is None:
-        try:
-            _tracked_claude = TrackedClaudeClient(cost_tracker=cost_tracker)
-        except Exception as exc:
-            raise RuntimeError(
-                "Anthropic API client is unavailable "
-                "(set ANTHROPIC_API_KEY to enable smart_complete). "
-                "Memory search and cost-tracking tools do not require it."
-            ) from exc
-    return _tracked_claude
+# Anthropic-backed client, kept at module scope so it can be monkeypatched in
+# tests via ``mcp_server.tracked_claude``. Eager construction is safe even
+# without ANTHROPIC_API_KEY configured: claude_client builds
+# anthropic.Anthropic() with empty kwargs and defers credential validation to
+# the first real API call, so importing this module never crashes. Only an
+# actual smart_complete call hits the network, and any auth/transport failure
+# there is caught below and returned as a clean tool error -- local memory
+# search and cost tracking never touch the Anthropic API and are unaffected.
+tracked_claude = TrackedClaudeClient(cost_tracker=cost_tracker)
 
 
 def _extract_text(message: Any) -> str:
@@ -255,16 +232,7 @@ def smart_complete(
             task, context_len=context_len, operation_type="smart_complete",
         )
 
-        # Resolve the Anthropic-backed client lazily. If it is unavailable
-        # (e.g. ANTHROPIC_API_KEY unset) return a clean tool error instead of
-        # crashing -- and do NOT record a routing outcome, because this is a
-        # configuration problem, not a signal about the chosen model.
-        try:
-            claude = get_tracked_claude()
-        except RuntimeError as exc:
-            return {"success": False, "error": str(exc)}
-
-        message = claude.complete(
+        message = tracked_claude.complete(
             prompt=prompt,
             model=chosen_model,
             max_tokens=max_tokens,
