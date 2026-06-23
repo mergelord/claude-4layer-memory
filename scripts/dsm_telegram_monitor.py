@@ -560,6 +560,13 @@ def split_telegram_text(text: str, limit: int = 3900) -> list[str]:
     return chunks
 
 
+def _sanitize_token(text: str, token: str) -> str:
+    """Remove bot token from text to prevent credential leaks in error messages."""
+    if token and token in text:
+        return text.replace(token, "***")
+    return text
+
+
 def send_telegram_message(telegram: TelegramConfig, text: str, timeout: int = 30) -> None:
     url = f"{telegram.api_base}/bot{telegram.token}/sendMessage"
     for chunk in split_telegram_text(text):
@@ -580,7 +587,8 @@ def send_telegram_message(telegram: TelegramConfig, text: str, timeout: int = 30
             with urllib.request.urlopen(request, timeout=timeout) as response:  # nosec B310
                 response_data = json.loads(response.read().decode("utf-8"))
         except (urllib.error.URLError, json.JSONDecodeError) as exc:
-            raise TelegramError(f"Telegram send failed: {exc}") from exc
+            sanitized = _sanitize_token(str(exc), telegram.token)
+            raise TelegramError(f"Telegram send failed: {sanitized}") from exc
         if not response_data.get("ok"):
             raise TelegramError(f"Telegram API rejected message: {response_data}")
 

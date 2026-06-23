@@ -174,3 +174,27 @@ def test_should_notify_only_initial_when_requested():
     assert monitor.should_notify(None, current, send_initial=False) is False
     assert monitor.should_notify(None, current, send_initial=True) is True
     assert monitor.should_notify({"reachable": False}, current, send_initial=False) is True
+
+
+def test_send_telegram_message_sanitizes_token_in_error():
+    import urllib.error
+    from unittest.mock import patch
+
+    telegram = monitor.TelegramConfig(token="secret-token-12345", chat_id="123")
+
+    def mock_urlopen(*_args, **_kwargs):
+        raise urllib.error.URLError(
+            "Connection refused: https://api.telegram.org/botsecret-token-12345/sendMessage"
+        )
+
+    with patch("urllib.request.urlopen", side_effect=mock_urlopen):
+        try:
+            monitor.send_telegram_message(telegram, "test message")
+        except monitor.TelegramError as exc:
+            error_msg = str(exc)
+            assert "secret-token-12345" not in error_msg, (
+                f"Bot token leaked in error message: {error_msg}"
+            )
+            assert "Telegram send failed" in error_msg
+        else:
+            raise AssertionError("TelegramError was not raised")
