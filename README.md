@@ -24,11 +24,7 @@
 - **Smart Filtering** - Protects against indexing system directories (.git, node_modules, etc.)
 
 ### Advanced Search & Retrieval
-- **Hybrid Search (P1)** - Multi-signal retrieval combining FTS5, semantic search, and BM25 via Reciprocal Rank Fusion (RRF)
-- **Parallel Search** - ThreadPoolExecutor-based concurrent execution for 2-3x performance boost
-- **Cross-Encoder Reranking** - Final precision boost using `cross-encoder/ms-marco-MiniLM-L-6-v2` for top-20 results
 - **Semantic Search** - Find information by meaning, not keywords (multilingual support)
-- **BM25 Ranking** - Industry-standard probabilistic ranking for keyword search
 - **Embedding Gateway** - Intelligent caching layer for embedding operations (reduces API costs by 70%)
 - **Linguistic Triggers** - Automatic context retrieval on natural language signals (inspired by Claude Opus 4.7)
   - Possessive pronouns: "my project", "our code"
@@ -36,24 +32,24 @@
   - Past tense: "you recommended", "we discussed"
   - Bilingual: English + Russian support
 
+> **Repository Tools (require full clone):** Hybrid search, BM25 ranking, parallel search, and cross-encoder reranking are development tools available in the repository but not included in the installed runtime.
+
 ### Quality Assurance & Monitoring
-- **Memory Lint** - Two-layer validation system with quick mode for SessionStart hooks
-  - Layer 1: Deterministic checks (ghost links, orphans, duplicates)
-  - Layer 2: Semantic analysis (terminology consistency, anti-patterns)
 - **EncodingGate (URC-1)** - Automatic mojibake detection and repair for Cyrillic text
 - **Health Monitoring** - Automatic rotation, corruption detection, size limits
 - **System Artifacts Cleanup** - Intelligent removal of C--WINDOWS-system32 and similar artifacts
 - **Skill Creator** - Automatic discovery and documentation of recurring patterns
 
+> **Repository Tools (require full clone):** Memory Lint (two-layer validation system) is a development tool available in the repository but not included in the installed runtime.
+
 ### Reliability & Hardening
-- **Sanitized FTS5 Queries** - Raw user input is sanitized before `MATCH`, preventing crashes on special characters and quotes
-- **Graceful Search Degradation** - SQLite failures in cached search are caught narrowly (`sqlite3.Error`) and logged, while unexpected errors propagate instead of being silently swallowed
-- **Per-Instance Caching** - Reranker caching is scoped per instance to avoid cross-instance state leakage
 - **Timezone-Aware Cost Tracking** - All cost and usage timestamps are stored as timezone-aware UTC
 - **Robust Cost Fallback** - Missing model prices no longer raise `KeyError`; pricing falls back safely
 - **Unified Windows UTF-8 Guard** - Consistent UTF-8 stdout/stderr setup across all modules
 - **BOM-Free UTF-8 Sources** - All sources are clean UTF-8 (no BOM), enforced by the EncodingGate
 - **Path-Traversal Protection** - Unified key contract with path-traversal hardening for memory operations
+
+> **Repository Tools (require full clone):** Sanitized FTS5 queries, graceful search degradation, and per-instance reranker caching are development features in the repository but not in the installed runtime.
 
 ### Developer Experience
 - **Cross-Platform** - Windows, Linux, macOS support with platform-specific optimizations
@@ -239,8 +235,12 @@ l4_stats.bat
 # Cleanup junk collections
 python l4_semantic_global.py cleanup --dry-run
 python l4_semantic_global.py cleanup
+```
 
-# Validate memory health (run from the cloned repo)
+### Repository Commands (require full clone)
+
+```bash
+# Validate memory health
 python scripts/memory_lint.py --layer 1
 ```
 
@@ -299,7 +299,11 @@ See [CONFIGURATION.md](docs/guides/CONFIGURATION.md) for details.
 
 ## 📚 Examples
 
-### Example 1: Cross-Project Learning
+### Installed Runtime Examples
+
+These commands work from the installed hooks (`~/.claude/hooks/`) after running the installer:
+
+#### Example 1: Cross-Project Learning
 
 ```bash
 # Find solutions from other projects
@@ -310,14 +314,25 @@ l4_search_all.bat "how to handle Unicode errors"
 # [2] [project-B] feedback.md - Windows console encoding fix
 ```
 
-### Example 2: Project-Specific Search
+#### Example 2: Project-Specific Search
 
 ```bash
 # Search within a single project's memory
 python scripts/l4_semantic_global.py search-project my-project "API integration"
 ```
 
-### Example 3: Parallel Hybrid Search
+#### Example 3: Health Check
+
+```bash
+# Check memory size / rotation health
+python scripts/health_memory_size.py
+```
+
+### Repository Tools Examples
+
+These commands require the full repository clone and are not available in the installed runtime:
+
+#### Example 4: Parallel Hybrid Search
 
 ```bash
 # Standard hybrid search (sequential)
@@ -336,7 +351,7 @@ python scripts/benchmark_parallel_search.py "memory system"
 # Improvement: 63.7%
 ```
 
-### Example 4: Memory Lint Quick Check
+#### Example 5: Memory Lint Quick Check
 
 ```bash
 # Quick check (SessionStart hook - fast)
@@ -347,13 +362,6 @@ python scripts/memory_lint.py --layer 1
 
 # Full check with semantic analysis
 python scripts/memory_lint.py --layer all
-```
-
-### Example 5: Health Check
-
-```bash
-# Check memory size / rotation health
-python scripts/health_memory_size.py
 ```
 
 See [examples/](examples/) directory for more.

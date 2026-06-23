@@ -188,10 +188,10 @@ class PreInstallAudit(BaseReporter):
 
         # Check Python version
         python_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
-        if sys.version_info >= (3, 7):
-            self.print_ok(f"Python {python_version} (>= 3.7 required)")
+        if sys.version_info >= (3, 10):
+            self.print_ok(f"Python {python_version} (>= 3.10 required)")
         else:
-            self.print_error(f"Python {python_version} (3.7+ required)")
+            self.print_error(f"Python {python_version} (3.10+ required)")
 
         # Check required packages
         required_packages = {
