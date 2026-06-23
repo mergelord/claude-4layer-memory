@@ -119,21 +119,43 @@ class CostTracker:
 
         return self.DEFAULT_PRICES
 
-    def resolve_price(self, model: str) -> Dict[str, float]:
+    def resolve_price(self, model: Optional[str]) -> Dict[str, float]:
         """Return prices for a model with safe fallbacks.
 
         Public entry point so other modules (e.g. mcp_server computing a
         routing-learner cost estimate) reuse the same single source of
         truth as :meth:`track_operation` — never duplicate price math.
+
+        The Anthropic API returns versioned model IDs (e.g.
+        ``claude-opus-4-20250514``) in ``message.model``, but
+        ``DEFAULT_PRICES`` / ``prices.json`` keys are short aliases
+        (``claude-opus-4``).  An exact key miss triggers a prefix match
+        (longest key first) so versioned IDs resolve to the correct base
+        price instead of silently falling back to ``FALLBACK_MODEL``.
+
+        ``None`` or empty *model* is treated as ``FALLBACK_MODEL``.
         """
+        if not model:
+            model = self.FALLBACK_MODEL
         fallback = self.DEFAULT_PRICES.get(
             self.FALLBACK_MODEL, {'input': 0.0, 'output': 0.0}
         )
-        price = (
-            self.prices.get(model)
-            or self.prices.get(self.FALLBACK_MODEL)
-            or fallback
-        )
+        # 1. Exact match (short alias "claude-opus-4")
+        price = self.prices.get(model)
+        if not price:
+            # 2. Prefix match (versioned id "claude-opus-4-20250514" → key "claude-opus-4")
+            #    Longest key first to prevent "claude-opus-4" from eating
+            #    a hypothetical "claude-opus-4-1" that is its own key.
+            for key in sorted(self.prices, key=len, reverse=True):
+                if model.startswith(key):
+                    price = self.prices.get(key)
+                    break
+        if not price:
+            print(
+                f"[WARN] Unknown model {model!r}, falling back to {self.FALLBACK_MODEL!r}",
+                file=sys.stderr,
+            )
+            price = self.prices.get(self.FALLBACK_MODEL) or fallback
         return {
             'input': float(price.get('input', fallback.get('input', 0.0))),
             'output': float(price.get('output', fallback.get('output', 0.0))),
