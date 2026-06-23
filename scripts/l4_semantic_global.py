@@ -292,6 +292,27 @@ class GlobalSemanticMemory:
     # ADAPTER: chunk -> document key (для RRF)
     # ----------------------------
 
+    def _warn_if_mixed_metrics(self) -> None:
+        """Log a warning if collections use different distance metrics."""
+        try:
+            collections = self.client.list_collections()
+            metrics: Dict[str, str] = {}
+            for c in collections:
+                meta = getattr(c, "metadata", None) or {}
+                metric = meta.get("hnsw:space", "cosine")
+                metrics[c.name] = metric
+
+            unique = set(metrics.values())
+            if len(unique) > 1:
+                logging.warning(
+                    "Mixed distance metrics across collections: %s. "
+                    "Results may be inaccurate. Consider rebuilding all "
+                    "collections with the same metric.",
+                    metrics,
+                )
+        except Exception:  # pylint: disable=broad-except
+            pass
+
     def _make_document_key(self, source: str, metadata: Dict[str, Any]) -> str:
         """
         Формирует document-level ключ для RRF на основе метаданных чанка.
@@ -381,6 +402,10 @@ class GlobalSemanticMemory:
         # ------------------------
         # LOCAL RANKING (within semantic)
         # ------------------------
+
+        # Check distance metrics across collections before merging.
+        # Different metrics (cosine vs L2 vs IP) produce incomparable distances.
+        self._warn_if_mixed_metrics()
 
         for _, results in results_by_source.items():
             results.sort(key=lambda x: (x["distance"], x["id"]))
