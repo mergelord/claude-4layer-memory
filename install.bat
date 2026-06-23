@@ -77,7 +77,12 @@ copy /Y "scripts\windows\l4_*.bat" "%USERPROFILE%\.claude\hooks\" >nul
 copy /Y "hooks\git-activity-detector.py" "%USERPROFILE%\.claude\hooks\" >nul
 copy /Y "hooks\stop_handoff_universal.py" "%USERPROFILE%\.claude\hooks\" >nul
 
-echo [OK] Scripts copied
+REM Copy built-in hooks (essential for 4-layer memory to function)
+REM These hooks provide: pre-compact flush, session logging, auto-remember,
+REM context loading, encoding gate cache, and graceful shutdown wrapper.
+copy /Y "hooks\builtin\*.py" "%USERPROFILE%\.claude\hooks\" >nul
+
+echo [OK] Scripts and built-in hooks copied
 
 REM Copy templates
 echo.

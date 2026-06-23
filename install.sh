@@ -85,7 +85,13 @@ cp -f hooks/stop_handoff_universal.py "$HOME/.claude/hooks/"
 chmod +x "$HOME/.claude/hooks/git-activity-detector.py"
 chmod +x "$HOME/.claude/hooks/stop_handoff_universal.py"
 
-echo -e "${GREEN}[OK]${NC} Scripts copied"
+# Copy built-in hooks (essential for 4-layer memory to function)
+# These hooks provide: pre-compact flush, session logging, auto-remember,
+# context loading, encoding gate cache, and graceful shutdown wrapper.
+cp -f hooks/builtin/*.py "$HOME/.claude/hooks/"
+chmod +x "$HOME/.claude/hooks/"*.py
+
+echo -e "${GREEN}[OK]${NC} Scripts and built-in hooks copied"
 
 # Copy templates
 echo ""
