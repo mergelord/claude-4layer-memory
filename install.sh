@@ -58,6 +58,11 @@ echo -e "${GREEN}[OK]${NC} Directories created"
 # Copy scripts
 echo ""
 echo "Copying scripts..."
+# Deployed runtime is semantic-only: the l4_* wrappers invoke
+# l4_semantic_global.py (which imports chunking + ranking) and the hooks
+# import EncodingGate from memory_lint_helpers.py. Keep this set identical to
+# install.bat. Hybrid FTS5/BM25/rerank runs from the repo, not the flat
+# ~/.claude/hooks layout, so those modules are intentionally NOT deployed.
 cp -f scripts/l4_semantic_global.py "$HOME/.claude/hooks/"
 cp -f scripts/chunking.py "$HOME/.claude/hooks/"
 cp -f scripts/ranking.py "$HOME/.claude/hooks/"
