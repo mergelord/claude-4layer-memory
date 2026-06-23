@@ -6,7 +6,7 @@ This file provides guidance for Claude Code when working with this project.
 
 **Claude 4-Layer Memory System** is an intelligent memory management system for Claude Code that provides semantic search, cross-project knowledge sharing, and automated context management through a 4-layer architecture (HOT → WARM → COLD → SEMANTIC).
 
-**Version:** 1.4.0
+**Version:** 1.6.0
 **Status:** Production (published on GitHub)
 **License:** MIT
 

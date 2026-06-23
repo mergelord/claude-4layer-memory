@@ -1,5 +1,43 @@
 # Changelog
 
+## [1.6.0] - 2026-06-23
+
+### Breaking Changes
+- **`graceful-shutdown-wrapper.py` переписан:** вместо захардкоженного списка 7
+  личных хуков используется auto-discovery — сканирует `~/.claude/hooks/` для
+  `stop-*.py` файлов. Пользователи с кастомным списком хуков в этом файле
+  должны перейти на именование `stop-*.py` для своих хуков.
+
+### Added
+- **Hooks в репозитории:** `hooks/builtin/` (7 файлов) и `hooks/optional/` (1 файл)
+  теперь версионируются в git. Без них 4-layer memory не работает.
+  - `hooks/builtin/precompact-flush-l4.py` — сохраняет HOT/WARM перед компактом
+  - `hooks/builtin/session-usage-logger.py` — логирует usage для ledger
+  - `hooks/builtin/auto-remember.py` — ловит "запомни: X" → HOT memory
+  - `hooks/builtin/load-context-on-start.py` — грузит MEMORY.md/decisions.md
+  - `hooks/builtin/inject-verified-facts.py` — антигаллюцинация (CWD, user, date)
+  - `hooks/builtin/hook_cache.py` — кэш для ChromaDB/sentence-transformers
+  - `hooks/builtin/graceful-shutdown-wrapper.py` — обёртка для Stop hooks
+  - `hooks/optional/crash-recovery.py` — восстановление после аварий
+- `hooks/README.md` — документация по структуре hooks/ и auto-discovery
+
+### Security
+- **Token leak fix** (`dsm_telegram_monitor.py:583`): бот-токен в URL попадал
+  в `str(HTTPError)` → утечка в логи. Добавлена `_sanitize_token()` для замены
+  токена на `***` + regression test.
+
+### Fixed
+- `audit.py:191` — Python version gate обновлён с `>=3.7` на `>=3.10`
+  (CI тестирует 3.10-3.13, код использует PEP 604).
+- `README.md` — разделены installed runtime команды и repo-only dev инструменты
+  (hybrid search, BM25, rerank, memory_lint).
+
+### Maintenance
+- `install.bat` / `install.sh` — копируют `hooks/builtin/*` при установке
+- Deployed runtime синхронизирован: `~/.claude/hooks/` = repo (10/10 ключевых файлов)
+- `~/.claude/VERSION` обновлён до 1.6.1 (был 1.4.0)
+- Очистка deploy: удалены 16 orphaned bat-файлов, 8 backup-файлов, `cmd.exe`
+
 ## [1.5.1] - 2026-05-29
 
 ### Documentation
