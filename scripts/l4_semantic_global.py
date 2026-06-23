@@ -310,8 +310,8 @@ class GlobalSemanticMemory:
                     "collections with the same metric.",
                     metrics,
                 )
-        except Exception:  # pylint: disable=broad-except
-            pass
+        except Exception as exc:  # pylint: disable=broad-except
+            logging.debug("metric check skipped: %s", exc)
 
     def _make_document_key(self, source: str, metadata: Dict[str, Any]) -> str:
         """
