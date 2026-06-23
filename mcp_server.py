@@ -40,8 +40,40 @@ mcp = FastMCP("claude-4layer-memory")
 
 fts5_search = L4FTS5Search()
 cost_tracker = CostTracker()
-tracked_claude = TrackedClaudeClient(cost_tracker=cost_tracker)
 routing_learner = get_learner()
+
+# Lazy Anthropic-backed client.
+#
+# Constructing TrackedClaudeClient() eagerly builds an anthropic.Anthropic()
+# instance, which raises at import time when no ANTHROPIC_API_KEY (and no
+# explicit api_key) is configured. Doing that at module scope took down the
+# ENTIRE MCP server -- including search_memory / get_memory_stats /
+# reindex_memory and every cost-tracking tool, none of which touch the
+# Anthropic API. Defer construction until smart_complete actually needs it so
+# a missing key only disables smart_complete, not local memory search.
+_tracked_claude: TrackedClaudeClient | None = None
+
+
+def get_tracked_claude() -> TrackedClaudeClient:
+    """Return a process-wide TrackedClaudeClient, building it on first use.
+
+    Raises:
+        RuntimeError: If the Anthropic client cannot be constructed (e.g. no
+            ANTHROPIC_API_KEY configured). Callers should translate this into
+            a clean tool-level error rather than letting it propagate and
+            crash the server.
+    """
+    global _tracked_claude
+    if _tracked_claude is None:
+        try:
+            _tracked_claude = TrackedClaudeClient(cost_tracker=cost_tracker)
+        except Exception as exc:
+            raise RuntimeError(
+                "Anthropic API client is unavailable "
+                "(set ANTHROPIC_API_KEY to enable smart_complete). "
+                "Memory search and cost-tracking tools do not require it."
+            ) from exc
+    return _tracked_claude
 
 
 def _extract_text(message: Any) -> str:
@@ -179,7 +211,7 @@ def get_cost_breakdown(days: int = 7) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Code execution tool (stealth routing — no mention of models)
+# Code execution tool (stealth routing -- no mention of models)
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
@@ -218,12 +250,21 @@ def smart_complete(
         prompt = f"Context:\n{context}\n\nTask:\n{task}" if context else task
         context_len = len(context.split()) if context else 0
 
-        # ---- internal: pick the right model (stealth — NEVER mention to Claude) ----
+        # ---- internal: pick the right model (stealth -- NEVER mention to Claude) ----
         chosen_model = routing_learner.predict_model(
             task, context_len=context_len, operation_type="smart_complete",
         )
 
-        message = tracked_claude.complete(
+        # Resolve the Anthropic-backed client lazily. If it is unavailable
+        # (e.g. ANTHROPIC_API_KEY unset) return a clean tool error instead of
+        # crashing -- and do NOT record a routing outcome, because this is a
+        # configuration problem, not a signal about the chosen model.
+        try:
+            claude = get_tracked_claude()
+        except RuntimeError as exc:
+            return {"success": False, "error": str(exc)}
+
+        message = claude.complete(
             prompt=prompt,
             model=chosen_model,
             max_tokens=max_tokens,
@@ -234,7 +275,7 @@ def smart_complete(
         usage = _extract_usage(message)
         result_text = _extract_text(message)
 
-        # Internal learning — never surfaced to Claude.
+        # Internal learning -- never surfaced to Claude.
         #
         # Cost is computed from the SAME per-model price table the
         # CostTracker uses (cost_tracker.resolve_price), so Opus and
