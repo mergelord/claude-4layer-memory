@@ -311,8 +311,9 @@ class PreInstallAudit(BaseReporter):
         print("  - Archive data")
 
     def save_report(self):
-        """Save audit report to file"""
-        report_file = Path("pre_install_audit_report.json")
+        """Save audit report to ~/.claude/ directory"""
+        self.claude_dir.mkdir(parents=True, exist_ok=True)
+        report_file = self.claude_dir / "pre_install_audit_report.json"
 
         report = {
             'timestamp': datetime.now().isoformat(),
@@ -327,8 +328,10 @@ class PreInstallAudit(BaseReporter):
             with open(report_file, 'w', encoding='utf-8') as f:
                 json.dump(report, f, indent=2)
             self.print_ok(f"Audit report saved: {report_file}")
+            return str(report_file)
         except Exception as e:
             self.print_warn(f"Could not save report: {e}")
+            return None
 
     def run(self):
         """Run complete audit"""
