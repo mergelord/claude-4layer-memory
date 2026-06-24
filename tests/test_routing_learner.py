@@ -21,8 +21,9 @@ ChromaDB: chroma_client инжектится как mock, а метод ``_encod
 from __future__ import annotations
 
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -35,6 +36,30 @@ from scripts.routing_learner import (  # noqa: E402
     OUTCOME_PENALTY,
     RoutingLearner,
 )
+
+
+# ---------------------------------------------------------------------------
+# Deterministic datetime for task_id generation
+# ---------------------------------------------------------------------------
+_counter = 0
+
+
+def _fixed_now(tz=None):
+    """Return incrementing timestamps so each record_outcome gets a unique ID."""
+    global _counter
+    _counter += 1
+    return datetime(2026, 1, 1, 0, 0, 0, _counter, tzinfo=timezone.utc)
+
+
+@pytest.fixture(autouse=True)
+def _patch_datetime():
+    """Patch datetime.now in routing_learner to avoid ID collisions on fast CI."""
+    global _counter
+    _counter = 0
+    with patch("scripts.routing_learner.datetime") as mock_dt:
+        mock_dt.now = _fixed_now
+        mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+        yield
 
 
 # ---------------------------------------------------------------------------
