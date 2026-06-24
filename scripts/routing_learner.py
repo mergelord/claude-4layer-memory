@@ -278,8 +278,8 @@ class RoutingLearner:
             return floor_model
 
         model_scores: dict[str, float] = {
-            model: model_weight_sums[model] / model_counts[model]
-            for model in model_weight_sums
+            model: weight_sum / model_counts[model]
+            for model, weight_sum in model_weight_sums.items()
         }
 
         # Pick highest-scoring model
