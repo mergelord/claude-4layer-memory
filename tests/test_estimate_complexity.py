@@ -43,9 +43,9 @@ def test_estimate_complexity_prompt_tokens():
 
 
 def test_estimate_complexity_always_escalate():
-    """Verify that specific keywords bypass scoring and always use Opus."""
-    assert estimate_complexity("refactor this code", context_len=0) == "claude-opus-4"
-    assert estimate_complexity("architect a new module", context_len=0) == "claude-opus-4"
+    """Verify that specific operation types bypass scoring and always use Opus."""
+    assert estimate_complexity("any text", operation_type="refactor") == "claude-opus-4"
+    assert estimate_complexity("any text", operation_type="architect") == "claude-opus-4"
 
 
 def test_estimate_complexity_returns_string():
