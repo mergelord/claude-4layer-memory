@@ -11,6 +11,11 @@ rerank(query, candidates) для переупорядочивания топ‑�
 полученной от RRF. Модуль не имеет побочных эффектов: возвращает
 НОВЫЙ список результатов, не изменяя входной.
 
+``sentence_transformers`` импортируется лениво (внутри ``_get_model``),
+а не на уровне модуля — поэтому импорт ``l4_rerank`` никогда не падает
+даже если зависимость не установлена: реранк просто молча отключается
+(возвращает копию входного списка).
+
 Контракт:
 - Принимает query (str) и candidates (list[RankedResult]).
 - Возвращает НОВЫЙ список RankedResult, отсортированный по убыванию
@@ -42,12 +47,19 @@ import os
 import sys
 from functools import lru_cache
 from pathlib import Path
-from typing import List, TypedDict
+from typing import TYPE_CHECKING, List, TypedDict
 
 sys.path.insert(0, str(Path(__file__).parent))
 
 from ranking import RankedResult
-from sentence_transformers import CrossEncoder
+
+if TYPE_CHECKING:
+    # Import only under the type-checker guard so that merely importing
+    # ``l4_rerank`` never hard-requires ``sentence_transformers``. This
+    # matches the lazy-load pattern already used by l4_semantic_global.py:
+    # the (heavy, optional) CrossEncoder is pulled in on first use inside
+    # :func:`_get_model`, not at module import time.
+    from sentence_transformers import CrossEncoder
 
 _MODEL_NAME = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 _MAX_SNIPPET_CHARS = 1200  # ограничиваем длину для скорости и качества
@@ -72,6 +84,16 @@ class RetrievalHit(TypedDict, total=False):
 @lru_cache(maxsize=1)
 def _get_model() -> CrossEncoder | None:
     """Возвращает модель CrossEncoder или None при ошибке."""
+    try:
+        # Lazy import: keeps ``import l4_rerank`` cheap and lets the module
+        # load on hosts where sentence_transformers isn't installed (the
+        # caller simply gets ``None`` and a graceful no-op rerank).
+        from sentence_transformers import CrossEncoder  # pylint: disable=import-outside-toplevel
+    except ImportError as exc:
+        logging.warning(
+            "sentence_transformers not installed; rerank disabled: %s", exc,
+        )
+        return None
     try:
         return CrossEncoder(_MODEL_NAME)
     except Exception as exc:  # nosec

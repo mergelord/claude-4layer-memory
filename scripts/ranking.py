@@ -91,6 +91,7 @@ original empirical retrieval benchmarks.
 from __future__ import annotations
 
 import logging
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
@@ -113,8 +114,26 @@ _KEY_PATTERN = re.compile(r"^\[([^\]]+)\]\s+(.+)$")
 _SOURCE_NON_ALNUM = re.compile(r"[^a-zA-Z0-9_]")
 _SOURCE_REPEATED_UNDERSCORE = re.compile(r"_+")
 
-_CHUNK_PATTERN = re.compile(r"(#\w+|[?&]chunk=)")
+# Detects chunk-level fragments in a join key. Covers the variants used
+# across the engines so the validator catches real offenders instead of
+# only the ``#anchor`` / ``?chunk=`` forms:
+#   #anchor           – markdown anchor / heading fragment
+#   ?chunk= / &chunk= – URL-style chunk selector
+#   _chunk_           – snake_case chunk marker (chunking.py id schemes)
+#   :<digits>         – the actual on-disk format produced by
+#                       l4_semantic_global.py: ``f"{md_file}:{i}"`` →
+#                       ``notes.md:3``. The ``\b`` guard avoids matching
+#                       dates/versions inside a path (``2024-01-15``,
+#                       ``v2/``), which are legitimate document-level keys.
+_CHUNK_PATTERN = re.compile(r"(#\w+|[?&]chunk=|_chunk_|:\d+\b)")
 _SEEN_BAD_KEYS: set[str] = set()
+
+# Default strictness of the chunk-key check. ``False`` preserves the
+# historical behaviour (warn-only); ``True`` turns chunk-level keys into
+# a hard ``ValueError`` from :func:`rrf_merge`. Override per-call via
+# the ``strict`` argument, or globally via the env var below for
+# enforcement in CI/pre-commit without touching call sites.
+_STRICT_CHUNK_KEYS = os.getenv("RRF_STRICT_CHUNK_KEYS", "0") in ("1", "true", "yes")
 
 # Word-character tokeniser for FTS5 query sanitization. ``\w`` is
 # Unicode-aware in Python 3, so Cyrillic / CJK tokens survive while all
@@ -246,13 +265,32 @@ def sanitize_fts5_query(query: str) -> str:
     return " ".join(f'"{token}"' for token in tokens)
 
 
-def _validate_key_shape(key: str) -> None:
-    """Soft validation: warn if key contains chunk-like patterns.
+def _validate_key_shape(key: str, *, strict: bool = False) -> None:
+    """Validate that ``key`` is document-level, not chunk-level.
 
-    Deduplicates warnings per key to avoid log spam when the same
-    bad key appears across multiple chunks.
+    Warns (default) or raises (``strict=True``) when the key carries a
+    chunk fragment such as ``notes.md:3``, ``notes.md#anchor`` or
+    ``notes.md?chunk=5``. Chunk-level keys break RRF by counting the
+    same document multiple times within one stream (see KEY CONTRACT).
+
+    In warn mode the warning is deduplicated per key via
+    ``_SEEN_BAD_KEYS`` to avoid log spam when the same bad key appears
+    across multiple chunks. In strict mode every occurrence raises, so
+    no dedup set is touched.
+
+    Args:
+        key: The join key to inspect.
+        strict: When ``True``, raise ``ValueError`` instead of warning.
     """
-    if _CHUNK_PATTERN.search(key) and key not in _SEEN_BAD_KEYS:
+    if not _CHUNK_PATTERN.search(key):
+        return
+    if strict:
+        msg = (
+            f"chunk-level RRF key rejected (strict mode): {key!r}. "
+            "Document-level keys only — use make_join_key/normalize_existing_key."
+        )
+        raise ValueError(msg)
+    if key not in _SEEN_BAD_KEYS:
         _SEEN_BAD_KEYS.add(key)
         logging.warning(
             "RRF key looks like chunk-level (%s). "
@@ -287,6 +325,7 @@ class RankedResult:
 def rrf_merge(
     *streams: tuple[str, Iterable[Mapping[str, Any]]],
     k: int = DEFAULT_K,
+    strict: bool | None = None,
 ) -> list[RankedResult]:
     """Merge two or more ranking streams via Reciprocal Rank Fusion.
 
@@ -299,6 +338,16 @@ def rrf_merge(
         k: RRF damping constant. Higher values flatten the ranking;
             lower values emphasise top results. Default 60 follows
             Cormack 2009.
+        strict: Key-shape enforcement level for chunk-level keys.
+
+            * ``None`` (default): honour the module default, which is
+              warn-only unless ``RRF_STRICT_CHUNK_KEYS=1`` is set in the
+              environment. Use this for existing call sites.
+            * ``True``: any chunk-level key (``notes.md:3``,
+              ``notes.md#anchor`` …) raises ``ValueError``. Use for
+              CI / pre-commit gates where silent ranking bias is worse
+              than a loud failure.
+            * ``False``: always warn-only, regardless of the env var.
 
     Returns:
         List of :class:`RankedResult` ordered by descending score.
@@ -307,8 +356,8 @@ def rrf_merge(
 
     Raises:
         ValueError: If ``k`` is negative, any item lacks a ``"key"``,
-            an item has an empty key, or duplicate source names are
-            provided.
+            an item has an empty key, duplicate source names are
+            provided, or (in strict mode) a chunk-level key is detected.
 
     .. important::
        The ``key`` must be a **document-level** identifier
@@ -326,6 +375,9 @@ def rrf_merge(
     if k < 0:
         msg = f"rrf k must be non-negative, got {k}"
         raise ValueError(msg)
+
+    # Resolve the effective strictness: explicit arg wins, else env default.
+    effective_strict = _STRICT_CHUNK_KEYS if strict is None else bool(strict)
 
     seen_sources: set[str] = set()
     accumulator: dict[str, RankedResult] = {}
@@ -352,7 +404,7 @@ def rrf_merge(
                     msg,
                 )
 
-            _validate_key_shape(key)
+            _validate_key_shape(key, strict=effective_strict)
 
             contribution = 1.0 / (k + rank)
 

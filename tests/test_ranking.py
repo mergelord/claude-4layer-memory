@@ -406,6 +406,94 @@ def test_validate_key_shape_no_warning_on_normal_key(caplog):
     assert len(warnings) == 0
 
 
+@pytest.mark.parametrize(
+    "chunk_key",
+    [
+        "file.md#chunk_3",      # markdown anchor / heading fragment
+        "file.md:3",            # real on-disk format from l4_semantic_global.py
+        "file.md?chunk=5",      # URL-style chunk selector
+        "file.md&chunk=5",      # URL-style (ampersand variant)
+        "file_chunk_0",         # snake_case chunk marker
+    ],
+)
+def test_validate_key_shape_warns_on_all_chunk_formats(chunk_key, caplog):
+    """Every chunk-id format emitted by the engines must be flagged.
+
+    Regression guard for the extended _CHUNK_PATTERN: the real semantic
+    indexer writes ``f"{md_file}:{i}"`` (l4_semantic_global.py:514), which
+    the original narrow pattern ``(#\\w+|[?&]chunk=)`` missed entirely.
+    """
+    import logging
+    import ranking as _ranking
+
+    # Dedup set is module-level mutable state — clear it so that earlier
+    # tests (e.g. test_validate_key_shape_warns_on_chunk_pattern) don't
+    # suppress the warning for the same key.
+    _ranking._SEEN_BAD_KEYS.clear()
+
+    items = [{"key": chunk_key}]
+    with caplog.at_level(logging.WARNING):
+        rrf_merge(("fts", items))
+
+    warnings = [r for r in caplog.records if "chunk-level" in r.message]
+    assert len(warnings) == 1, f"chunk key not detected: {chunk_key!r}"
+
+
+@pytest.mark.parametrize(
+    "doc_key",
+    [
+        "[global] 2024-01-15-notes.md",   # date in filename — NOT a chunk id
+        "[g] v2/changelog.md",            # version dir — NOT a chunk id
+        "[proj] dir/sub.md",              # nested path
+        "[global] handoff.md",            # plain doc
+    ],
+)
+def test_validate_key_shape_no_false_positives_on_valid_doc_keys(doc_key, caplog):
+    """Valid document-level keys (with dates/versions) must NOT be flagged.
+
+    The ``:\\d+`` alternative in _CHUNK_PATTERN uses a ``\\b`` word
+    boundary specifically so that ``2024-01-15`` (digits glued to a dash)
+    and ``v2/`` (digits glued to a letter/slash) are not mistaken for a
+    ``file:N`` chunk suffix.
+    """
+    import logging
+
+    items = [{"key": doc_key}]
+    with caplog.at_level(logging.WARNING):
+        rrf_merge(("fts", items))
+
+    warnings = [r for r in caplog.records if "chunk-level" in r.message]
+    assert len(warnings) == 0, f"false positive on valid key: {doc_key!r}"
+
+
+def test_rrf_merge_strict_mode_rejects_chunk_key():
+    """strict=True turns a chunk-level key into a hard ValueError."""
+    items = [{"key": "[global] file.md:3"}]
+    with pytest.raises(ValueError, match="chunk-level"):
+        rrf_merge(("fts", items), strict=True)
+
+
+def test_rrf_merge_strict_false_ignores_env_and_only_warns(caplog, monkeypatch):
+    """strict=False overrides a strict env var back to warn-only."""
+    import importlib
+    import logging
+
+    monkeypatch.setenv("RRF_STRICT_CHUNK_KEYS", "1")
+    # Re-import the module-level default to pick up the env var.
+    import ranking as ranking_mod
+    importlib.reload(ranking_mod)
+
+    items = [{"key": "[global] file.md:3"}]
+    with caplog.at_level(logging.WARNING):
+        # Call through the *reloaded* module to guarantee we hit the
+        # fresh _STRICT_CHUNK_KEYS value (True from env).
+        # Explicit strict=False must still win over the env-enabled default.
+        ranking_mod.rrf_merge(("fts", items), strict=False)
+
+    warnings = [r for r in caplog.records if "chunk-level" in r.message]
+    assert len(warnings) == 1, "strict=False should warn, not raise"
+
+
 # ---------------------------------------------------------------------------
 # normalize_scores — inf protection
 # ---------------------------------------------------------------------------

@@ -148,6 +148,17 @@ def estimate_complexity(
 _API_RETRY_CODES = {429, 502, 503, 504}
 _API_MAX_RETRIES = 3
 _API_RETRY_DELAY = 1.0
+# Hard wall-clock cap on a single messages.create call. Without it a
+# hung socket (gateway stall, DNS black-hole, idle keep-alive drop) can
+# block the caller forever — the SDK's retry logic only fires on raised
+# errors, never on a request that never returns. Configurable via env so
+# long-running generations can opt out. ``None``/``0`` disables it.
+_api_timeout_env = os.getenv("CLAUDE_API_TIMEOUT", "120")
+_API_TIMEOUT = (
+    None
+    if _api_timeout_env.strip() in ("", "0", "none", "None")
+    else float(_api_timeout_env)
+)
 
 
 class TrackedClaudeClient:
@@ -223,6 +234,11 @@ class TrackedClaudeClient:
         )
 
         last_exc: Optional[Exception] = None
+        # Inject a per-request timeout only when the caller hasn't set
+        # one explicitly. ``timeout`` may already be present in kwargs
+        # (e.g. via route_and_complete passthrough) — respect it.
+        if "timeout" not in kwargs and _API_TIMEOUT is not None:
+            kwargs = {"timeout": _API_TIMEOUT, **kwargs}
         for attempt in range(1, _API_MAX_RETRIES + 1):
             try:
                 message = self.client.messages.create(**kwargs)
