@@ -35,6 +35,17 @@ Pass criteria: 431 tests green, pylint no new errors, encoding clean.
 
 ## Recent Decisions
 
+**2026-06-24/25** — PR #58: честный routing-тест, изоляция post-success bookkeeping в `smart_complete`, нормализация routing-скоров. Все 19 чеков зелёные.
+- **Контекст:** подробное код-ревью `main`@`3d9016b` (состояние после PR #57) выявило три P2-фоллоуапа; реализованы в одной ветке по запросу пользователя.
+- **Ветка/PR:** `fix/review-followups-routing-tests-smart-complete` от `main`@`3d9016b`; PR #58 (https://github.com/mergelord/claude-4layer-memory/pull/58). Коммиты: тест `test_routing_learner.py` (первый push), `08f9350` (`mcp_server.py` + `scripts/routing_learner.py`), `a952510` (lint `.items()`).
+- **Фикс 1 — `tests/test_routing_learner.py` (честный поведенческий тест):** старый `test_success_history_prefers_model_over_failure` был ВАКУУМНЫМ — сидел 2 записи, но `predict_model` требует `history_count >= 3` (`if history_count < 3: return floor_model`), поэтому срабатывал cold-start и возвращался floor=`haiku`; ассерт проходил из-за floor, а НЕ из-за outcome-weighting. Переписан: 6 соседей (3× sonnet success, 3× opus failure), равная similarity (FakeCollection distance 0.2), равные счётчики (3 vs 3 — частота не решает), floor=haiku (не перекрывает) → `predict_model` обязан выбрать `sonnet` за счёт `OUTCOME_BONUS` vs `OUTCOME_PENALTY`. Добавлены зеркальный тест (opus success > sonnet failure) и `test_outcome_quality_beats_frequency` (haiku×5 провалов проигрывает sonnet×2 успехам — прямая проверка нормализации из фикса 3).
+- **Фикс 2 — `mcp_server.smart_complete` (изоляция post-success bookkeeping):** расчёт стоимости (`resolve_price` + cache-тиры `CACHE_CREATION_PRICE_KEY`/`CACHE_READ_PRICE_KEY`) и `record_outcome` вынесены из основного `try` в отдельный `try/except`. Раньше сбой ПОСЛЕ успешного `complete()` (миссинг в price-таблице / ChromaDB-сбой) возвращал `{"success": False}` для фактически успешного ответа И писал ложный провал в learner → отравлял маршрутизацию. Теперь bookkeeping не может ни перевернуть успешный ответ, ни записать ложный negative. Семантика «пустой ответ → negative signal» (`was_successful = bool(result_text.strip())`) сохранена; в `except` основного try при реальной ошибке по-прежнему пишется `was_successful=False` (под защищённым inner try).
+- **Фикс 3 — `routing_learner.predict_model` (нормализация `model_scores`):** раньше суммировались веса соседей по модели (`model_scores[m] += weight`) → побеждала самая ЧАСТАЯ модель, а не самая УСПЕШНАЯ. Теперь `model_weight_sums` + `model_counts`, затем `model_scores = {m: model_weight_sums[m] / model_counts[m]}` (среднее). Floor/tier-логика без изменений; существующие тесты `test_history_cannot_downgrade_below_floor` / `test_history_can_upgrade_above_floor` остаются зелёными (на сценариях с одной моделью среднее == сумме/1).
+- **Lint (pylint C0206):** нормализующая comprehension сначала ловила `consider-using-dict-items` (итерация ключей + индексация того же dict), CI падал с exit code 16. Исправлено на `for model, weight_sum in model_weight_sums.items()`. Чистая lint-правка, поведение не меняется. Pylint снова 10.00/10.
+- **CI:** после lint-фикса все 19 чеков зелёные — `lint.yml` (Pylint/MyPy/Ruff/EncodingGate/Bandit/Radon) + `test.yml` (ubuntu/windows/macos × Python 3.10–3.13).
+- **Роль reviewer:** PR не мёржен автоматически — оставлено пользователю. Файлы PR: `tests/test_routing_learner.py`, `mcp_server.py`, `scripts/routing_learner.py`.
+- This handoff entry is committed to `main` only.
+
 **2026-06-24** — Зелёный CI: фикс Bandit B110 в `claude-4layer-memory`. Красным был не pytest, а **Code Quality / Bandit Security Check** (Failing after ~11s).
 - **Диагноз:** `[B110:try_except_pass]` в `scripts/l4_semantic_global.py` (функция `_warn_if_mixed_metrics`): голый `except Exception: pass`. Bandit запускается с `-l` (`bandit -r scripts/ audit.py -l --skip B404,B603`), поэтому даже находка Severity Low даёт exit code 1.
 - **Источник:** введён коммитом `90044c1` (semantic mixed-metrics), а НЕ `208fa77` (`fix(routing): context_len tokens`, трогает только `mcp_server.py` + `tests/test_estimate_complexity.py`, вне области Bandit). Ранняя ложная атрибуция исправлена — красный чек существовал ещё до `208fa77`.
@@ -88,79 +99,6 @@ Pass criteria: 431 tests green, pylint no new errors, encoding clean.
 - Updated `cli/README.md` to document only the clone + `npm install` / optional `npm link` flow and changed the CI snippet to run from the cloned repo with `node cli/index.js`.
 - Aligned `README.md` visible version badge/text with `VERSION` and `package.json`: `1.5.1`.
 - Validation: encoding gate clean; no remaining registry-install recommendations in `README.md` / `cli/README.md`.
-
-**2026-05-29** - GitHub CI Bandit follow-up:
-- After pushing `cabadeb`, GitHub Actions started for the commit. `Shellcheck` passed, but `Code Quality / Bandit Security Check` failed on existing `scripts/dsm_telegram_monitor.py` with B310 at `urllib.request.urlopen()`.
-- Fixed the monitor instead of broad-skipping the rule: added HTTPS-only Telegram `api_base` validation without credentials, kept a targeted `# nosec B310` only on the validated `urlopen` call, and added `test_load_config_rejects_non_https_telegram_api_base`.
-- Local validation before follow-up commit: focused DSM monitor tests `9 passed`; full pytest `430 passed, 1 skipped`; Bandit exact CI command clean; encoding gate clean; ruff clean; mypy clean; radon cc/mi clean; pylint `10.00/10`; `git diff --check` clean.
-
-**2026-05-29** - Runtime project search resolver hotfix:
-- Review after local/GitHub/runtime sync found one live regression: `l4_semantic_global.py search-project C--BAT-claude-4layer-memory ...` returned `[]` because resolver tried normalized `memory_C__BAT_claude_4layer_memory` before the raw collection name, while existing/indexed runtime collections are `memory_C--BAT-claude-4layer-memory`.
-- Fixed repo `scripts/l4_semantic_global.py`: `_resolve_project_collection_name()` now prefers exact raw `memory_<project>` collection, then normalized name, then raw/normalized prefix matches. Added regression test in `tests/test_l4_semantic_global_v2.py`.
-- Deployed fixed `l4_semantic_global.py` to `C:\Users\MYRIG\.claude\hooks` and `C:\Users\MYRIG\.claude\scripts`. Backups: `C:\Users\MYRIG\.claude\backups\l4_semantic_global.py.codex_20260529_project_search_fix.hooks.bak` and `.scripts.bak`.
-- Validation: focused semantic tests `41 passed`; full pytest `429 passed, 1 skipped`; encoding gate clean; pylint `10.00/10`; runtime `py_compile` passed; runtime `search-project C--BAT-claude-4layer-memory memory --json` now returns project results.
-- Drift check after deploy: critical modules match repo in both `.claude\hooks` and `.claude\scripts` (`cost_tracker.py`, `l4_fts5_search.py`, `l4_semantic_global.py`, `l4_bm25_search.py`, `ranking.py`, `memory_lint.py`, `memory_lint_helpers.py`, `semantic_search.py`, `scan_repo_encoding.py`, `skill_creator.py`; plus hook `stop_handoff_universal.py`).
-
-**2026-05-29** - Live `.claude` runtime sync from GitHub:
-- Used clean deploy worktree `C:\tmp\claude-4layer-memory-deploy-main` at `origin/main` `5afd331`; local repo remained dirty/behind and was not merged.
-- Synced GitHub runtime deltas into `C:\Users\MYRIG\.claude\hooks` and `C:\Users\MYRIG\.claude\scripts`: `cost_tracker.py`, `l4_fts5_search.py`, `l4_semantic_global.py`. Backup: `C:\Users\MYRIG\.claude\backups\github-sync-20260529_063535`.
-- Runtime checks passed for cost tracker stats, FTS5 stats, semantic stats, active SessionStart hooks, `auto-remember.py`, `semantic_search.py`, Stop wrapper, and PreCompact after hotfix.
-- Live-only hotfix: `precompact-flush-l4.py` now calls `GlobalSemanticMemory.index_all()` with fallback to old `index_global_memory()`/`index_project()` methods. Upstream this or future syncs can overwrite it.
-- `crash-recovery.py` passed isolated temp-USERPROFILE smoke. Live run was intentionally skipped because preflight found one real candidate (`C--BAT`, session `1e37c274-13ef-4c26-8209-4b5c7b520c88`) and full run would append to real `handoff.md`.
-- Follow-up after repo fast-forward/tag `v1.5.0` (`origin/main` `d070702`): only additional live runtime delta was `scripts/l4_fts5_search.py` from PR #39/AUDIT #5 first slice. Updated live copies in `.claude\hooks` and `.claude\scripts`; backup `C:\Users\MYRIG\.claude\backups\github-sync-20260529_085823-v150`; SHA256/py_compile/stats/search smoke passed.
-
-**2026-05-29** - DSM Telegram monitor:
-- Added `scripts/dsm_telegram_monitor.py`: stdlib-only SSH monitor for DSM/codex-lab with Telegram Bot API notifications. Commands: `status`, `status --send`, `check`, `watch`, `test-telegram`.
-- Added ignored local config flow via `config/dsm_telegram_monitor.example.json`; real configs should be copied to `config/*.local.json` or supplied with `DSM_*` environment variables.
-- Added docs in `docs/DSM_TELEGRAM_MONITOR.md` and tests in `tests/test_dsm_telegram_monitor.py`.
-- Validation after patch: focused monitor tests `8 passed`; full pytest `382 passed, 1 skipped`; pylint `10.00/10`. Pylint still logs non-fatal cache write warning under `%LOCALAPPDATA%`.
-
-**2026-05-29** - Codex-lab project upload and validation:
-- Uploaded local archive `.codex-temp\claude-4layer-memory.tar.gz` to DSM path `/volume1/docker/codex-lab/cache/upload/claude-4layer-memory.tar.gz`. Used `ssh ... cat > file` because Synology SFTP/scp failed; verified SHA256 `582c81e6509f2b01cde050827647aef504674a2ee36b79eb51e1efe44e204c74`.
-- Extracted project to `/volume1/docker/codex-lab/workspace/claude-4layer-memory`; inside container this is `/workspace/claude-4layer-memory`. Added Git `safe.directory` for that path inside `codex-lab`.
-- Created Python venv `/cache/venvs/claude-4layer-memory`; installed `requirements-dev.txt` and `requirements.txt`. Venv is about `5.5G` because Linux `torch` pulled CUDA wheels; `/volume1` still has about `1.4T` free.
-- Codex-lab validation results: `python -m pytest tests/ --tb=short -q` -> `374 passed, 1 skipped in 47.87s`; `python scripts/scan_repo_encoding.py` -> `150 file(s) scanned, all clean`; project pylint command -> `10.00/10`.
-- Node validation: `npm ci --cache /cache/npm --prefer-offline` -> `0 vulnerabilities`; `node cli/index.js --version` -> `1.4.0`; `node cli/index.js --help` works.
-- Uploaded project mirrors local dirty tree: `.gitignore` and `CODEX_CONTEXT.md` modified; untracked `docs/CODEX_REVIEW_MR32_GITLAB_CI.md` and `docs/RESEARCH_MR32_RESULT.md`.
-
-**2026-05-29** — Codex-lab handoff before restart:
-- User may restart Codex because modem connection is unstable; resume from this context instead of re-discovering DSM state.
-- Working DSM SSH command uses key `C:\tmp\codex_dsm_myrig_key2` with `-p 22756 -o BatchMode=yes -o ConnectTimeout=10 -o UserKnownHostsFile=.codex-temp\dsm_known_hosts -o StrictHostKeyChecking=yes -i C:\tmp\codex_dsm_myrig_key2 jbsergie@31.10.124.45`.
-- `codex-lab` has already been verified live on DSM: container status `running` / Docker ps `Up`, image `node:22-bookworm-slim`, restart `unless-stopped`, memory limit `4294967296`, security opt `no-new-privileges:true`.
-- Verified binds: `/volume1/docker/codex-lab/workspace:/workspace`, `/volume1/docker/codex-lab/cache:/cache`, `/volume1/docker/codex-lab/logs:/logs`, `/volume1/docker/codex-lab/bin:/usr/local/codex-lab/bin:ro`.
-- Verified inside container: Python `3.11.2`, Node `v22.22.3`, npm/npx `10.9.8`, Git `2.39.5`, ripgrep `13.0.0`, curl `7.88.1`; `/var/run/docker.sock` absent.
-- Host dirs exist and are owned by `jbsergie users`: `/volume1/docker/codex-lab`, `workspace`, `cache`, `logs`, `bin`.
-- No repo code changed for codex-lab verification; tests not run because only context/ops notes were touched.
-
-**2026-05-28** — DSM/Synology automation context:
-- DSM host: `31.10.124.45:22756`, SSH user `jbsergie`.
-- Codex SSH key is already authorized on DSM; user PuTTY key `jbsergie-putty` was added to `/var/services/homes/jbsergie/.ssh/authorized_keys`.
-- `jbsergie` has persistent passwordless sudo via `/etc/sudoers.d/codex-admin` (`jbsergie ALL=(ALL) NOPASSWD: ALL`).
-- Docker on DSM works via `/usr/local/bin/docker`; host is Synology DS425+ class (`synology_geminilakenk_ds425+`), Docker server `24.0.2`.
-- GitLab runner experiment was abandoned because GitLab.com required account verification (phone/card/captcha). Runner was unregistered from GitLab, container `gitlab-runner` was removed, `/volume1/docker/gitlab-runner` was deleted, images `gitlab/gitlab-runner:alpine` and `python:3.11-slim` were removed.
-- `codex-lab` is deployed on DSM under `/volume1/docker/codex-lab` with host dirs `workspace`, `cache`, `logs`, and `bin`; it intentionally does not mount `/var/run/docker.sock` or `.claude` runtime memory paths.
-- Current `codex-lab` container: image `node:22-bookworm-slim`, restart `unless-stopped`, memory limit `4g`, security option `no-new-privileges:true`, binds `/workspace`, `/cache`, `/logs`, `/usr/local/codex-lab/bin:ro`.
-- Verified tools inside `codex-lab`: Python `3.11.2`, Node `v22.22.3`, npm/npx `10.9.8`, Git `2.39.5`, ripgrep `13.0.0`, curl `7.88.1`; Docker socket absent.
-- The first `ubuntu:24.04` attempt was removed because `apt install npm` dragged in Debian node packages and `dpkg` stalled during unpack. The persistent host volume was kept; only the container was replaced.
-- Current DSM Docker state: `codex-lab` is `Up`; pre-existing `linuxserver-firefox-1-1` remains in `Created` status.
-
-**2026-05-27** — Housekeeping closed (all prior PR blockers resolved):
-- Bug N-4 (RRF basename collision, silent correctness) fixed: `ranking.normalize_document_path` + `make_join_key` POSIX rel_path; FTS5/BM25/semantic all use document-level rel_path keys. Regression test added in `test_key_contract.py`. **After merge: `l4_search.bat reindex` + rebuild ChromaDB.**
-- `.pytest-tmp-codex-review/` deleted and added to `.gitignore`; `scan_repo_encoding.py` now clean on full repo.
-- `docs/CODE_REVIEW_REPORT.md`: C-1 marked ✅ ИСПРАВЛЕНО (resolved 2026-05-27); N-4 documented as resolved.
-- `CLAUDE.md` synced to 1.4.0 / 2026-05-27; added "Full PR Validation" section (pytest, encoding scan, ruff, mypy, full pylint when scripts/*.py touched, node --check when cli/*.js touched).
-- `requirements-dev.txt`: duplicate `pytest-cov` removed, `black`/`flake8` dropped, added `ruff`, `pylint`, `bandit`, `radon`, `vulture`.
-- Gates after housekeeping: pytest `374 passed, 1 skipped`; pylint -E clean on 6 critical modules; `scan_repo_encoding` clean on whole repo.
-
-**2026-05-27** — Codex independent review findings folded into `docs/CODE_REVIEW_REPORT.md`; transient `docs/CODEX_REVIEW_V1_4_0.md` was not committed (intermediate snapshot, made stale by housekeeping fixes — risk of confusion in PR).
-
-**2026-05-27** — semantic CLI contracts + UTF-8 + lazy load patch (commit 065cc24, ec53a22):
-- Collection normalization: `C--BAT` → `C__BAT` via `_COLLECTION_NON_ALNUM.sub("_", name)`
-- Resolver tries exact match first, then prefix match `memory_C__BAT*`
-- `_print_results` fallback: `r.get("key", make_join_key(source, file))`
-- UTF-8 init: `str(getattr(stream, "encoding", None) or "").lower()` — str() cast required for pylint
-- Lazy SentenceTransformer: loaded only at search/index, raises `RuntimeError` if missing
-- Lazy l4_rerank: imported only on hybrid rerank path via `@lru_cache`
 
 **Architecture:**
 - `.claude\` = runtime memory + hooks, NOT full installation
