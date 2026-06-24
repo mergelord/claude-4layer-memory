@@ -33,7 +33,7 @@ from cost_tracker import (  # noqa: E402
     CACHE_READ_PRICE_KEY,
     CostTracker,
 )
-from claude_client import TrackedClaudeClient  # noqa: E402
+from claude_client import TrackedClaudeClient, approx_tokens  # noqa: E402
 from routing_learner import get_learner  # noqa: E402
 
 mcp = FastMCP("claude-4layer-memory")
@@ -191,13 +191,6 @@ def get_cost_breakdown(days: int = 7) -> dict[str, Any]:
 # Code execution tool (stealth routing -- no mention of models)
 # ---------------------------------------------------------------------------
 
-
-def _approx_tokens(text: str) -> int:
-    """Estimate token count from text. ~1.3 tokens per word for English,
-    more for code/Cyrillic. Simple heuristic: words * 1.3."""
-    return int(len(text.split()) * 1.3)
-
-
 @mcp.tool()
 def smart_complete(
     task: str,
@@ -232,7 +225,7 @@ def smart_complete(
     chosen_model: str | None = None
     try:
         prompt = f"Context:\n{context}\n\nTask:\n{task}" if context else task
-        context_len = _approx_tokens(context) if context else 0
+        context_len = approx_tokens(context) if context else 0
 
         # ---- internal: pick the right model (stealth -- NEVER mention to Claude) ----
         chosen_model = routing_learner.predict_model(

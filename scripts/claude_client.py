@@ -87,6 +87,12 @@ _ALWAYS_ESCALATE = [
 ]
 
 
+def approx_tokens(text: str) -> int:
+    """Estimate token count from text. ~1.3 tokens per word for English,
+    more for code/Cyrillic. Simple heuristic: words * 1.3."""
+    return int(len(text.split()) * 1.3)
+
+
 def estimate_complexity(
     prompt: str,
     context_len: int = 0,
@@ -110,7 +116,7 @@ def estimate_complexity(
     elif context_len > 8_000:
         score += 1
 
-    prompt_tokens_approx = len(prompt.split())
+    prompt_tokens_approx = approx_tokens(prompt)
     if prompt_tokens_approx > 500:
         score += 2
     elif prompt_tokens_approx > 200:
