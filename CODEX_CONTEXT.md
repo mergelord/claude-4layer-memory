@@ -35,7 +35,7 @@ Pass criteria: 431 tests green, pylint no new errors, encoding clean.
 
 ## Recent Decisions
 
-**2026-06-24/25** — PR #58: честный routing-тест, изоляция post-success bookkeeping в `smart_complete`, нормализация routing-скоров. Все 19 чеков зелёные.
+**2026-06-24/25** — PR #58: честный routing-тест, изоляция post-success bookkeeping в `smart_complete`, нормализация routing-скоров. Все 19 чеков зелёные. PR смёржен в `main` пользователем 2026-06-25.
 - **Контекст:** подробное код-ревью `main`@`3d9016b` (состояние после PR #57) выявило три P2-фоллоуапа; реализованы в одной ветке по запросу пользователя.
 - **Ветка/PR:** `fix/review-followups-routing-tests-smart-complete` от `main`@`3d9016b`; PR #58 (https://github.com/mergelord/claude-4layer-memory/pull/58). Коммиты: тест `test_routing_learner.py` (первый push), `08f9350` (`mcp_server.py` + `scripts/routing_learner.py`), `a952510` (lint `.items()`).
 - **Фикс 1 — `tests/test_routing_learner.py` (честный поведенческий тест):** старый `test_success_history_prefers_model_over_failure` был ВАКУУМНЫМ — сидел 2 записи, но `predict_model` требует `history_count >= 3` (`if history_count < 3: return floor_model`), поэтому срабатывал cold-start и возвращался floor=`haiku`; ассерт проходил из-за floor, а НЕ из-за outcome-weighting. Переписан: 6 соседей (3× sonnet success, 3× opus failure), равная similarity (FakeCollection distance 0.2), равные счётчики (3 vs 3 — частота не решает), floor=haiku (не перекрывает) → `predict_model` обязан выбрать `sonnet` за счёт `OUTCOME_BONUS` vs `OUTCOME_PENALTY`. Добавлены зеркальный тест (opus success > sonnet failure) и `test_outcome_quality_beats_frequency` (haiku×5 провалов проигрывает sonnet×2 успехам — прямая проверка нормализации из фикса 3).
@@ -43,7 +43,7 @@ Pass criteria: 431 tests green, pylint no new errors, encoding clean.
 - **Фикс 3 — `routing_learner.predict_model` (нормализация `model_scores`):** раньше суммировались веса соседей по модели (`model_scores[m] += weight`) → побеждала самая ЧАСТАЯ модель, а не самая УСПЕШНАЯ. Теперь `model_weight_sums` + `model_counts`, затем `model_scores = {m: model_weight_sums[m] / model_counts[m]}` (среднее). Floor/tier-логика без изменений; существующие тесты `test_history_cannot_downgrade_below_floor` / `test_history_can_upgrade_above_floor` остаются зелёными (на сценариях с одной моделью среднее == сумме/1).
 - **Lint (pylint C0206):** нормализующая comprehension сначала ловила `consider-using-dict-items` (итерация ключей + индексация того же dict), CI падал с exit code 16. Исправлено на `for model, weight_sum in model_weight_sums.items()`. Чистая lint-правка, поведение не меняется. Pylint снова 10.00/10.
 - **CI:** после lint-фикса все 19 чеков зелёные — `lint.yml` (Pylint/MyPy/Ruff/EncodingGate/Bandit/Radon) + `test.yml` (ubuntu/windows/macos × Python 3.10–3.13).
-- **Роль reviewer:** PR не мёржен автоматически — оставлено пользователю. Файлы PR: `tests/test_routing_learner.py`, `mcp_server.py`, `scripts/routing_learner.py`.
+- **Роль reviewer:** PR #58 смёржен в `main` пользователем 2026-06-25 (автоматического мёрджа не было). Файлы PR: `tests/test_routing_learner.py`, `mcp_server.py`, `scripts/routing_learner.py`.
 - This handoff entry is committed to `main` only.
 
 **2026-06-24** — Зелёный CI: фикс Bandit B110 в `claude-4layer-memory`. Красным был не pytest, а **Code Quality / Bandit Security Check** (Failing after ~11s).
