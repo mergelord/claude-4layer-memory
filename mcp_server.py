@@ -242,14 +242,39 @@ def smart_complete(
 
         usage = _extract_usage(message)
         result_text = _extract_text(message)
+    except Exception as e:
+        logging.error("smart_complete failed: %s", e)
+        # Record failure so the routing learner avoids models that
+        # consistently error out (transport timeouts, auth failures, etc.).
+        if chosen_model:
+            try:
+                routing_learner.record_outcome(
+                    task=task,
+                    model_used=chosen_model,
+                    was_successful=False,
+                    operation_type="smart_complete",
+                    tokens={"input": 0, "output": 0},
+                    cost_usd=0.0,
+                )
+            except Exception:
+                logging.debug("Failed to record routing outcome for error", exc_info=True)
+        return {"success": False, "error": str(e)}
 
-        # Internal learning -- never surfaced to Claude.
-        #
-        # Cost is computed from the SAME per-model price table the
-        # CostTracker uses (cost_tracker.resolve_price), so Opus and
-        # Sonnet are no longer mis-priced as Haiku. Includes cache tiers
-        # (cache_creation / cache_read) so the recorded cost matches the
-        # authoritative ledger entry persisted by tracked_claude.complete.
+    # ---- post-success bookkeeping (must NEVER turn a successful response into
+    # a failure) -------------------------------------------------------------
+    # Cost estimation and routing-learner recording run OUTSIDE the main try
+    # above. A failure here (e.g. a missing entry in the price table, or a
+    # ChromaDB hiccup while recording the outcome) happens *after* the LLM
+    # already produced a valid result -- it must not flip the response to
+    # {"success": False} nor record a false-negative outcome that would poison
+    # the learner and route future similar tasks away from a model that
+    # actually worked.
+    try:
+        # Cost is computed from the SAME per-model price table the CostTracker
+        # uses (cost_tracker.resolve_price), so Opus and Sonnet are no longer
+        # mis-priced as Haiku. Includes cache tiers (cache_creation /
+        # cache_read) so the recorded cost matches the authoritative ledger
+        # entry persisted by tracked_claude.complete.
         prices = cost_tracker.resolve_price(chosen_model)
         input_tokens = usage.get("input_tokens", 0)
         output_tokens = usage.get("output_tokens", 0)
@@ -276,30 +301,17 @@ def smart_complete(
             tokens={"input": input_tokens, "output": output_tokens},
             cost_usd=cost_est,
         )
+    except Exception as bookkeeping_exc:
+        logging.warning(
+            "smart_complete bookkeeping failed (result still returned): %s",
+            bookkeeping_exc,
+        )
 
-        return {
-            "success": True,
-            "result": result_text,
-            "usage": usage,
-        }
-
-    except Exception as e:
-        logging.error("smart_complete failed: %s", e)
-        # Record failure so the routing learner avoids models that
-        # consistently error out (transport timeouts, auth failures, etc.).
-        if chosen_model:
-            try:
-                routing_learner.record_outcome(
-                    task=task,
-                    model_used=chosen_model,
-                    was_successful=False,
-                    operation_type="smart_complete",
-                    tokens={"input": 0, "output": 0},
-                    cost_usd=0.0,
-                )
-            except Exception:
-                logging.debug("Failed to record routing outcome for error", exc_info=True)
-        return {"success": False, "error": str(e)}
+    return {
+        "success": True,
+        "result": result_text,
+        "usage": usage,
+    }
 
 
 # ---------------------------------------------------------------------------
