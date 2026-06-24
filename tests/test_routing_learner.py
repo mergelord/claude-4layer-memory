@@ -312,26 +312,111 @@ class TestBehaviouralOutcomeWeighting:
     """End-to-end: success/failure history influences model selection."""
 
     def test_success_history_prefers_model_over_failure(self):
-        """Two models with equal similarity but different outcomes:
-        predict_model must prefer the one with success history."""
+        """Outcome weighting must drive predict_model on the history path.
+
+        This is a *real* end-to-end check of outcome weighting, unlike the
+        earlier version which seeded only 2 entries and therefore never
+        reached the history path (predict_model returns the cold-start
+        floor while ``history_count < 3``) — it passed because of the
+        floor, not because of any weighting.
+
+        Setup that isolates outcome weighting as the ONLY differentiator:
+        - 6 neighbours (>= 3 threshold → history path is active).
+        - Every neighbour has identical similarity (FakeCollection returns
+          distance 0.2 for all), so similarity cannot decide.
+        - Equal counts per model (3 vs 3), so frequency cannot decide.
+        - Floor is haiku ("cache design", no escalation, score 0), the
+          lowest tier, so the conservative floor cannot override either
+          candidate.
+        Sonnet has a success track record (OUTCOME_BONUS) while opus only
+        failed (OUTCOME_PENALTY); predict_model must therefore pick sonnet
+        — even though opus is the higher tier — proving the choice is
+        driven by outcomes.
+        """
         coll = FakeCollection()
-        # Pre-seed: haiku succeeded, opus failed — same document, same sim.
         coll.add(
-            ids=["h_s", "o_f"],
-            embeddings=[[0.0], [0.0]],
-            documents=["cache design", "cache design"],
+            ids=["s1", "s2", "s3", "o1", "o2", "o3"],
+            embeddings=[[0.0]] * 6,
+            documents=["cache design"] * 6,
             metadatas=[
-                {"model_used": "claude-haiku-4", "was_successful": True},
+                {"model_used": "claude-sonnet-4", "was_successful": True},
+                {"model_used": "claude-sonnet-4", "was_successful": True},
+                {"model_used": "claude-sonnet-4", "was_successful": True},
+                {"model_used": "claude-opus-4", "was_successful": False},
+                {"model_used": "claude-opus-4", "was_successful": False},
                 {"model_used": "claude-opus-4", "was_successful": False},
             ],
         )
         lrn = _make_learner(collection=coll)
         lrn._encode = lambda t: [0.0]  # noqa: E731
-        # 2 entries ≥ 3 threshold → history path; floor=haiku (short prompt,
-        # no operation_type escalation), so haiku is expected because it has
-        # the success bonus while opus has the penalty.
+
+        # Preconditions that make this an honest test of weighting:
+        assert coll.count() == 6, "must be >= 3 so the history path is active"
+        assert _heuristic_floor("cache design") == "claude-haiku-4", (
+            "floor must be the lowest tier so it cannot override the pick"
+        )
+
         model = lrn.predict_model("cache design")
-        assert model == "claude-haiku-4"
+        assert model == "claude-sonnet-4", (
+            "success-weighted sonnet must beat failure-weighted opus"
+        )
+
+    def test_failure_history_demotes_model_below_successful_peer(self):
+        """Mirror image: with equal counts and similarity, the model that
+        succeeded outranks the one that failed even when the failing model
+        shares the lower tier. opus(success) must beat sonnet(failure)."""
+        coll = FakeCollection()
+        coll.add(
+            ids=["o1", "o2", "o3", "s1", "s2", "s3"],
+            embeddings=[[0.0]] * 6,
+            documents=["cache design"] * 6,
+            metadatas=[
+                {"model_used": "claude-opus-4", "was_successful": True},
+                {"model_used": "claude-opus-4", "was_successful": True},
+                {"model_used": "claude-opus-4", "was_successful": True},
+                {"model_used": "claude-sonnet-4", "was_successful": False},
+                {"model_used": "claude-sonnet-4", "was_successful": False},
+                {"model_used": "claude-sonnet-4", "was_successful": False},
+            ],
+        )
+        lrn = _make_learner(collection=coll)
+        lrn._encode = lambda t: [0.0]  # noqa: E731
+        assert _heuristic_floor("cache design") == "claude-haiku-4"
+        model = lrn.predict_model("cache design")
+        assert model == "claude-opus-4"
+
+    def test_outcome_quality_beats_frequency(self):
+        """Frequency must not dominate outcomes: a frequently-failing model
+        must lose to a rarely-but-successfully used one.
+
+        haiku appears 5× but always failed; sonnet appears 2× but always
+        succeeded. With score normalised by neighbour count, sonnet's mean
+        weight (sim*BONUS) beats haiku's (sim*PENALTY) despite haiku's
+        higher raw frequency. Floor is haiku, so it cannot override the
+        sonnet pick.
+        """
+        coll = FakeCollection()
+        coll.add(
+            ids=["h1", "h2", "h3", "h4", "h5", "s1", "s2"],
+            embeddings=[[0.0]] * 7,
+            documents=["cache design"] * 7,
+            metadatas=[
+                {"model_used": "claude-haiku-4", "was_successful": False},
+                {"model_used": "claude-haiku-4", "was_successful": False},
+                {"model_used": "claude-haiku-4", "was_successful": False},
+                {"model_used": "claude-haiku-4", "was_successful": False},
+                {"model_used": "claude-haiku-4", "was_successful": False},
+                {"model_used": "claude-sonnet-4", "was_successful": True},
+                {"model_used": "claude-sonnet-4", "was_successful": True},
+            ],
+        )
+        lrn = _make_learner(collection=coll)
+        lrn._encode = lambda t: [0.0]  # noqa: E731
+        assert _heuristic_floor("cache design") == "claude-haiku-4"
+        model = lrn.predict_model("cache design")
+        assert model == "claude-sonnet-4", (
+            "normalised outcome quality must beat raw frequency"
+        )
 
 
 # ---------------------------------------------------------------------------
