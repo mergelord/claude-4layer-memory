@@ -42,6 +42,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import chromadb
 from chromadb.config import Settings
@@ -313,7 +314,10 @@ class RoutingLearner:
             The ChromaDB document ID.
         """
         tokens = tokens or {}
-        task_id = f"task_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S_%f')}"
+        task_id = (
+            f"task_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S_%f')}"
+            f"_{uuid4().hex[:8]}"
+        )
         embedding = self._encode(task)
 
         metadata: dict[str, Any] = {

@@ -21,9 +21,8 @@ ChromaDB: chroma_client инжектится как mock, а метод ``_encod
 from __future__ import annotations
 
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -36,30 +35,6 @@ from scripts.routing_learner import (  # noqa: E402
     OUTCOME_PENALTY,
     RoutingLearner,
 )
-
-
-# ---------------------------------------------------------------------------
-# Deterministic datetime for task_id generation
-# ---------------------------------------------------------------------------
-_counter = 0
-
-
-def _fixed_now(tz=None):
-    """Return incrementing timestamps so each record_outcome gets a unique ID."""
-    global _counter
-    _counter += 1
-    return datetime(2026, 1, 1, 0, 0, 0, _counter, tzinfo=timezone.utc)
-
-
-@pytest.fixture(autouse=True)
-def _patch_datetime():
-    """Patch datetime.now in routing_learner to avoid ID collisions on fast CI."""
-    global _counter
-    _counter = 0
-    with patch("scripts.routing_learner.datetime") as mock_dt:
-        mock_dt.now = _fixed_now
-        mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
-        yield
 
 
 # ---------------------------------------------------------------------------
@@ -112,6 +87,13 @@ class FailingCollection(FakeCollection):
 
     def query(self, *, query_embeddings, n_results):  # noqa: ANN001
         raise RuntimeError("query unavailable (simulated)")
+
+
+class AddFailingCollection(FakeCollection):
+    """Collection whose ``add`` always raises — for testing error handling."""
+
+    def add(self, *, ids, embeddings, documents, metadatas):  # noqa: ANN001
+        raise RuntimeError("add failed (simulated)")
 
 
 def _make_learner(collection=None) -> RoutingLearner:
@@ -195,8 +177,8 @@ class TestPredictColdStart:
     ):
         # Seed exactly 2 entries (below the <3 threshold).
         monkeypatch.setattr(learner, "_encode", lambda t: [0.0])
-        learner.record_outcome(task="t_0", model_used="claude-haiku-4", was_successful=True)
-        learner.record_outcome(task="t_1", model_used="claude-haiku-4", was_successful=True)
+        learner.record_outcome(task="t", model_used="claude-haiku-4", was_successful=True)
+        learner.record_outcome(task="t", model_used="claude-haiku-4", was_successful=True)
         assert learner.collection.count() == 2
 
         # Even with "successful on haiku" history, cold start must defer to floor.
@@ -210,9 +192,9 @@ class TestPredictConservativeFloor:
     def test_history_cannot_downgrade_below_floor(self, learner):
         """Floor=opus (operation_type=refactor); history favouring haiku
         must NOT win — the floor overrides a cheaper history pick."""
-        for i in range(5):
+        for _ in range(5):
             learner.record_outcome(
-                task=f"fix the bug {i}", model_used="claude-haiku-4", was_successful=True,
+                task="fix the bug", model_used="claude-haiku-4", was_successful=True,
             )
         assert learner.collection.count() >= 3
         model = learner.predict_model("fix the bug", operation_type="refactor")
@@ -222,9 +204,9 @@ class TestPredictConservativeFloor:
         """Floor=sonnet (context_len=50000) but history reliably succeeds
         on opus → opus is the history pick and is >= floor tier, so it is
         returned. Uses context_len for a deterministic sonnet floor."""
-        for i in range(5):
+        for _ in range(5):
             learner.record_outcome(
-                task=f"cache design {i}", model_used="claude-opus-4",
+                task="cache design", model_used="claude-opus-4",
                 was_successful=True,
             )
         # context_len=50000 deterministically yields a sonnet floor.
@@ -285,8 +267,8 @@ class TestRecordOutcome:
 
     def test_record_increments_count(self, learner):
         assert learner.collection.count() == 0
-        learner.record_outcome(task="t_task_1", model_used="claude-haiku-4")
-        learner.record_outcome(task="t_task_2", model_used="claude-sonnet-4")
+        learner.record_outcome(task="t1", model_used="claude-haiku-4")
+        learner.record_outcome(task="t2", model_used="claude-sonnet-4")
         assert learner.collection.count() == 2
 
     def test_record_stores_metadata_fields(self, learner):
@@ -308,13 +290,48 @@ class TestRecordOutcome:
     def test_record_swallows_collection_error_and_still_returns_id(self):
         """If the collection .add() fails, record_outcome must not raise;
         it logs and still returns the generated id (robustness contract)."""
-        lrn = _make_learner(collection=FailingCollection())
-        # _encode is never reached because .add() on FailingCollection is
-        # inherited from FakeCollection (does not raise); but to be safe
-        # and avoid loading ST, stub it.
+        lrn = _make_learner(collection=AddFailingCollection())
         lrn._encode = lambda t: [0.0]  # noqa: E731
         task_id = lrn.record_outcome(task="t", model_used="claude-haiku-4")
         assert task_id.startswith("task_")
+        assert lrn.collection.count() == 0
+
+    def test_record_outcome_generates_unique_ids(self, learner):
+        """UUID suffix ensures no collision even for fast consecutive calls."""
+        id1 = learner.record_outcome(task="t", model_used="claude-haiku-4")
+        id2 = learner.record_outcome(task="t", model_used="claude-haiku-4")
+        assert id1 != id2
+        assert learner.collection.count() == 2
+
+
+# ---------------------------------------------------------------------------
+# behavioural — outcome weighting affects predict_model
+# ---------------------------------------------------------------------------
+
+class TestBehaviouralOutcomeWeighting:
+    """End-to-end: success/failure history influences model selection."""
+
+    def test_success_history_prefers_model_over_failure(self):
+        """Two models with equal similarity but different outcomes:
+        predict_model must prefer the one with success history."""
+        coll = FakeCollection()
+        # Pre-seed: haiku succeeded, opus failed — same document, same sim.
+        coll.add(
+            ids=["h_s", "o_f"],
+            embeddings=[[0.0], [0.0]],
+            documents=["cache design", "cache design"],
+            metadatas=[
+                {"model_used": "claude-haiku-4", "was_successful": True},
+                {"model_used": "claude-opus-4", "was_successful": False},
+            ],
+        )
+        lrn = _make_learner(collection=coll)
+        lrn._encode = lambda t: [0.0]  # noqa: E731
+        # 2 entries ≥ 3 threshold → history path; floor=haiku (short prompt,
+        # no operation_type escalation), so haiku is expected because it has
+        # the success bonus while opus has the penalty.
+        model = lrn.predict_model("cache design")
+        assert model == "claude-haiku-4"
 
 
 # ---------------------------------------------------------------------------
@@ -336,33 +353,33 @@ class TestStats:
         learner._encode = lambda t: [0.0]  # noqa: E731
 
         # 2 entries → cold_start (<3)
-        learner.record_outcome(task="t_0", model_used="claude-haiku-4")
-        learner.record_outcome(task="t_1", model_used="claude-haiku-4")
+        learner.record_outcome(task="t", model_used="claude-haiku-4")
+        learner.record_outcome(task="t", model_used="claude-haiku-4")
         assert learner.collection.count() == 2
         assert learner.stats()["routing_phase"] == "cold_start"
 
         # +1 = 3 entries → weak_history (>=3, <30)
-        learner.record_outcome(task="t_2", model_used="claude-haiku-4")
+        learner.record_outcome(task="t", model_used="claude-haiku-4")
         assert learner.collection.count() == 3
         assert learner.stats()["routing_phase"] == "weak_history"
 
         # +27 = 30 entries → learning (>=30, <100)
-        for i in range(27):
-            learner.record_outcome(task=f"t_s_{i}", model_used="claude-sonnet-4")
+        for _ in range(27):
+            learner.record_outcome(task="t", model_used="claude-sonnet-4")
         assert learner.collection.count() == 30
         assert learner.stats()["routing_phase"] == "learning"
 
         # +70 = 100 entries → trained (>=100)
-        for i in range(70):
-            learner.record_outcome(task=f"t_o_{i}", model_used="claude-opus-4")
+        for _ in range(70):
+            learner.record_outcome(task="t", model_used="claude-opus-4")
         assert learner.collection.count() == 100
         assert learner.stats()["routing_phase"] == "trained"
 
     def test_stats_aggregates_per_model(self, learner):
         learner._encode = lambda t: [0.0]  # noqa: E731
-        learner.record_outcome(task="t_h_1", model_used="claude-haiku-4", was_successful=True)
-        learner.record_outcome(task="t_h_2", model_used="claude-haiku-4", was_successful=False)
-        learner.record_outcome(task="t_s_1", model_used="claude-sonnet-4", was_successful=True)
+        learner.record_outcome(task="t", model_used="claude-haiku-4", was_successful=True)
+        learner.record_outcome(task="t", model_used="claude-haiku-4", was_successful=False)
+        learner.record_outcome(task="t", model_used="claude-sonnet-4", was_successful=True)
         s = learner.stats()
         assert s["by_model"]["claude-haiku-4"]["count"] == 2
         assert s["by_model"]["claude-haiku-4"]["successes"] == 1
