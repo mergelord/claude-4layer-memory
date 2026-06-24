@@ -170,8 +170,8 @@ class TestPredictColdStart:
     ):
         # Seed exactly 2 entries (below the <3 threshold).
         monkeypatch.setattr(learner, "_encode", lambda t: [0.0])
-        learner.record_outcome(task="t", model_used="claude-haiku-4", was_successful=True)
-        learner.record_outcome(task="t", model_used="claude-haiku-4", was_successful=True)
+        learner.record_outcome(task="t_0", model_used="claude-haiku-4", was_successful=True)
+        learner.record_outcome(task="t_1", model_used="claude-haiku-4", was_successful=True)
         assert learner.collection.count() == 2
 
         # Even with "successful on haiku" history, cold start must defer to floor.
@@ -185,9 +185,9 @@ class TestPredictConservativeFloor:
     def test_history_cannot_downgrade_below_floor(self, learner):
         """Floor=opus (operation_type=refactor); history favouring haiku
         must NOT win — the floor overrides a cheaper history pick."""
-        for _ in range(5):
+        for i in range(5):
             learner.record_outcome(
-                task="fix the bug", model_used="claude-haiku-4", was_successful=True,
+                task=f"fix the bug {i}", model_used="claude-haiku-4", was_successful=True,
             )
         assert learner.collection.count() >= 3
         model = learner.predict_model("fix the bug", operation_type="refactor")
@@ -197,9 +197,9 @@ class TestPredictConservativeFloor:
         """Floor=sonnet (context_len=50000) but history reliably succeeds
         on opus → opus is the history pick and is >= floor tier, so it is
         returned. Uses context_len for a deterministic sonnet floor."""
-        for _ in range(5):
+        for i in range(5):
             learner.record_outcome(
-                task="cache design", model_used="claude-opus-4",
+                task=f"cache design {i}", model_used="claude-opus-4",
                 was_successful=True,
             )
         # context_len=50000 deterministically yields a sonnet floor.
@@ -260,8 +260,8 @@ class TestRecordOutcome:
 
     def test_record_increments_count(self, learner):
         assert learner.collection.count() == 0
-        learner.record_outcome(task="t1", model_used="claude-haiku-4")
-        learner.record_outcome(task="t2", model_used="claude-sonnet-4")
+        learner.record_outcome(task="t_task_1", model_used="claude-haiku-4")
+        learner.record_outcome(task="t_task_2", model_used="claude-sonnet-4")
         assert learner.collection.count() == 2
 
     def test_record_stores_metadata_fields(self, learner):
@@ -311,33 +311,33 @@ class TestStats:
         learner._encode = lambda t: [0.0]  # noqa: E731
 
         # 2 entries → cold_start (<3)
-        learner.record_outcome(task="t", model_used="claude-haiku-4")
-        learner.record_outcome(task="t", model_used="claude-haiku-4")
+        learner.record_outcome(task="t_0", model_used="claude-haiku-4")
+        learner.record_outcome(task="t_1", model_used="claude-haiku-4")
         assert learner.collection.count() == 2
         assert learner.stats()["routing_phase"] == "cold_start"
 
         # +1 = 3 entries → weak_history (>=3, <30)
-        learner.record_outcome(task="t", model_used="claude-haiku-4")
+        learner.record_outcome(task="t_2", model_used="claude-haiku-4")
         assert learner.collection.count() == 3
         assert learner.stats()["routing_phase"] == "weak_history"
 
         # +27 = 30 entries → learning (>=30, <100)
-        for _ in range(27):
-            learner.record_outcome(task="t", model_used="claude-sonnet-4")
+        for i in range(27):
+            learner.record_outcome(task=f"t_s_{i}", model_used="claude-sonnet-4")
         assert learner.collection.count() == 30
         assert learner.stats()["routing_phase"] == "learning"
 
         # +70 = 100 entries → trained (>=100)
-        for _ in range(70):
-            learner.record_outcome(task="t", model_used="claude-opus-4")
+        for i in range(70):
+            learner.record_outcome(task=f"t_o_{i}", model_used="claude-opus-4")
         assert learner.collection.count() == 100
         assert learner.stats()["routing_phase"] == "trained"
 
     def test_stats_aggregates_per_model(self, learner):
         learner._encode = lambda t: [0.0]  # noqa: E731
-        learner.record_outcome(task="t", model_used="claude-haiku-4", was_successful=True)
-        learner.record_outcome(task="t", model_used="claude-haiku-4", was_successful=False)
-        learner.record_outcome(task="t", model_used="claude-sonnet-4", was_successful=True)
+        learner.record_outcome(task="t_h_1", model_used="claude-haiku-4", was_successful=True)
+        learner.record_outcome(task="t_h_2", model_used="claude-haiku-4", was_successful=False)
+        learner.record_outcome(task="t_s_1", model_used="claude-sonnet-4", was_successful=True)
         s = learner.stats()
         assert s["by_model"]["claude-haiku-4"]["count"] == 2
         assert s["by_model"]["claude-haiku-4"]["successes"] == 1
