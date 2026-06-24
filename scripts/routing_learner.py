@@ -247,8 +247,17 @@ class RoutingLearner:
         distances = results.get("distances", [[1.0] * SIMILAR_K])[0]
         metadatas = results.get("metadatas", [[]])[0]
 
-        # Aggregate scores per model
-        model_scores: dict[str, float] = {}
+        # Aggregate scores per model.
+        #
+        # We track both the summed similarity-weighted outcome score AND the
+        # number of neighbours per model, then divide to obtain a *mean*
+        # weight. Using the mean rather than the raw sum prevents a frequency
+        # bias: a model that simply appears more often among the neighbours
+        # would otherwise accumulate a larger total even with a worse success
+        # record. Normalising by count makes the score reflect the *quality*
+        # of past outcomes, not merely how often the model was used.
+        model_weight_sums: dict[str, float] = {}
+        model_counts: dict[str, int] = {}
         for i, meta in enumerate(metadatas):
             if not meta:
                 continue
@@ -260,10 +269,18 @@ class RoutingLearner:
             outcome_weight = OUTCOME_BONUS if was_successful else OUTCOME_PENALTY
             weight = similarity * outcome_weight
 
-            model_scores[model_used] = model_scores.get(model_used, 0.0) + weight
+            model_weight_sums[model_used] = (
+                model_weight_sums.get(model_used, 0.0) + weight
+            )
+            model_counts[model_used] = model_counts.get(model_used, 0) + 1
 
-        if not model_scores:
+        if not model_weight_sums:
             return floor_model
+
+        model_scores: dict[str, float] = {
+            model: model_weight_sums[model] / model_counts[model]
+            for model in model_weight_sums
+        }
 
         # Pick highest-scoring model
         best_model = max(model_scores, key=lambda m: model_scores[m])
