@@ -148,17 +148,33 @@ def estimate_complexity(
 _API_RETRY_CODES = {429, 502, 503, 504}
 _API_MAX_RETRIES = 3
 _API_RETRY_DELAY = 1.0
+
+
+def _parse_api_timeout(raw: str) -> float | None:
+    """Parse CLAUDE_API_TIMEOUT env value safely.
+
+    Returns the timeout in seconds, or ``None`` to disable.
+    Invalid values fall back to the default (120.0) with a warning.
+    """
+    value = raw.strip().lower()
+    if value in ("", "0", "none", "false", "off"):
+        return None
+    try:
+        timeout = float(value)
+    except ValueError:
+        logger.warning("Invalid CLAUDE_API_TIMEOUT=%r, using default 120s", raw)
+        return 120.0
+    if timeout <= 0:
+        return None
+    return timeout
+
+
 # Hard wall-clock cap on a single messages.create call. Without it a
 # hung socket (gateway stall, DNS black-hole, idle keep-alive drop) can
 # block the caller forever — the SDK's retry logic only fires on raised
 # errors, never on a request that never returns. Configurable via env so
 # long-running generations can opt out. ``None``/``0`` disables it.
-_api_timeout_env = os.getenv("CLAUDE_API_TIMEOUT", "120")
-_API_TIMEOUT = (
-    None
-    if _api_timeout_env.strip() in ("", "0", "none", "None")
-    else float(_api_timeout_env)
-)
+_API_TIMEOUT = _parse_api_timeout(os.getenv("CLAUDE_API_TIMEOUT", "120"))
 
 
 class TrackedClaudeClient:
