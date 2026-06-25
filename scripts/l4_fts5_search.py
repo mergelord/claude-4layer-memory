@@ -61,13 +61,25 @@ try:
 except ImportError:
     fetch_bm25_results = None
 
-# Настройка UTF-8 для Windows
-if sys.platform == "win32":
+
+def _configure_windows_utf8_stdio() -> None:
+    """Configure UTF-8 stdio for direct Windows CLI execution only.
+
+    This must not run at import time: MCP stdio expects the original
+    ``sys.stdout`` object to expose ``.buffer``. Rewrapping stdout/stderr while
+    importing this module breaks ``python mcp_server.py`` on Windows before the
+    MCP server can start.
+    """
+    if sys.platform != "win32":
+        return
+
     import codecs
 
     if hasattr(sys.stdout, "buffer"):
         sys.stdout = codecs.getwriter("utf-8")(sys.stdout.buffer, "strict")
+    if hasattr(sys.stderr, "buffer"):
         sys.stderr = codecs.getwriter("utf-8")(sys.stderr.buffer, "strict")
+
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
@@ -886,6 +898,8 @@ def cmd_hybrid(fts: L4FTS5Search, query: str, enable_rerank: bool = True) -> Non
 
 def main() -> None:
     """CLI интерфейс."""
+    _configure_windows_utf8_stdio()
+
     if len(sys.argv) < 2:
         print(__doc__)
         sys.exit(1)
