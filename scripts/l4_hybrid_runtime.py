@@ -13,6 +13,7 @@ cross-encoder reranking.
 from __future__ import annotations
 
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -45,6 +46,22 @@ def _fetch_bm25_results(query: str) -> list[dict[str, Any]]:
     except Exception as exc:  # noqa: BLE001
         l4_fts5_search.logging.warning("BM25 search failed: %s", exc)
         return []
+
+
+def _fetch_source_results(
+    fts: L4FTS5Search, query: str
+) -> tuple[list[Any], list[dict[str, Any]], list[dict[str, Any]]]:
+    """Fetch FTS, semantic, and BM25 result streams concurrently."""
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        future_fts = executor.submit(fts.search, query, limit=20)
+        future_semantic = executor.submit(fetch_semantic_results, query)
+        future_bm25 = executor.submit(_fetch_bm25_results, query)
+
+        fts_results = future_fts.result()
+        semantic_results = future_semantic.result()
+        bm25_results = future_bm25.result()
+
+    return fts_results, semantic_results, bm25_results
 
 
 def _build_fts_stream(fts_results: list[Any]) -> list[dict[str, Any]]:
@@ -104,9 +121,7 @@ def build_hybrid_results(
         engine produced a hit. Semantic/BM25 failures degrade to no hits via
         their existing helper boundaries; FTS failures propagate to callers.
     """
-    fts_results = fts.search(query, limit=20)
-    semantic_results = fetch_semantic_results(query)
-    bm25_results = _fetch_bm25_results(query)
+    fts_results, semantic_results, bm25_results = _fetch_source_results(fts, query)
 
     fts_stream = l4_fts5_search.collapse_to_best_per_doc(
         _build_fts_stream(fts_results)
