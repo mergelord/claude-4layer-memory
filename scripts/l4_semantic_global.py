@@ -27,8 +27,8 @@ from typing import Any, Dict, List
 
 _PROCESS_START = time.perf_counter()
 
-import chromadb
-from chromadb.config import Settings
+import chromadb  # noqa: E402
+from chromadb.config import Settings  # noqa: E402
 
 # chromadb's exception taxonomy differs across the supported range
 # (``chromadb>=0.4.0``): older releases raise a bare ``ValueError`` for a
