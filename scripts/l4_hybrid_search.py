@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # mypy: ignore-errors
-# pylint: disable=protected-access,wrong-import-position
+# pylint: disable=protected-access,wrong-import-position,import-error
 """Programmatic hybrid search API for repository/runtime callers.
 
 This module exposes the return-value counterpart to the CLI-only
