@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import importlib
 import sys
+import threading
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
@@ -83,3 +84,39 @@ def test_hybrid_search_returns_empty_when_no_engine_has_hits(module, monkeypatch
     )
 
     assert module.hybrid_search(fts_mock, "nothing", enable_rerank=False) == []
+
+
+def test_hybrid_search_fetches_sources_in_parallel(module, monkeypatch):
+    """FTS, semantic, and BM25 fetches must start concurrently."""
+    fts_mock = MagicMock(spec=module.L4FTS5Search)
+    barrier = threading.Barrier(3, timeout=2)
+    started: list[str] = []
+    started_lock = threading.Lock()
+
+    def wait_for_other_sources(source_name: str) -> None:
+        with started_lock:
+            started.append(source_name)
+        barrier.wait(timeout=2)
+
+    def fake_fts_search(query, limit=20):  # noqa: ARG001
+        wait_for_other_sources("fts")
+        return []
+
+    def fake_semantic(query):  # noqa: ARG001
+        wait_for_other_sources("semantic")
+        return []
+
+    def fake_bm25(query):  # noqa: ARG001
+        wait_for_other_sources("bm25")
+        return []
+
+    fts_mock.search.side_effect = fake_fts_search
+    monkeypatch.setattr(module.l4_hybrid_runtime, "fetch_semantic_results", fake_semantic)
+    monkeypatch.setattr(
+        module.l4_hybrid_runtime.l4_fts5_search,
+        "fetch_bm25_results",
+        fake_bm25,
+    )
+
+    assert module.hybrid_search(fts_mock, "alpha", enable_rerank=False) == []
+    assert set(started) == {"fts", "semantic", "bm25"}
