@@ -120,3 +120,50 @@ def test_hybrid_search_fetches_sources_in_parallel(module, monkeypatch):
 
     assert module.hybrid_search(fts_mock, "alpha", enable_rerank=False) == []
     assert set(started) == {"fts", "semantic", "bm25"}
+
+
+def test_fetch_semantic_results_reuses_in_process_backend(module, monkeypatch):
+    """Runtime semantic fetches must cache the backend after first use."""
+    runtime = module.l4_hybrid_runtime
+    created_backends = []
+
+    class FakeSemanticBackend:  # pylint: disable=too-few-public-methods
+        def __init__(self):
+            self.queries: list[str] = []
+            created_backends.append(self)
+
+        def search_all(self, query):
+            self.queries.append(query)
+            return [
+                {
+                    "key": make_join_key("global", f"{query}.md"),
+                    "text": f"semantic {query}",
+                    "distance": 0.1,
+                    "metadata": {"file": f"{query}.md"},
+                    "source": "global",
+                }
+            ]
+
+    monkeypatch.setattr(runtime, "_semantic_backend", None)
+    monkeypatch.setattr(runtime, "_new_semantic_backend", FakeSemanticBackend)
+
+    first = runtime.fetch_semantic_results("first")
+    second = runtime.fetch_semantic_results("second")
+
+    assert len(created_backends) == 1
+    assert created_backends[0].queries == ["first", "second"]
+    assert first[0]["text"] == "semantic first"
+    assert second[0]["text"] == "semantic second"
+
+
+def test_fetch_semantic_results_failure_degrades_to_empty(module, monkeypatch):
+    """Semantic backend failures must not break hybrid runtime callers."""
+    runtime = module.l4_hybrid_runtime
+
+    class BrokenSemanticBackend:  # pylint: disable=too-few-public-methods
+        def search_all(self, query):  # noqa: ARG002
+            raise RuntimeError("semantic boom")
+
+    monkeypatch.setattr(runtime, "_semantic_backend", BrokenSemanticBackend())
+
+    assert runtime.fetch_semantic_results("hello") == []
