@@ -28,6 +28,7 @@ if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)
 
 from l4_fts5_search import L4FTS5Search  # noqa: E402
+from l4_hybrid_search import hybrid_search  # noqa: E402
 from cost_tracker import (  # noqa: E402
     CACHE_CREATION_PRICE_KEY,
     CACHE_READ_PRICE_KEY,
@@ -99,6 +100,54 @@ def search_memory(query: str, limit: int = 10, debug: bool = False) -> dict[str,
         return response
     except Exception as e:
         logging.error("Search failed: %s", e)
+        return {"success": False, "error": str(e)}
+
+
+@mcp.tool()
+def hybrid_search_memory(
+    query: str,
+    limit: int = 10,
+    rerank: bool = True,
+) -> dict[str, Any]:
+    """Search memory via hybrid retrieval (FTS5 + semantic + BM25 + RRF).
+
+    Unlike ``search_memory`` (FTS5 keyword search only), this uses the full
+    hybrid pipeline and returns structured ranking metadata suitable for MCP
+    clients.
+    """
+    try:
+        merged = hybrid_search(fts5_search, query, enable_rerank=rerank)
+
+        results = []
+        for entry in merged[:limit]:
+            sources = sorted(entry.sources.keys())
+            snippet = ""
+            for source_name in sources:
+                for hit in entry.sources[source_name]:
+                    snippet = (hit.get("snippet") or hit.get("text") or "").strip()
+                    if snippet:
+                        break
+                if snippet:
+                    break
+
+            results.append(
+                {
+                    "key": entry.key,
+                    "score": entry.score,
+                    "normalized_score": entry.normalized_score,
+                    "sources": sources,
+                    "snippet": snippet[:200],
+                }
+            )
+
+        return {
+            "success": True,
+            "query": query,
+            "count": len(results),
+            "results": results,
+        }
+    except Exception as e:
+        logging.error("Hybrid search failed: %s", e)
         return {"success": False, "error": str(e)}
 
 
