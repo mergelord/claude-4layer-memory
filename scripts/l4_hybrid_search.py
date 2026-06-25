@@ -14,15 +14,19 @@ from __future__ import annotations
 
 from typing import Any
 
-from l4_fts5_search import (
-    L4FTS5Search,
-    _fetch_semantic_results,
-    _get_l4_rerank,
-    collapse_to_best_per_doc,
-    fetch_bm25_results,
-    logging,
-)
+import l4_fts5_search
+from l4_fts5_search import L4FTS5Search
 from ranking import normalize_existing_key, normalize_scores, rrf_merge
+
+
+def _fetch_semantic(query: str) -> list[dict[str, Any]]:
+    """Fetch semantic hits using the current CLI-backed implementation."""
+    return l4_fts5_search._fetch_semantic_results(query)  # pylint: disable=protected-access
+
+
+def _get_reranker():
+    """Return the optional L4 reranker, preserving lazy import semantics."""
+    return l4_fts5_search._get_l4_rerank()  # pylint: disable=protected-access
 
 
 def hybrid_search(
@@ -46,14 +50,14 @@ def hybrid_search(
         FTS failure propagates to the caller and is handled by the MCP wrapper.
     """
     fts_results = fts.search(query, limit=20)
-    semantic_results = _fetch_semantic_results(query)
+    semantic_results = _fetch_semantic(query)
 
     bm25_results: list[dict[str, Any]] = []
-    if fetch_bm25_results is not None:
+    if l4_fts5_search.fetch_bm25_results is not None:
         try:
-            bm25_results = fetch_bm25_results(query)
+            bm25_results = l4_fts5_search.fetch_bm25_results(query)
         except Exception as exc:  # noqa: BLE001
-            logging.warning("BM25 search failed: %s", exc)
+            l4_fts5_search.logging.warning("BM25 search failed: %s", exc)
 
     fts_stream = [
         {
@@ -86,9 +90,9 @@ def hybrid_search(
         for item in bm25_results
     ]
 
-    fts_stream = collapse_to_best_per_doc(fts_stream)
-    semantic_stream = collapse_to_best_per_doc(semantic_stream)
-    bm25_stream = collapse_to_best_per_doc(bm25_stream)
+    fts_stream = l4_fts5_search.collapse_to_best_per_doc(fts_stream)
+    semantic_stream = l4_fts5_search.collapse_to_best_per_doc(semantic_stream)
+    bm25_stream = l4_fts5_search.collapse_to_best_per_doc(bm25_stream)
 
     if not fts_stream and not semantic_stream and not bm25_stream:
         return []
@@ -101,7 +105,7 @@ def hybrid_search(
         )
     )
 
-    reranker = _get_l4_rerank() if enable_rerank and merged else None
+    reranker = _get_reranker() if enable_rerank and merged else None
     if reranker is not None:
         merged = reranker(query, merged[:20])
 
