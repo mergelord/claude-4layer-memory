@@ -451,10 +451,10 @@ def test_validate_key_shape_warns_on_all_chunk_formats(chunk_key, caplog):
 def test_validate_key_shape_no_false_positives_on_valid_doc_keys(doc_key, caplog):
     """Valid document-level keys (with dates/versions) must NOT be flagged.
 
-    The ``:\\d+`` alternative in _CHUNK_PATTERN uses a ``\\b`` word
-    boundary specifically so that ``2024-01-15`` (digits glued to a dash)
-    and ``v2/`` (digits glued to a letter/slash) are not mistaken for a
-    ``file:N`` chunk suffix.
+    The ``:\\d+`` alternative in _CHUNK_PATTERN is anchored to the end of
+    the key (``:\\d+$``) so that ``2024-01-15`` (digits mid-path) and
+    ``v2/`` (digits glued to a slash) are not mistaken for a ``file:N``
+    chunk suffix, which only ever appears at the very end of a key.
     """
     import logging
 
@@ -492,6 +492,56 @@ def test_rrf_merge_strict_false_ignores_env_and_only_warns(caplog, monkeypatch):
 
     warnings = [r for r in caplog.records if "chunk-level" in r.message]
     assert len(warnings) == 1, "strict=False should warn, not raise"
+
+
+def test_validate_key_shape_no_false_positive_on_mid_filename_colon_digits(caplog):
+    """Colon+digits *inside* a filename must NOT be flagged as chunk-level.
+
+    Regression for the over-broad ``:\\d+\\b`` pattern: a document key whose
+    filename legitimately contains ``:<digits>`` somewhere other than the
+    very end (e.g. ``note:123.md``) was wrongly flagged as chunk-level. The
+    ``:\\d+$`` anchor fixes this -- only a trailing ``:N`` (the real
+    ``f"{md_file}:{i}"`` on-disk format) counts as a chunk suffix.
+    """
+    import logging
+    import ranking as _ranking
+
+    _ranking._SEEN_BAD_KEYS.clear()
+
+    items = [
+        {"key": "[global] note:123.md"},
+        {"key": "[proj] v1:2-draft.md"},
+        {"key": "[g] section:4-overview.md"},
+    ]
+    with caplog.at_level(logging.WARNING):
+        rrf_merge(("fts", items))
+
+    warnings = [r for r in caplog.records if "chunk-level" in r.message]
+    assert warnings == [], f"false positive on mid-filename colon: {warnings!r}"
+
+
+def test_rrf_merge_env_strict_raises_without_explicit_arg(monkeypatch):
+    """RRF_STRICT_CHUNK_KEYS=1 alone makes a chunk key a hard error.
+
+    Complements test_rrf_merge_strict_false_ignores_env_and_only_warns:
+    that one proves an explicit strict=False overrides the env back to
+    warn-only; this proves the env var is honoured when no explicit
+    argument is passed (the CI / pre-commit enforcement path).
+    """
+    import importlib
+    import ranking as ranking_mod
+
+    monkeypatch.setenv("RRF_STRICT_CHUNK_KEYS", "1")
+    importlib.reload(ranking_mod)
+    try:
+        items = [{"key": "[global] file.md:3"}]
+        with pytest.raises(ValueError, match="chunk-level"):
+            ranking_mod.rrf_merge(("fts", items))
+    finally:
+        # Restore the module-level default so later tests in the session
+        # observe warn-only behaviour again.
+        monkeypatch.delenv("RRF_STRICT_CHUNK_KEYS", raising=False)
+        importlib.reload(ranking_mod)
 
 
 # ---------------------------------------------------------------------------

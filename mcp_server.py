@@ -232,6 +232,15 @@ def smart_complete(
             task, context_len=context_len, operation_type="smart_complete",
         )
 
+        # Cosmetic observability: surface the approx *token* count that fed the
+        # router (token-based via approx_tokens, NOT a word count) alongside the
+        # model it picked. Logged at debug level and deliberately free of the
+        # task/context text so user content never leaks into logs.
+        logging.debug(
+            "smart_complete routing: ~%d context tokens -> model=%s",
+            context_len, chosen_model,
+        )
+
         message = tracked_claude.complete(
             prompt=prompt,
             model=chosen_model,
