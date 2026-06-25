@@ -71,8 +71,6 @@ def test_estimate_complexity_boundary_prompt_tokens():
         prompt_tokens_approx > 200 → +1
     So exactly 200 tokens → +0 (Haiku), exactly 500 tokens → +1 (Haiku).
     """
-    neutral_score_0 = "do a generic task"
-
     # 200 tokens exactly: 200 / 1.3 ≈ 153.8 words → 153 words → 198 tokens (under)
     # Use 154 words → 200.2 → int(200.2) = 200 tokens exactly
     prompt_200_tokens = "word " * 154  # 154 * 1.3 = 200.2 → int = 200

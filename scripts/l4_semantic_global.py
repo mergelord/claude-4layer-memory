@@ -281,7 +281,9 @@ class GlobalSemanticMemory:
                 {
                     "id": id_val,
                     "key": self._make_document_key(source, metadata),
-                    # P3 guard: skip this id if no document text available
+                    # P3 guard: fall back to empty text when no document is
+                    # available for this id. The id/metadata are still surfaced
+                    # rather than skipped, so callers get a stable result set.
                     "text": docs[i] if i < len(docs) else "",
                     "metadata": metadata,
                     "distance": dists[i] if i < len(dists) else 999,

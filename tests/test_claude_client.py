@@ -59,6 +59,7 @@ class TestTimeoutInjection:
         tracker = MagicMock()
         return TrackedClaudeClient(client=mock_api, cost_tracker=tracker)
 
+    @patch("claude_client._API_TIMEOUT", 120.0)
     def test_timeout_injected_when_absent(self):
         """When kwargs lacks 'timeout', messages_create should add one."""
         client = self._make_client()
@@ -85,6 +86,7 @@ class TestTimeoutInjection:
         call_kwargs = client.client.messages.create.call_args
         assert "timeout" not in call_kwargs.kwargs
 
+    @patch("claude_client._API_TIMEOUT", 120.0)
     def test_timeout_is_not_positional(self):
         """timeout must be passed as a keyword arg, not positional."""
         client = self._make_client()
