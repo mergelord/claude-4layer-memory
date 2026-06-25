@@ -6,7 +6,7 @@
 
 This module centralizes the non-printing hybrid search flow used by runtime
 callers. It keeps the existing retrieval strategy intact: FTS5 + semantic
-subprocess + optional BM25, RRF merge, score normalization, and optional
+backend + optional BM25, RRF merge, score normalization, and optional
 cross-encoder reranking.
 """
 
@@ -15,6 +15,7 @@ from __future__ import annotations
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Lock
 from typing import Any
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
@@ -25,10 +26,43 @@ import l4_fts5_search  # noqa: E402
 from l4_fts5_search import L4FTS5Search  # noqa: E402
 from ranking import normalize_existing_key, normalize_scores, rrf_merge  # noqa: E402
 
+_semantic_backend: Any | None = None
+_semantic_backend_lock = Lock()
+
+
+def _new_semantic_backend() -> Any:
+    """Create a semantic memory backend lazily to avoid MCP startup cost."""
+    from l4_semantic_global import GlobalSemanticMemory
+
+    return GlobalSemanticMemory()
+
+
+def _get_semantic_backend() -> Any:
+    """Return a cached in-process semantic backend for runtime callers."""
+    global _semantic_backend  # pylint: disable=global-statement
+    if _semantic_backend is None:
+        with _semantic_backend_lock:
+            if _semantic_backend is None:
+                _semantic_backend = _new_semantic_backend()
+    return _semantic_backend
+
 
 def fetch_semantic_results(query: str) -> list[dict[str, Any]]:
-    """Fetch semantic hits using the current CLI-backed implementation."""
-    return l4_fts5_search._fetch_semantic_results(query)
+    """Fetch semantic hits through a cached in-process backend.
+
+    The previous runtime path spawned ``l4_semantic_global.py`` for every MCP
+    hybrid query, paying the full ``sentence_transformers`` import/model-load
+    cost every time. Keeping ``GlobalSemanticMemory`` in this process preserves
+    lazy startup while allowing subsequent MCP queries to reuse the loaded
+    model and Chroma client.
+    """
+    try:
+        results = _get_semantic_backend().search_all(query)
+    except Exception as exc:  # noqa: BLE001
+        l4_fts5_search.logging.warning("Semantic search failed: %s", exc)
+        return []
+
+    return results if isinstance(results, list) else []
 
 
 def get_l4_reranker():
