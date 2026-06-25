@@ -16,7 +16,7 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Lock
-from typing import Any
+from typing import Any, Optional
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
@@ -26,7 +26,7 @@ import l4_fts5_search  # noqa: E402
 from l4_fts5_search import L4FTS5Search  # noqa: E402
 from ranking import normalize_existing_key, normalize_scores, rrf_merge  # noqa: E402
 
-_semantic_backend: Any | None = None
+_semantic_backend: Optional[Any] = None
 _semantic_backend_lock = Lock()
 
 
