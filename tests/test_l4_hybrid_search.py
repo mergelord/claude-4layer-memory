@@ -27,7 +27,7 @@ def fixture_module():
 
 def _make_search_result(module: Any, source: str, rel_path: str, snippet="snippet") -> Any:
     """Build an l4_fts5_search.SearchResult for fake FTS streams."""
-    return module._fts5.SearchResult(  # pylint: disable=protected-access
+    return module.fts5_module.SearchResult(
         path=f"[{source}] {rel_path}",
         key=make_join_key(source, rel_path),
         snippet=snippet,
@@ -47,11 +47,11 @@ def test_hybrid_search_returns_merged_ranking(module, monkeypatch):
     ]
 
     monkeypatch.setattr(
-        module._fts5, "_fetch_semantic_results", lambda query: semantic_results
+        module.fts5_module, "_fetch_semantic_results", lambda query: semantic_results
     )
-    monkeypatch.setattr(module._fts5, "fetch_bm25_results", None)
+    monkeypatch.setattr(module.fts5_module, "fetch_bm25_results", None)
     rerank_lookup = MagicMock(return_value=None)
-    monkeypatch.setattr(module._fts5, "_get_l4_rerank", rerank_lookup)
+    monkeypatch.setattr(module.fts5_module, "_get_l4_rerank", rerank_lookup)
 
     merged = module.hybrid_search(fts_mock, "alpha", enable_rerank=False)
 
@@ -68,7 +68,7 @@ def test_hybrid_search_returns_empty_when_no_engine_has_hits(module, monkeypatch
     fts_mock = MagicMock(spec=module.L4FTS5Search)
     fts_mock.search.return_value = []
 
-    monkeypatch.setattr(module._fts5, "_fetch_semantic_results", lambda query: [])
-    monkeypatch.setattr(module._fts5, "fetch_bm25_results", None)
+    monkeypatch.setattr(module.fts5_module, "_fetch_semantic_results", lambda query: [])
+    monkeypatch.setattr(module.fts5_module, "fetch_bm25_results", None)
 
     assert module.hybrid_search(fts_mock, "nothing", enable_rerank=False) == []
