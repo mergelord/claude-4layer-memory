@@ -92,6 +92,12 @@ def chunk_text(
         if len(candidate) <= max_chars:
             current = candidate + "\n\n"
         else:
+            # P3 overlap consistency: if carry_over + para still exceeds
+            # max_chars, don't silently drop the overlap. Emit it as its own
+            # chunk so the overlapping paragraph is not lost, then start
+            # fresh with just the current paragraph.
+            if carry_over:
+                chunks.append("\n\n".join(carry_over).strip())
             current = para + "\n\n"
         carry_over = []
 

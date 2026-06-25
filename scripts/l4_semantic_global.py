@@ -269,8 +269,10 @@ class GlobalSemanticMemory:
             return out
 
         ids = res["ids"][0]
-        docs = res["documents"][0]
-        metas = res["metadatas"][0]
+        # P3 guard: use .get() with safe defaults so a missing or empty
+        # documents/metadatas key does not raise KeyError or IndexError.
+        docs = res.get("documents", [[]])[0] if res.get("documents") else []
+        metas = res.get("metadatas", [[]])[0] if res.get("metadatas") else []
         dists = res.get("distances", [[]])[0]
 
         for i, id_val in enumerate(ids):
@@ -279,7 +281,8 @@ class GlobalSemanticMemory:
                 {
                     "id": id_val,
                     "key": self._make_document_key(source, metadata),
-                    "text": docs[i],
+                    # P3 guard: skip this id if no document text available
+                    "text": docs[i] if i < len(docs) else "",
                     "metadata": metadata,
                     "distance": dists[i] if i < len(dists) else 999,
                     "source": source,
