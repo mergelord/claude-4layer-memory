@@ -19,6 +19,7 @@ if str(SCRIPTS_DIR) not in sys.path:
 import mcp_server  # noqa: E402  pylint: disable=wrong-import-position
 from l4_fts5_search import SearchResult  # noqa: E402  pylint: disable=wrong-import-position
 from ranking import make_join_key  # noqa: E402  pylint: disable=wrong-import-position
+from claude_client import approx_tokens  # noqa: E402  pylint: disable=wrong-import-position
 
 
 def test_reindex_memory_returns_dict_with_int_count():
@@ -272,3 +273,58 @@ def test_smart_complete_still_returns_response_to_caller():
     assert result["result"] == "hello world"
     assert result["usage"]["input_tokens"] == 10
     assert result["usage"]["output_tokens"] == 5
+
+
+# ---------------------------------------------------------------------------
+# smart_complete: routing bridge -- context_len must be TOKEN-based, not words
+#
+# Regression net for commit 208fa77 ("context_len counts tokens, not words").
+# mcp_server previously passed len(context.split()) (a *word* count) to the
+# router, which compares against token thresholds (8000/30000/80000) and so
+# under-estimated complexity for code- and Cyrillic-heavy context.
+# smart_complete now feeds approx_tokens(context); these tests pin that bridge
+# so it cannot silently regress back to word counting.
+# ---------------------------------------------------------------------------
+
+
+def _capture_predicted_context_len():
+    """Patch predict_model and capture the context_len it was called with."""
+    captured = {}
+
+    def fake_predict(*_args, **kwargs):
+        captured["context_len"] = kwargs["context_len"]
+        return "claude-haiku-4"
+
+    return captured, fake_predict
+
+
+def test_smart_complete_passes_token_based_context_len_to_router():
+    """predict_model must receive context_len == approx_tokens(context)."""
+    captured, fake_predict = _capture_predicted_context_len()
+    context = "def add(a, b):\n    return a + b\n" * 50
+
+    with patch.object(mcp_server.routing_learner, "predict_model",
+                      side_effect=fake_predict), \
+         patch.object(mcp_server.tracked_claude, "complete",
+                      return_value=_fake_message("ok")), \
+         patch.object(mcp_server.routing_learner, "record_outcome"):
+        mcp_server.smart_complete(task="t", context=context)
+
+    assert captured["context_len"] == approx_tokens(context)
+    # Token estimate must exceed the raw word count (the 1.3x factor),
+    # proving the value is token-based, not the old len(context.split()).
+    assert captured["context_len"] > len(context.split())
+
+
+def test_smart_complete_passes_zero_context_len_when_no_context():
+    """No context -> context_len is exactly 0 (no spurious token estimate)."""
+    captured, fake_predict = _capture_predicted_context_len()
+
+    with patch.object(mcp_server.routing_learner, "predict_model",
+                      side_effect=fake_predict), \
+         patch.object(mcp_server.tracked_claude, "complete",
+                      return_value=_fake_message("ok")), \
+         patch.object(mcp_server.routing_learner, "record_outcome"):
+        mcp_server.smart_complete(task="t")
+
+    assert captured["context_len"] == 0

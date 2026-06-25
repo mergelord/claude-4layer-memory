@@ -120,12 +120,15 @@ _SOURCE_REPEATED_UNDERSCORE = re.compile(r"_+")
 #   #anchor           – markdown anchor / heading fragment
 #   ?chunk= / &chunk= – URL-style chunk selector
 #   _chunk_           – snake_case chunk marker (chunking.py id schemes)
-#   :<digits>         – the actual on-disk format produced by
+#   :<digits> at END  – the actual on-disk format produced by
 #                       l4_semantic_global.py: ``f"{md_file}:{i}"`` →
-#                       ``notes.md:3``. The ``\b`` guard avoids matching
-#                       dates/versions inside a path (``2024-01-15``,
-#                       ``v2/``), which are legitimate document-level keys.
-_CHUNK_PATTERN = re.compile(r"(#\w+|[?&]chunk=|_chunk_|:\d+\b)")
+#                       ``notes.md:3``. The ``$`` anchor pins this to the
+#                       very end of the key, so a real chunk suffix
+#                       (``notes.md:3``) is caught while colon+digits that
+#                       merely sit *inside* a filename (``note:123.md``), or
+#                       dates/versions in a path (``2024-01-15``, ``v2/``),
+#                       are correctly treated as document-level keys.
+_CHUNK_PATTERN = re.compile(r"(#\w+|[?&]chunk=|_chunk_|:\d+$)")
 _SEEN_BAD_KEYS: set[str] = set()
 
 # Default strictness of the chunk-key check. ``False`` preserves the
