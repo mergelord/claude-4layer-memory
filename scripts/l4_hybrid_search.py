@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # mypy: ignore-errors
-# pylint: disable=protected-access
+# pylint: disable=protected-access,wrong-import-position
 """Programmatic hybrid search API for repository/runtime callers.
 
 This module exposes the return-value counterpart to the CLI-only
@@ -13,7 +13,13 @@ strategy in this PR.
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
 from typing import Any
+
+SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
 
 import l4_fts5_search
 from l4_fts5_search import L4FTS5Search
