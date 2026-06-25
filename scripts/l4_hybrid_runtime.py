@@ -42,7 +42,7 @@ def _fetch_bm25_results(query: str) -> list[dict[str, Any]]:
 
     try:
         return l4_fts5_search.fetch_bm25_results(query)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         l4_fts5_search.logging.warning("BM25 search failed: %s", exc)
         return []
 
