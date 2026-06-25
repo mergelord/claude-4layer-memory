@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # mypy: ignore-errors
-# pylint: disable=wrong-import-position,import-error,protected-access,broad-exception-caught
+# pylint: disable=wrong-import-position,import-error,protected-access,broad-exception-caught,import-outside-toplevel
 """Shared return-value hybrid search runtime.
 
 This module centralizes the non-printing hybrid search flow used by runtime
