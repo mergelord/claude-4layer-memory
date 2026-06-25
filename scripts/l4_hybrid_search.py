@@ -21,9 +21,9 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-import l4_fts5_search
-from l4_fts5_search import L4FTS5Search
-from ranking import normalize_existing_key, normalize_scores, rrf_merge
+import l4_fts5_search  # noqa: E402
+from l4_fts5_search import L4FTS5Search  # noqa: E402
+from ranking import normalize_existing_key, normalize_scores, rrf_merge  # noqa: E402
 
 
 def _fetch_semantic(query: str) -> list[dict[str, Any]]:
