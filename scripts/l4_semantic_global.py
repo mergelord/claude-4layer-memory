@@ -25,6 +25,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List
 
+_PROCESS_START = time.perf_counter()
+
 import chromadb
 from chromadb.config import Settings
 
@@ -71,6 +73,10 @@ MAX_INDEX_FILE_BYTES = max(
     1, int(os.getenv("L4_MAX_INDEX_FILE_BYTES", str(10 * 1024 * 1024)))
 )
 _COLLECTION_NON_ALNUM = re.compile(r"[^a-zA-Z0-9_]")
+_TIMING_ENV_VALUES = {"1", "true", "yes", "on"}
+_SEMANTIC_TIMING_ENABLED = (
+    os.getenv("L4_SEMANTIC_TIMING", "").strip().lower() in _TIMING_ENV_VALUES
+)
 
 
 # Exceptions that represent an expected, recoverable Chroma lookup/query
@@ -78,6 +84,19 @@ _COLLECTION_NON_ALNUM = re.compile(r"[^a-zA-Z0-9_]")
 # (e.g. a programming bug) is intentionally allowed to propagate instead of
 # being silently swallowed -- see AUDIT #5.
 _CHROMA_LOOKUP_ERRORS = (ValueError, KeyError, _ChromaError)
+
+
+def _semantic_timing_enabled() -> bool:
+    """Return whether semantic timing diagnostics should be emitted."""
+    return _SEMANTIC_TIMING_ENABLED
+
+
+def _emit_timing(label: str, start: float) -> None:
+    """Emit a timing diagnostic to stderr without touching JSON stdout."""
+    if not _semantic_timing_enabled():
+        return
+    elapsed_ms = (time.perf_counter() - start) * 1000
+    print(f"[TIMING] {label}: {elapsed_ms:.2f} ms", file=sys.stderr)
 
 
 def configure_utf8_output() -> None:
@@ -116,6 +135,7 @@ class GlobalSemanticMemory:
     # pylint: disable=too-many-instance-attributes
 
     def __init__(self) -> None:
+        init_start = time.perf_counter()
         self.home = Path.home()
 
         self.global_memory = self.home / ".claude" / "memory"
@@ -124,9 +144,11 @@ class GlobalSemanticMemory:
         self.db_path = self.home / ".claude" / "semantic_db_global"
         self.db_path.mkdir(parents=True, exist_ok=True)
 
+        client_start = time.perf_counter()
         self.client = chromadb.PersistentClient(
             path=str(self.db_path), settings=Settings(anonymized_telemetry=False)
         )
+        _emit_timing("semantic.init.chroma_client", client_start)
 
         self.model_name = os.getenv("L4_MODEL", DEFAULT_MODEL)
         self._model = None
@@ -142,11 +164,13 @@ class GlobalSemanticMemory:
         # lives on the class object, which pins every instance in memory and
         # shares cache entries across unrelated instances.
         self._encode_query_cache: Any = None
+        _emit_timing("semantic.init.total", init_start)
 
     @property
     def model(self):
         """Load SentenceTransformer only for operations that need embeddings."""
         if self._model is None:
+            import_start = time.perf_counter()
             try:
                 from sentence_transformers import SentenceTransformer
             except ImportError as exc:
@@ -155,7 +179,11 @@ class GlobalSemanticMemory:
                     "Install project dependencies and retry."
                 )
                 raise RuntimeError(msg) from exc
+            _emit_timing("semantic.model.import_sentence_transformers", import_start)
+
+            load_start = time.perf_counter()
             self._model = SentenceTransformer(self.model_name)
+            _emit_timing("semantic.model.load", load_start)
         return self._model
 
     @model.setter
@@ -182,7 +210,9 @@ class GlobalSemanticMemory:
 
     def _encode_query_impl(self, query: str):
         """Реальная реализация encode (вызывается через self._encode_query)."""
+        start = time.perf_counter()
         result = self.model.encode([query])[0]
+        _emit_timing("semantic.encode_query", start)
         return result.tolist() if hasattr(result, "tolist") else result
 
     def _encode_documents(self, documents: List[str]) -> List[Any]:
@@ -355,7 +385,11 @@ class GlobalSemanticMemory:
             a contract violation.
         """
         start_time = time.time()
+        timing_total = time.perf_counter()
+
+        encode_start = time.perf_counter()
         embedding = self._encode_query(query)
+        _emit_timing("semantic.search_all.encode", encode_start)
 
         results_by_source: Dict[str, List[Dict[str, Any]]] = {"semantic": []}
 
@@ -363,6 +397,7 @@ class GlobalSemanticMemory:
         # GLOBAL MEMORY
         # ------------------------
 
+        global_start = time.perf_counter()
         try:
             global_col = self._get_collection(self.global_collection)
 
@@ -374,13 +409,16 @@ class GlobalSemanticMemory:
             # whole search. AUDIT #5: log instead of silently swallowing, and
             # let non-Chroma errors propagate.
             logging.warning("Global collection search failed: %s", e)
+        _emit_timing("semantic.search_all.global_collection", global_start)
 
         # ------------------------
         # PROJECTS
         # ------------------------
 
+        collections_start = time.perf_counter()
         prefix = self.collection_prefix
         collections = self.client.list_collections()
+        _emit_timing("semantic.search_all.list_collections", collections_start)
 
         project_cols = [
             c
@@ -390,6 +428,7 @@ class GlobalSemanticMemory:
 
         per_col = max(n_results, 10)
 
+        projects_start = time.perf_counter()
         for c in project_cols:
             try:
                 col = self._get_collection(c.name)
@@ -403,6 +442,7 @@ class GlobalSemanticMemory:
                 # going. AUDIT #5: log the skip; unexpected errors propagate.
                 logging.warning("Project collection %s search failed: %s", c.name, e)
                 continue
+        _emit_timing("semantic.search_all.project_collections", projects_start)
 
         # ------------------------
         # LOCAL RANKING (within semantic)
@@ -410,8 +450,11 @@ class GlobalSemanticMemory:
 
         # Check distance metrics across collections before merging.
         # Different metrics (cosine vs L2 vs IP) produce incomparable distances.
+        metric_start = time.perf_counter()
         self._warn_if_mixed_metrics()
+        _emit_timing("semantic.search_all.metric_check", metric_start)
 
+        rank_start = time.perf_counter()
         for _, results in results_by_source.items():
             results.sort(key=lambda x: (x["distance"], x["id"]))
             for i, r in enumerate(results):
@@ -455,11 +498,13 @@ class GlobalSemanticMemory:
                     "_chunks": doc["chunks"],
                 }
             )
+        _emit_timing("semantic.search_all.rank_and_collapse", rank_start)
 
         elapsed = time.time() - start_time
         logging.info(
             "Search completed in %.2f seconds, %d results", elapsed, len(final)
         )
+        _emit_timing("semantic.search_all.total", timing_total)
 
         return final
 
@@ -585,17 +630,23 @@ class GlobalSemanticMemory:
 
     def search_global(self, query: str, n_results: int = 10) -> List[Dict[str, Any]]:
         """Поиск только в глобальной памяти."""
+        start = time.perf_counter()
         embedding = self._encode_query(query)
         col = self._get_collection(self.global_collection)
-        return self._search_collection(col, embedding, n_results, "global")
+        results = self._search_collection(col, embedding, n_results, "global")
+        _emit_timing("semantic.search_global.total", start)
+        return results
 
     def search_project(self, project_name: str, query: str, n_results: int = 10) -> List[Dict[str, Any]]:
         """Поиск только в памяти конкретного проекта."""
+        start = time.perf_counter()
         embedding = self._encode_query(query)
         col_name = self._resolve_project_collection_name(project_name)
         col = self._get_collection(col_name)
         source = col_name[len(self.collection_prefix) :]
-        return self._search_collection(col, embedding, n_results, source)
+        results = self._search_collection(col, embedding, n_results, source)
+        _emit_timing("semantic.search_project.total", start)
+        return results
 
 
 # ----------------------------
@@ -609,7 +660,7 @@ COMMANDS_HELP = (
 
 
 def _print_usage() -> None:
-    print("Usage: l4_semantic_global.py <command> [args] [--json]")
+    print("Usage: l4_semantic_global.py <command> [args] [--json] [--timing]")
     print(COMMANDS_HELP)
 
 
@@ -694,9 +745,22 @@ def _print_results(results: List[Dict[str, Any]], json_output: bool) -> None:
         print("-" * 40)
 
 
+def _consume_timing_flag() -> None:
+    """Enable timing diagnostics from the CLI flag without polluting stdout."""
+    global _SEMANTIC_TIMING_ENABLED  # pylint: disable=global-statement
+    if "--timing" in sys.argv:
+        _SEMANTIC_TIMING_ENABLED = True
+        sys.argv.remove("--timing")
+
+
 def main() -> None:
     configure_utf8_output()
+    _consume_timing_flag()
+    _emit_timing("semantic.process_start_to_main", _PROCESS_START)
+
+    init_start = time.perf_counter()
     mem = GlobalSemanticMemory()
+    _emit_timing("semantic.main.init", init_start)
 
     if len(sys.argv) < 2:
         _print_usage()
@@ -712,7 +776,9 @@ def main() -> None:
     if _run_admin_command(mem, cmd):
         return
 
+    search_start = time.perf_counter()
     results = _get_search_results(mem, cmd)
+    _emit_timing("semantic.main.command", search_start)
     if results is None:
         return
 
