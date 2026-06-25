@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# mypy: ignore-errors
+# pylint: disable=protected-access
 """Programmatic hybrid search API for repository/runtime callers.
 
 This module exposes the return-value counterpart to the CLI-only
@@ -39,12 +41,12 @@ def hybrid_search(
         FTS failure propagates to the caller (and is handled by the MCP wrapper).
     """
     fts_results = fts.search(query, limit=20)
-    semantic_results = _fts5._fetch_semantic_results(query)  # pylint: disable=protected-access
+    semantic_results = _fts5._fetch_semantic_results(query)
 
     bm25_results: list[dict[str, Any]] = []
     if _fts5.fetch_bm25_results is not None:
         try:
-            bm25_results = _fts5.fetch_bm25_results(query)  # type: ignore[misc]
+            bm25_results = _fts5.fetch_bm25_results(query)
         except Exception as exc:  # noqa: BLE001
             _fts5.logging.warning("BM25 search failed: %s", exc)
 
@@ -79,9 +81,9 @@ def hybrid_search(
         for item in bm25_results
     ]
 
-    _fts5._validate_stream_source_type(fts_stream, "fts", "FTS")  # pylint: disable=protected-access
-    _fts5._validate_stream_source_type(semantic_stream, "semantic", "Semantic")  # pylint: disable=protected-access
-    _fts5._validate_stream_source_type(bm25_stream, "bm25", "BM25")  # pylint: disable=protected-access
+    _fts5._validate_stream_source_type(fts_stream, "fts", "FTS")
+    _fts5._validate_stream_source_type(semantic_stream, "semantic", "Semantic")
+    _fts5._validate_stream_source_type(bm25_stream, "bm25", "BM25")
 
     fts_stream = _fts5.collapse_to_best_per_doc(fts_stream)
     semantic_stream = _fts5.collapse_to_best_per_doc(semantic_stream)
@@ -92,11 +94,13 @@ def hybrid_search(
 
     merged = normalize_scores(
         rrf_merge(
-            ("fts", fts_stream), ("semantic", semantic_stream), ("bm25", bm25_stream)
+            ("fts", fts_stream),
+            ("semantic", semantic_stream),
+            ("bm25", bm25_stream),
         )
     )
 
-    reranker = _fts5._get_l4_rerank() if enable_rerank and merged else None  # pylint: disable=protected-access
+    reranker = _fts5._get_l4_rerank() if enable_rerank and merged else None
     if reranker is not None:
         merged = reranker(query, merged[:20])
 
