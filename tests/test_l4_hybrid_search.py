@@ -7,8 +7,9 @@ from __future__ import annotations
 import importlib
 import sys
 import threading
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 from unittest.mock import MagicMock
 
 import pytest
@@ -167,3 +168,64 @@ def test_fetch_semantic_results_failure_degrades_to_empty(module, monkeypatch):
     monkeypatch.setattr(runtime, "_semantic_backend", BrokenSemanticBackend())
 
     assert runtime.fetch_semantic_results("hello") == []
+
+
+def test_runtime_semantic_backend_prefers_quiet_offline_load(module, monkeypatch):
+    """First MCP semantic query should try quiet offline model load first."""
+    runtime = module.l4_hybrid_runtime
+    contexts: list[bool] = []
+
+    @contextmanager
+    def fake_quiet_context(*, offline: bool) -> Iterator[None]:
+        contexts.append(offline)
+        yield
+
+    class FakeGlobalSemanticMemory:  # pylint: disable=too-few-public-methods
+        def __init__(self):
+            self._model = None
+
+        def search_all(self, query):
+            self._model = object()
+            return [{"key": make_join_key("global", f"{query}.md")}]
+
+    monkeypatch.setattr(runtime, "_quiet_model_load_context", fake_quiet_context)
+    monkeypatch.setattr(runtime, "_new_global_semantic_memory", FakeGlobalSemanticMemory)
+
+    backend = runtime._QuietOfflineSemanticBackend()  # pylint: disable=protected-access
+    assert backend.search_all("first")[0]["key"] == make_join_key("global", "first.md")
+    assert contexts == [True]
+
+    backend.search_all("second")
+    assert contexts == [True]
+
+
+def test_runtime_semantic_backend_retries_online_on_offline_cache_miss(
+    module, monkeypatch
+):
+    """Cold MCP model load must fall back online if local cache is missing."""
+    runtime = module.l4_hybrid_runtime
+    contexts: list[bool] = []
+
+    @contextmanager
+    def fake_quiet_context(*, offline: bool) -> Iterator[None]:
+        contexts.append(offline)
+        yield
+
+    class FakeGlobalSemanticMemory:  # pylint: disable=too-few-public-methods
+        def __init__(self):
+            self._model = None
+            self.calls = 0
+
+        def search_all(self, query):
+            self.calls += 1
+            if contexts[-1]:
+                raise RuntimeError("offline cache miss")
+            self._model = object()
+            return [{"key": make_join_key("global", f"{query}.md")}]
+
+    monkeypatch.setattr(runtime, "_quiet_model_load_context", fake_quiet_context)
+    monkeypatch.setattr(runtime, "_new_global_semantic_memory", FakeGlobalSemanticMemory)
+
+    backend = runtime._QuietOfflineSemanticBackend()  # pylint: disable=protected-access
+    assert backend.search_all("first")[0]["key"] == make_join_key("global", "first.md")
+    assert contexts == [True, False]
