@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # mypy: ignore-errors
+# pylint: disable=protected-access
 """Programmatic hybrid search API for repository/runtime callers.
 
 This module exposes the return-value counterpart to the CLI-only
@@ -21,12 +22,12 @@ from ranking import normalize_existing_key, normalize_scores, rrf_merge
 
 def _fetch_semantic(query: str) -> list[dict[str, Any]]:
     """Fetch semantic hits using the current CLI-backed implementation."""
-    return l4_fts5_search._fetch_semantic_results(query)  # pylint: disable=protected-access
+    return l4_fts5_search._fetch_semantic_results(query)
 
 
 def _get_reranker():
     """Return the optional L4 reranker, preserving lazy import semantics."""
-    return l4_fts5_search._get_l4_rerank()  # pylint: disable=protected-access
+    return l4_fts5_search._get_l4_rerank()
 
 
 def hybrid_search(
