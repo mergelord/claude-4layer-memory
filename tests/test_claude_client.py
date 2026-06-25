@@ -6,10 +6,11 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
-from claude_client import _parse_api_timeout  # noqa: E402
+from claude_client import _parse_api_timeout, TrackedClaudeClient  # noqa: E402
 
 
 class TestParseApiTimeout:
@@ -44,3 +45,50 @@ class TestParseApiTimeout:
 
     def test_whitespace_trimmed(self):
         assert _parse_api_timeout("  60  ") == 60.0
+
+
+class TestTimeoutInjection:
+    """Verify that messages_create injects a per-request timeout."""
+
+    def _make_client(self) -> TrackedClaudeClient:
+        """Build a TrackedClaudeClient with a mock Anthropic client + tracker."""
+        mock_api = MagicMock()
+        fake_message = MagicMock()
+        fake_message.usage = MagicMock(input_tokens=10, output_tokens=5)
+        mock_api.messages.create.return_value = fake_message
+        tracker = MagicMock()
+        return TrackedClaudeClient(client=mock_api, cost_tracker=tracker)
+
+    def test_timeout_injected_when_absent(self):
+        """When kwargs lacks 'timeout', messages_create should add one."""
+        client = self._make_client()
+        client.messages_create(model="test-model", max_tokens=10, messages=[])
+        call_kwargs = client.client.messages.create.call_args
+        assert "timeout" in call_kwargs.kwargs
+        assert call_kwargs.kwargs["timeout"] is not None
+        assert call_kwargs.kwargs["timeout"] > 0
+
+    def test_caller_timeout_respected(self):
+        """When kwargs already has 'timeout', messages_create must not override."""
+        client = self._make_client()
+        client.messages_create(
+            model="test-model", max_tokens=10, messages=[], timeout=300.0
+        )
+        call_kwargs = client.client.messages.create.call_args
+        assert call_kwargs.kwargs["timeout"] == 300.0
+
+    @patch("claude_client._API_TIMEOUT", None)
+    def test_no_timeout_when_disabled(self):
+        """When _API_TIMEOUT is None, no timeout key is added to kwargs."""
+        client = self._make_client()
+        client.messages_create(model="test-model", max_tokens=10, messages=[])
+        call_kwargs = client.client.messages.create.call_args
+        assert "timeout" not in call_kwargs.kwargs
+
+    def test_timeout_is_not_positional(self):
+        """timeout must be passed as a keyword arg, not positional."""
+        client = self._make_client()
+        client.messages_create(model="test-model", max_tokens=10, messages=[])
+        call_kwargs = client.client.messages.create.call_args
+        # call_args.kwargs should contain it, not call_args.args
+        assert "timeout" in call_kwargs.kwargs
