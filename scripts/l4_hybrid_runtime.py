@@ -12,11 +12,14 @@ cross-encoder reranking.
 
 from __future__ import annotations
 
+import logging
+import os
 import sys
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from pathlib import Path
 from threading import Lock
-from typing import Any, Optional
+from typing import Any, Iterator, Optional
 
 SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
@@ -28,13 +31,102 @@ from ranking import normalize_existing_key, normalize_scores, rrf_merge  # noqa:
 
 _semantic_backend: Optional[Any] = None
 _semantic_backend_lock = Lock()
+_MODEL_LOAD_LOGGERS = (
+    "huggingface_hub",
+    "httpx",
+    "sentence_transformers",
+    "transformers",
+    "urllib3",
+)
+_QUIET_MODEL_LOAD_ENV = {
+    "HF_HUB_DISABLE_PROGRESS_BARS": "1",
+    "HF_HUB_DISABLE_TELEMETRY": "1",
+    "HUGGINGFACE_HUB_VERBOSITY": "error",
+    "TOKENIZERS_PARALLELISM": "false",
+    "TRANSFORMERS_VERBOSITY": "error",
+}
+_OFFLINE_MODEL_LOAD_ENV = {
+    "HF_HUB_OFFLINE": "1",
+    "TRANSFORMERS_OFFLINE": "1",
+}
+
+
+@contextmanager
+def _temporary_env(updates: dict[str, str]) -> Iterator[None]:
+    """Temporarily set environment variables and restore them afterwards."""
+    previous = {key: os.environ.get(key) for key in updates}
+    os.environ.update(updates)
+    try:
+        yield
+    finally:
+        for key, value in previous.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+@contextmanager
+def _quiet_model_load_context(*, offline: bool) -> Iterator[None]:
+    """Suppress noisy Hugging Face/model-load logs for MCP runtime searches."""
+    env_updates = dict(_QUIET_MODEL_LOAD_ENV)
+    if offline:
+        env_updates.update(_OFFLINE_MODEL_LOAD_ENV)
+
+    loggers = [logging.getLogger(name) for name in _MODEL_LOAD_LOGGERS]
+    previous_levels = [logger.level for logger in loggers]
+    for logger in loggers:
+        logger.setLevel(logging.ERROR)
+
+    try:
+        with _temporary_env(env_updates):
+            yield
+    finally:
+        for logger, level in zip(loggers, previous_levels):
+            logger.setLevel(level)
+
+
+def _new_global_semantic_memory() -> Any:
+    """Create the underlying semantic memory backend lazily."""
+    from l4_semantic_global import GlobalSemanticMemory
+
+    return GlobalSemanticMemory()
+
+
+class _QuietOfflineSemanticBackend:
+    """Runtime semantic backend with quiet offline-first model loading.
+
+    MCP hybrid search should avoid Hugging Face network probes when the model is
+    already cached locally. The first semantic query therefore tries an offline
+    model load under quiet logging. If the cache is cold, it retries once online
+    while keeping the same log suppression so MCP stdio stays clean.
+    """
+
+    def __init__(self) -> None:
+        self._backend = _new_global_semantic_memory()
+
+    def search_all(self, query: str) -> list[dict[str, Any]]:
+        if getattr(self._backend, "_model", None) is not None:
+            return self._backend.search_all(query)
+
+        try:
+            with _quiet_model_load_context(offline=True):
+                return self._backend.search_all(query)
+        except Exception as exc:  # noqa: BLE001
+            if getattr(self._backend, "_model", None) is not None:
+                raise
+            l4_fts5_search.logging.info(
+                "Offline semantic model load missed local cache; retrying online: %s",
+                exc,
+            )
+
+        with _quiet_model_load_context(offline=False):
+            return self._backend.search_all(query)
 
 
 def _new_semantic_backend() -> Any:
     """Create a semantic memory backend lazily to avoid MCP startup cost."""
-    from l4_semantic_global import GlobalSemanticMemory
-
-    return GlobalSemanticMemory()
+    return _QuietOfflineSemanticBackend()
 
 
 def _get_semantic_backend() -> Any:
