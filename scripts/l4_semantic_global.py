@@ -55,6 +55,7 @@ except Exception:  # pragma: no cover - chromadb optional / version-dependent
 # pylint: disable=import-error
 from chunking import chunk_text  # noqa: E402
 from ranking import make_join_key, normalize_document_path  # noqa: E402
+from l4_config import get_config  # noqa: E402
 
 # ----------------------------
 # CONFIG
@@ -138,10 +139,11 @@ class GlobalSemanticMemory:
         init_start = time.perf_counter()
         self.home = Path.home()
 
-        self.global_memory = self.home / ".claude" / "memory"
-        self.projects_base = self.home / ".claude" / "projects"
+        config = get_config()
+        self.global_memory = config.memory_dir
+        self.projects_base = config.projects_dir
 
-        self.db_path = self.home / ".claude" / "semantic_db_global"
+        self.db_path = config.semantic_db_path
         self.db_path.mkdir(parents=True, exist_ok=True)
 
         client_start = time.perf_counter()

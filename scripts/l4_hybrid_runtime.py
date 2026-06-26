@@ -31,7 +31,6 @@ if str(SCRIPTS_DIR) not in sys.path:
 # pylint: disable=wrong-import-position,import-error
 import l4_fts5_search  # noqa: E402
 from l4_fts5_search import L4FTS5Search  # noqa: E402
-from ranking import normalize_existing_key, normalize_scores, rrf_merge  # noqa: E402
 
 _semantic_backend: Optional[Any] = None  # pylint: disable=invalid-name
 _semantic_backend_lock = Lock()
@@ -161,6 +160,27 @@ def fetch_semantic_results(query: str) -> list[dict[str, Any]]:
     return results if isinstance(results, list) else []
 
 
+def prewarm_semantic_backend() -> bool:
+    """Eagerly construct and warm the in-process semantic backend.
+
+    Loading ``sentence_transformers`` + Chroma lazily on the first hybrid query
+    adds multi-second latency to that query. For long-lived servers a caller can
+    invoke this once at startup (e.g. from a background thread) so the model and
+    Chroma client are ready before the first real request.
+
+    Best-effort: a tiny throwaway query triggers the load; any failure (cold
+    cache, missing optional deps, offline) is logged and reported as ``False``
+    so the caller never crashes — the first real query simply pays the lazy-load
+    cost as before.
+    """
+    try:
+        _get_semantic_backend().search_all("__prewarm__")
+        return True
+    except Exception as exc:  # noqa: BLE001
+        l4_fts5_search.logging.info("Semantic prewarm skipped: %s", exc)
+        return False
+
+
 def get_l4_reranker():
     """Return the optional L4 reranker, preserving lazy import semantics."""
     return l4_fts5_search._get_l4_rerank()  # pylint: disable=protected-access
@@ -194,48 +214,6 @@ def _fetch_source_results(
     return fts_results, semantic_results, bm25_results
 
 
-def _build_fts_stream(fts_results: list[Any]) -> list[dict[str, Any]]:
-    """Convert FTS SearchResult entries into RRF stream items."""
-    return [
-        {
-            "key": res.key,
-            "display_path": res.path,
-            "snippet": res.snippet,
-            "rank": res.rank,
-            "source_type": "fts",
-        }
-        for res in fts_results
-    ]
-
-
-def _build_semantic_stream(
-    semantic_results: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    """Convert semantic hits into normalized RRF stream items."""
-    return [
-        {
-            **hit,
-            "key": normalize_existing_key(hit.get("key", "")),
-            "source_type": "semantic",
-        }
-        for hit in semantic_results
-    ]
-
-
-def _build_bm25_stream(bm25_results: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Convert BM25 hits into normalized RRF stream items."""
-    return [
-        {
-            "key": normalize_existing_key(item["key"]),
-            "snippet": item["snippet"],
-            "rank": item.get("rank", 0),
-            "bm25_score": item.get("bm25_score"),
-            "source_type": "bm25",
-        }
-        for item in bm25_results
-    ]
-
-
 def build_hybrid_results(
     fts: L4FTS5Search, query: str, *, enable_rerank: bool = True
 ) -> list[Any]:
@@ -250,28 +228,24 @@ def build_hybrid_results(
         A list of ``ranking.RankedResult``-like objects. Returns ``[]`` when no
         engine produced a hit. Semantic/BM25 failures degrade to no hits via
         their existing helper boundaries; FTS failures propagate to callers.
+
+    Stream construction and RRF merge are delegated to the single source of
+    truth in :mod:`l4_fts5_search` (``build_hybrid_streams`` +
+    ``rrf_merge_streams``) so the runtime, sequential, and parallel paths all
+    produce identical streams. Reranking stays here so callers keep control of
+    ``enable_rerank``.
     """
     fts_results, semantic_results, bm25_results = _fetch_source_results(fts, query)
 
-    fts_stream = l4_fts5_search.collapse_to_best_per_doc(
-        _build_fts_stream(fts_results)
-    )
-    semantic_stream = l4_fts5_search.collapse_to_best_per_doc(
-        _build_semantic_stream(semantic_results)
-    )
-    bm25_stream = l4_fts5_search.collapse_to_best_per_doc(
-        _build_bm25_stream(bm25_results)
+    fts_stream, semantic_stream, bm25_stream = l4_fts5_search.build_hybrid_streams(
+        fts_results, semantic_results, bm25_results
     )
 
     if not fts_stream and not semantic_stream and not bm25_stream:
         return []
 
-    merged = normalize_scores(
-        rrf_merge(
-            ("fts", fts_stream),
-            ("semantic", semantic_stream),
-            ("bm25", bm25_stream),
-        )
+    merged = l4_fts5_search.rrf_merge_streams(
+        fts_stream, semantic_stream, bm25_stream
     )
 
     reranker = get_l4_reranker() if enable_rerank and merged else None
