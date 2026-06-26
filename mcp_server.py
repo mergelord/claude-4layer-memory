@@ -373,6 +373,34 @@ def smart_complete(
 
 
 # ---------------------------------------------------------------------------
+# Health / readiness
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def health_check(include_semantic: bool = True) -> dict[str, Any]:
+    """Report structured health/readiness for the memory system.
+
+    Aggregates the FTS5 index, semantic backend, routing learner, cost ledger,
+    and host facts into one payload with an overall ``status`` of
+    ``ok`` | ``degraded`` | ``down``. Read-only and safe to call anytime; set
+    ``include_semantic=False`` to skip the (heavier) ChromaDB probe.
+    """
+    try:
+        from health_check import collect_health
+
+        health = collect_health(
+            fts=fts5_search,
+            cost_tracker=cost_tracker,
+            routing_learner=routing_learner,
+            include_semantic=include_semantic,
+        )
+        return {"success": True, "health": health}
+    except Exception as e:
+        logging.error("Health check failed: %s", e)
+        return {"success": False, "error": str(e)}
+
+
+# ---------------------------------------------------------------------------
 # Resources
 # ---------------------------------------------------------------------------
 

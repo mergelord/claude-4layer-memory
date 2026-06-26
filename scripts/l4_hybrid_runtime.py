@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# pylint: skip-file
-# mypy: ignore-errors
 """Shared return-value hybrid search runtime.
 
 This module centralizes the non-printing hybrid search flow used by runtime
@@ -25,11 +23,17 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
+# The imports below intentionally run after the sys.path bootstrap above so the
+# flat ``scripts/`` modules resolve at runtime without an installed package.
+# Pylint analyzes statically (no bootstrap) and cannot resolve these sibling
+# modules, so suppress only the import-position and unresolved-import checks for
+# this shim rather than disabling the whole file (mirrors l4_hybrid_search.py).
+# pylint: disable=wrong-import-position,import-error
 import l4_fts5_search  # noqa: E402
 from l4_fts5_search import L4FTS5Search  # noqa: E402
 from ranking import normalize_existing_key, normalize_scores, rrf_merge  # noqa: E402
 
-_semantic_backend: Optional[Any] = None
+_semantic_backend: Optional[Any] = None  # pylint: disable=invalid-name
 _semantic_backend_lock = Lock()
 _MODEL_LOAD_LOGGERS = (
     "huggingface_hub",
@@ -159,10 +163,10 @@ def fetch_semantic_results(query: str) -> list[dict[str, Any]]:
 
 def get_l4_reranker():
     """Return the optional L4 reranker, preserving lazy import semantics."""
-    return l4_fts5_search._get_l4_rerank()
+    return l4_fts5_search._get_l4_rerank()  # pylint: disable=protected-access
 
 
-def _fetch_bm25_results(query: str) -> list[dict[str, Any]]:
+def _fetch_bm25_results(query: str) -> list[Any]:
     """Fetch optional BM25 hits, degrading to no hits on BM25 failures."""
     if l4_fts5_search.fetch_bm25_results is None:
         return []
