@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# pylint: disable=wrong-import-position, import-outside-toplevel
+# pylint: disable=wrong-import-position, import-outside-toplevel, too-many-lines
 # -*- coding: utf-8 -*-
 """
 L4 FTS5 Search - Fast keyword search for memory system
@@ -222,6 +222,7 @@ class L4FTS5Search:
         conn: sqlite3.Connection,
         source: str,
         rel_path: str,
+        *,
         mtime_ns: int,
         size: int,
         chunks: int,
@@ -324,7 +325,12 @@ class L4FTS5Search:
                         (rel_path, source, chunk),
                     )
                 self._record_file_meta(
-                    conn, source, rel_path, mtime_ns, size, len(chunks)
+                    conn,
+                    source,
+                    rel_path,
+                    mtime_ns=mtime_ns,
+                    size=size,
+                    chunks=len(chunks),
                 )
                 conn.commit()
             return True
@@ -523,7 +529,12 @@ class L4FTS5Search:
                         (rel_path, source, chunk),
                     )
                 self._record_file_meta(
-                    conn, source, rel_path, mtime_ns, size, len(chunks)
+                    conn,
+                    source,
+                    rel_path,
+                    mtime_ns=mtime_ns,
+                    size=size,
+                    chunks=len(chunks),
                 )
                 conn.commit()
             return True
@@ -574,7 +585,12 @@ class L4FTS5Search:
                     )
                 mtime_ns, size = self._file_signature(file_path)
                 self._record_file_meta(
-                    conn, source, rel_path, mtime_ns, size, len(chunks)
+                    conn,
+                    source,
+                    rel_path,
+                    mtime_ns=mtime_ns,
+                    size=size,
+                    chunks=len(chunks),
                 )
                 conn.commit()
                 logging.info(
