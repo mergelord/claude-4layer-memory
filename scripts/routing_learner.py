@@ -36,6 +36,7 @@ Usage::
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import sys
@@ -91,6 +92,24 @@ MODEL_TIER: dict[str, int] = {
     "claude-sonnet-4": 1,
     "claude-opus-4": 2,
 }
+
+
+def _store_task_text_enabled() -> bool:
+    """Return False when raw task-text storage is opted out via env.
+
+    Controlled by ``ROUTING_STORE_TASK_TEXT`` (default ``"1"``). Setting it to
+    ``"0"``, ``"false"`` or ``"no"`` (case-insensitive) stores only a hashed
+    digest of the task instead of the raw text, for privacy-sensitive
+    deployments. The embedding (and therefore routing quality) is unchanged;
+    only the human-readable document payload is redacted.
+    """
+    raw = os.getenv("ROUTING_STORE_TASK_TEXT", "1").strip().lower()
+    return raw not in {"0", "false", "no"}
+
+
+def _hash_task(task: str) -> str:
+    """Return a stable, non-reversible digest of a task description."""
+    return "sha256:" + hashlib.sha256(task.encode("utf-8")).hexdigest()
 
 
 class RoutingLearner:
@@ -351,11 +370,16 @@ class RoutingLearner:
         # Remove None values (ChromaDB doesn't like them)
         metadata = {k: v for k, v in metadata.items() if v is not None}
 
+        # Privacy: optionally store only a non-reversible digest of the task
+        # text. Raw text remains the default so existing search/debug quality
+        # is unaffected; the embedding is identical either way.
+        document = task if _store_task_text_enabled() else _hash_task(task)
+
         try:
             self.collection.add(
                 ids=[task_id],
                 embeddings=[embedding],
-                documents=[task],
+                documents=[document],
                 metadatas=[metadata],
             )
         except _CHROMA_LOOKUP_ERRORS as exc:
@@ -364,6 +388,53 @@ class RoutingLearner:
             logger.error("Unexpected record error: %s", exc)
 
         return task_id
+
+    def prune_history(self, max_entries: int | None = None) -> int:
+        """Delete the oldest history rows beyond ``max_entries``.
+
+        When ``max_entries`` is ``None`` the cap is read from the
+        ``ROUTING_HISTORY_MAX`` environment variable. A non-positive cap (the
+        default of ``0``) disables pruning and returns ``0``. Returns the
+        number of rows deleted.
+
+        Pruning is intentionally never invoked automatically by
+        :meth:`record_outcome`; call it explicitly from a maintenance routine
+        so normal recording keeps its predictable single-add behaviour.
+        """
+        if max_entries is None:
+            try:
+                max_entries = int(os.getenv("ROUTING_HISTORY_MAX", "0"))
+            except (TypeError, ValueError):
+                max_entries = 0
+        if max_entries <= 0:
+            return 0
+
+        try:
+            total = self.collection.count()
+            if total <= max_entries:
+                return 0
+            data = self.collection.get(include=["metadatas"])
+        except Exception as exc:
+            logger.warning("Cannot load history for pruning: %s", exc)
+            return 0
+
+        ids = data.get("ids") or []
+        metadatas = data.get("metadatas") or []
+        paired = list(zip(ids, metadatas))
+        paired.sort(key=lambda item: (item[1] or {}).get("timestamp", ""))
+
+        stale_count = max(0, len(paired) - max_entries)
+        stale_ids = [entry_id for entry_id, _ in paired[:stale_count]]
+        if not stale_ids:
+            return 0
+
+        try:
+            self.collection.delete(ids=stale_ids)
+        except Exception as exc:
+            logger.warning("Failed to delete stale history: %s", exc)
+            return 0
+
+        return len(stale_ids)
 
     # ------------------------------------------------------------------
     # Public API — stats
