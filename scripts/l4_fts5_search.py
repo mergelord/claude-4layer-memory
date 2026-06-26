@@ -11,6 +11,7 @@ L4 FTS5 Search - Fast keyword search for memory system
 Использование:
     python l4_fts5_search.py init                    # Инициализация FTS5 таблицы
     python l4_fts5_search.py reindex                 # Полная переиндексация
+    python l4_fts5_search.py reindex --incremental   # Инкрементальная (по mtime/size)
     python l4_fts5_search.py search "query"          # Поиск
     python l4_fts5_search.py hybrid "query"          # Гибридный поиск (sequential)
     python l4_fts5_search.py hybrid --parallel "query"  # Параллельный поиск (2-3x faster)
@@ -26,6 +27,7 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterator, List, Optional, Tuple
@@ -185,6 +187,92 @@ class L4FTS5Search:
         finally:
             conn.close()
 
+    @staticmethod
+    def _ensure_meta_table(conn: sqlite3.Connection) -> None:
+        """Create the per-file metadata table if it does not yet exist.
+
+        ``memory_files`` records one row per indexed document keyed by
+        ``(source, path)`` with the ``(mtime_ns, size)`` signature used by
+        :meth:`reindex_incremental` to detect changes without re-reading every
+        file. It is created alongside the FTS table and is safe to call
+        repeatedly.
+        """
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS memory_files (
+                source TEXT NOT NULL,
+                path TEXT NOT NULL,
+                mtime_ns INTEGER NOT NULL,
+                size INTEGER NOT NULL,
+                chunks INTEGER NOT NULL DEFAULT 0,
+                indexed_at TEXT,
+                PRIMARY KEY (source, path)
+            )
+            """
+        )
+
+    @staticmethod
+    def _file_signature(path: Path) -> Tuple[int, int]:
+        """Return ``(mtime_ns, size)`` used to detect file changes."""
+        stat_res = path.stat()
+        return stat_res.st_mtime_ns, stat_res.st_size
+
+    @staticmethod
+    def _record_file_meta(
+        conn: sqlite3.Connection,
+        source: str,
+        rel_path: str,
+        mtime_ns: int,
+        size: int,
+        chunks: int,
+    ) -> None:
+        """Upsert the indexed-file metadata row for ``(source, rel_path)``."""
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO memory_files
+                (source, path, mtime_ns, size, chunks, indexed_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                source,
+                rel_path,
+                mtime_ns,
+                size,
+                chunks,
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+
+    def _collect_memory_files(self) -> List[Tuple[Path, Path, str]]:
+        """Enumerate indexable markdown files as ``(md_file, base_path, source)``.
+
+        Mirrors the discovery logic historically inlined in ``reindex_all``:
+        global memory under ``self.global_memory`` (source ``"global"``) plus
+        each project's ``memory/`` directory (source = project directory name).
+        Non-directories and projects without a ``memory/`` folder are skipped.
+        Shared by both full and incremental reindex so they always see an
+        identical file set.
+        """
+        files_to_index: List[Tuple[Path, Path, str]] = []
+
+        if self.global_memory.exists():
+            for md_file in self.global_memory.rglob("*.md"):
+                files_to_index.append((md_file, self.global_memory, "global"))
+
+        if self.projects_base.exists():
+            for project_dir in self.projects_base.iterdir():
+                if not project_dir.is_dir():
+                    continue
+                memory_path = project_dir / "memory"
+                if not memory_path.exists():
+                    continue
+                for md_file in memory_path.rglob("*.md"):
+                    files_to_index.append(
+                        (md_file, memory_path, project_dir.name)
+                    )
+
+        return files_to_index
+
     def init_fts(self) -> bool:
         """Создать FTS5 таблицу если не существует"""
         try:
@@ -197,6 +285,7 @@ class L4FTS5Search:
                         tokenize='unicode61 remove_diacritics 2'
                     )
                 """)
+                self._ensure_meta_table(conn)
                 conn.commit()
                 logging.info("FTS5 table initialized")
                 return True
@@ -225,13 +314,18 @@ class L4FTS5Search:
             content = md_file.read_text(encoding="utf-8")
             rel_path = normalize_document_path(md_file.relative_to(base_path))
             chunks = chunk_text(content)
+            mtime_ns, size = self._file_signature(md_file)
 
             with self._get_connection() as conn:
+                self._ensure_meta_table(conn)
                 for chunk in chunks:
                     conn.execute(
                         "INSERT INTO memory_fts (path, source, content) VALUES (?, ?, ?)",
                         (rel_path, source, chunk),
                     )
+                self._record_file_meta(
+                    conn, source, rel_path, mtime_ns, size, len(chunks)
+                )
                 conn.commit()
             return True
         # AUDIT #5: narrowed from a blanket ``except Exception``. File reads
@@ -251,24 +345,12 @@ class L4FTS5Search:
 
         try:
             with self._get_connection() as conn:
+                self._ensure_meta_table(conn)
                 conn.execute("DELETE FROM memory_fts")
+                conn.execute("DELETE FROM memory_files")
                 conn.commit()
 
-            files_to_index = []
-
-            if self.global_memory.exists():
-                for md_file in self.global_memory.rglob("*.md"):
-                    files_to_index.append((md_file, self.global_memory, "global"))
-
-            if self.projects_base.exists():
-                for project_dir in self.projects_base.iterdir():
-                    if not project_dir.is_dir():
-                        continue
-                    memory_path = project_dir / "memory"
-                    if not memory_path.exists():
-                        continue
-                    for md_file in memory_path.rglob("*.md"):
-                        files_to_index.append((md_file, memory_path, project_dir.name))
+            files_to_index = self._collect_memory_files()
 
             with ThreadPoolExecutor(max_workers=4) as executor:
                 futures = {
@@ -311,6 +393,144 @@ class L4FTS5Search:
             logging.error("Reindex failed: %s", e)
             return 0
 
+    def reindex_incremental(self) -> dict:
+        """Переиндексация только изменённых/новых/удалённых файлов.
+
+        Compares each discoverable file's ``(mtime_ns, size)`` signature against
+        the stored ``memory_files`` metadata and reindexes just the differences,
+        instead of the full ``DELETE`` + rebuild performed by
+        :meth:`reindex_all`. Files that disappeared from disk are removed from
+        both the FTS index and the metadata table.
+
+        Returns a summary dict with integer counts: ``added``, ``updated``,
+        ``removed``, ``unchanged`` and ``indexed`` (== added + updated).
+        """
+        summary = {
+            "added": 0,
+            "updated": 0,
+            "removed": 0,
+            "unchanged": 0,
+            "indexed": 0,
+        }
+
+        try:
+            with self._get_connection() as conn:
+                self._ensure_meta_table(conn)
+                stored_rows = conn.execute(
+                    "SELECT source, path, mtime_ns, size FROM memory_files"
+                ).fetchall()
+
+            stored = {
+                (row["source"], row["path"]): (row["mtime_ns"], row["size"])
+                for row in stored_rows
+            }
+
+            seen = set()
+            for md_file, base_path, source in self._collect_memory_files():
+                if md_file.name.startswith("."):
+                    continue
+                try:
+                    rel_path = normalize_document_path(
+                        md_file.relative_to(base_path)
+                    )
+                    signature = self._file_signature(md_file)
+                except OSError as exc:
+                    logging.warning("Skip unreadable file %s: %s", md_file, exc)
+                    continue
+
+                identity = (source, rel_path)
+                seen.add(identity)
+                previous = stored.get(identity)
+
+                if previous is None:
+                    if self._reindex_one_file(md_file, base_path, source):
+                        summary["added"] += 1
+                elif previous != signature:
+                    if self._reindex_one_file(md_file, base_path, source):
+                        summary["updated"] += 1
+                else:
+                    summary["unchanged"] += 1
+
+            removed_identities = [key for key in stored if key not in seen]
+            if removed_identities:
+                with self._get_connection() as conn:
+                    self._ensure_meta_table(conn)
+                    for source, rel_path in removed_identities:
+                        conn.execute(
+                            "DELETE FROM memory_fts WHERE path = ? AND source = ?",
+                            (rel_path, source),
+                        )
+                        conn.execute(
+                            "DELETE FROM memory_files WHERE path = ? AND source = ?",
+                            (rel_path, source),
+                        )
+                        summary["removed"] += 1
+                    conn.commit()
+
+            summary["indexed"] = summary["added"] + summary["updated"]
+
+            if summary["indexed"] or summary["removed"]:
+                self.clear_cache()
+
+            logging.info(
+                "Incremental reindex: +%d ~%d -%d =%d",
+                summary["added"],
+                summary["updated"],
+                summary["removed"],
+                summary["unchanged"],
+            )
+            return summary
+
+        # AUDIT #5: same narrowing rationale as reindex_all — only the realistic
+        # sqlite3.Error / OSError failure modes degrade to the (partial)
+        # summary; unexpected errors propagate.
+        except (OSError, sqlite3.Error) as e:
+            logging.error("Incremental reindex failed: %s", e)
+            return summary
+
+    def _reindex_one_file(
+        self, md_file: Path, base_path: Path, source: str
+    ) -> bool:
+        """Reindex a single file in place (delete old rows, insert fresh chunks).
+
+        Unlike :meth:`_index_single_file` (full-rebuild helper that only
+        inserts into a freshly cleared table), this removes any existing rows
+        for the document first so it is safe to call repeatedly during
+        incremental reindex, and records per-file metadata so future runs can
+        detect changes by mtime/size.
+        """
+        if md_file.name.startswith("."):
+            return False
+        if not os.access(md_file, os.R_OK):
+            logging.warning("No read access: %s", md_file)
+            return False
+
+        try:
+            content = md_file.read_text(encoding="utf-8")
+            rel_path = normalize_document_path(md_file.relative_to(base_path))
+            chunks = chunk_text(content)
+            mtime_ns, size = self._file_signature(md_file)
+
+            with self._get_connection() as conn:
+                self._ensure_meta_table(conn)
+                conn.execute(
+                    "DELETE FROM memory_fts WHERE path = ? AND source = ?",
+                    (rel_path, source),
+                )
+                for chunk in chunks:
+                    conn.execute(
+                        "INSERT INTO memory_fts (path, source, content) VALUES (?, ?, ?)",
+                        (rel_path, source, chunk),
+                    )
+                self._record_file_meta(
+                    conn, source, rel_path, mtime_ns, size, len(chunks)
+                )
+                conn.commit()
+            return True
+        except (OSError, UnicodeDecodeError, sqlite3.Error) as e:
+            logging.warning("Failed to index %s: %s", md_file.name, e)
+            return False
+
     def index_file(
         self,
         file_path: Path,
@@ -334,6 +554,7 @@ class L4FTS5Search:
 
         try:
             with self._get_connection() as conn:
+                self._ensure_meta_table(conn)
                 content = file_path.read_text(encoding="utf-8")
                 if base_path is not None:
                     rel_path = normalize_document_path(
@@ -351,6 +572,10 @@ class L4FTS5Search:
                         "INSERT INTO memory_fts (path, source, content) VALUES (?, ?, ?)",
                         (rel_path, source, chunk),
                     )
+                mtime_ns, size = self._file_signature(file_path)
+                self._record_file_meta(
+                    conn, source, rel_path, mtime_ns, size, len(chunks)
+                )
                 conn.commit()
                 logging.info(
                     "Indexed: %s (%s) with %d chunks", rel_path, source, len(chunks)
@@ -506,9 +731,18 @@ def cmd_init(fts: L4FTS5Search) -> None:
         sys.exit(1)
 
 
-def cmd_reindex(fts: L4FTS5Search) -> None:
-    count = fts.reindex_all()
-    print(f"[OK] Reindexed {count} files")
+def cmd_reindex(fts: L4FTS5Search, incremental: bool = False) -> None:
+    if incremental:
+        summary = fts.reindex_incremental()
+        print(
+            "[OK] Incremental reindex: "
+            f"+{summary['added']} ~{summary['updated']} "
+            f"-{summary['removed']} ={summary['unchanged']} "
+            f"({summary['indexed']} indexed)"
+        )
+    else:
+        count = fts.reindex_all()
+        print(f"[OK] Reindexed {count} files")
 
 
 def cmd_search(fts: L4FTS5Search, query: str) -> None:
@@ -918,7 +1152,8 @@ def main() -> None:
     if command == "init":
         cmd_init(fts)
     elif command == "reindex":
-        cmd_reindex(fts)
+        incremental = "--incremental" in sys.argv[2:]
+        cmd_reindex(fts, incremental=incremental)
     elif command == "search":
         if len(sys.argv) < 3:
             print("Usage: l4_fts5_search.py search <query>")
