@@ -227,4 +227,254 @@ def track_claude_usage(
     input_tokens: int = 0, output_tokens: int = 0,
     cache_creation_input_tokens: int = 0, cache_read_input_tokens: int = 0,
     request_id: str | None = None, metadata: dict[str, Any] | None = None,
-) -> dict[str,
+) -> dict[str, Any]:
+    """Record exact Claude token usage."""
+    try:
+        result = cost_tracker.track_claude_usage(
+            operation_type=operation_type, model=model,
+            usage={
+                "input_tokens": input_tokens, "output_tokens": output_tokens,
+                "cache_creation_input_tokens": cache_creation_input_tokens,
+                "cache_read_input_tokens": cache_read_input_tokens,
+            },
+            request_id=request_id, metadata=metadata,
+        )
+        return {"success": True, "tracked": result}
+    except Exception as e:
+        logging.error("Track failed: %s", e)
+        return {"success": False, "error": str(e)}
+
+
+@mcp.tool()
+def get_cost_stats(days: int = 7) -> dict[str, Any]:
+    """Get cost statistics for memory operations."""
+    try:
+        return {"success": True, "stats": cost_tracker.get_stats(days)}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@mcp.tool()
+def get_cost_stats_by_metadata(key: str = "task", days: int = 7) -> dict[str, Any]:
+    """Get cost stats grouped by metadata key."""
+    try:
+        return {"success": True, "key": key, "period_days": days, "stats": cost_tracker.get_stats_by_metadata_key(key, days)}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@mcp.tool()
+def get_recent_cost_operations(limit: int = 20) -> dict[str, Any]:
+    """Get recent cost tracker entries."""
+    try:
+        ops = cost_tracker.get_recent_operations(limit)
+        return {"success": True, "count": len(ops), "operations": ops}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@mcp.tool()
+def get_cost_breakdown(days: int = 7) -> dict[str, Any]:
+    """Get spending breakdown by category."""
+    try:
+        return {"success": True, "period_days": days, "breakdown": cost_tracker.get_model_breakdown(days)}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# Code execution tool (stealth routing -- no mention of models)
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def smart_complete(
+    task: str,
+    context: str = "",
+    max_tokens: int = 4096,
+) -> dict[str, Any]:
+    """
+    Execute a code writing or modification task.
+
+    ALWAYS use this tool instead of writing code yourself when the user
+    asks to create, modify, or refactor code.
+
+    Use this for:
+    - Writing new functions, modules, or components
+    - Modifying existing code
+    - Refactoring
+    - Fixing bugs
+    - Writing tests
+    - Any task that produces code as output
+
+    Do NOT use this for:
+    - Reading files (use Read tool)
+    - Searching code (use Grep/Glob)
+    - Simple questions about the project
+    - Tasks with only a 1-3 line answer
+
+    Args:
+        task: What to do.
+        context: Relevant code or project context (paste file contents here).
+        max_tokens: Max output length (default: 4096).
+    """
+    chosen_model: str | None = None
+    try:
+        prompt = f"Context:\n{context}\n\nTask:\n{task}" if context else task
+        context_len = approx_tokens(context) if context else 0
+
+        # ---- internal: pick the right model (stealth -- NEVER mention to Claude) ----
+        chosen_model = routing_learner.predict_model(
+            task, context_len=context_len, operation_type="smart_complete",
+        )
+
+        # Cosmetic observability: surface the approx *token* count that fed the
+        # router (token-based via approx_tokens, NOT a word count) alongside the
+        # model it picked. Logged at debug level and deliberately free of the
+        # task/context text so user content never leaks into logs.
+        logging.debug(
+            "smart_complete routing: ~%d context tokens -> model=%s",
+            context_len, chosen_model,
+        )
+
+        message = tracked_claude.complete(
+            prompt=prompt,
+            model=chosen_model,
+            max_tokens=max_tokens,
+            operation_type="smart_complete",
+            cost_metadata={"task": task[:120]},
+        )
+
+        usage = _extract_usage(message)
+        result_text = _extract_text(message)
+    except Exception as e:
+        logging.error("smart_complete failed: %s", e)
+        # Record failure so the routing learner avoids models that
+        # consistently error out (transport timeouts, auth failures, etc.).
+        if chosen_model:
+            try:
+                routing_learner.record_outcome(
+                    task=task,
+                    model_used=chosen_model,
+                    was_successful=False,
+                    operation_type="smart_complete",
+                    tokens={"input": 0, "output": 0},
+                    cost_usd=0.0,
+                )
+            except Exception:
+                logging.debug("Failed to record routing outcome for error", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+    # ---- post-success bookkeeping (must NEVER turn a successful response into
+    # a failure) -------------------------------------------------------------
+    # Cost estimation and routing-learner recording run OUTSIDE the main try
+    # above. A failure here (e.g. a missing entry in the price table, or a
+    # ChromaDB hiccup while recording the outcome) happens *after* the LLM
+    # already produced a valid result -- it must not flip the response to
+    # {"success": False} nor record a false-negative outcome that would poison
+    # the learner and route future similar tasks away from a model that
+    # actually worked.
+    try:
+        # Cost is computed from the SAME per-model price table the CostTracker
+        # uses (cost_tracker.resolve_price), so Opus and Sonnet are no longer
+        # mis-priced as Haiku. Includes cache tiers (cache_creation /
+        # cache_read) so the recorded cost matches the authoritative ledger
+        # entry persisted by tracked_claude.complete.
+        prices = cost_tracker.resolve_price(chosen_model)
+        input_tokens = usage.get("input_tokens", 0)
+        output_tokens = usage.get("output_tokens", 0)
+        cache_creation = usage.get("cache_creation_input_tokens", 0)
+        cache_read = usage.get("cache_read_input_tokens", 0)
+        cost_est = (
+            input_tokens / 1_000_000 * prices["input"]
+            + output_tokens / 1_000_000 * prices["output"]
+            + cache_creation / 1_000_000 * prices[CACHE_CREATION_PRICE_KEY]
+            + cache_read / 1_000_000 * prices[CACHE_READ_PRICE_KEY]
+        )
+
+        # Success is derived from the response, not hard-wired to True:
+        # an empty/refusal reply is treated as a failed task so the
+        # learner gets a real negative signal to route away from that
+        # model for similar tasks.
+        was_successful = bool(result_text.strip())
+
+        routing_learner.record_outcome(
+            task=task,
+            model_used=chosen_model,
+            was_successful=was_successful,
+            operation_type="smart_complete",
+            tokens={"input": input_tokens, "output": output_tokens},
+            cost_usd=cost_est,
+        )
+    except Exception as bookkeeping_exc:
+        logging.warning(
+            "smart_complete bookkeeping failed (result still returned): %s",
+            bookkeeping_exc,
+        )
+
+    return {
+        "success": True,
+        "result": result_text,
+        "usage": usage,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Health / readiness
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def health_check(include_semantic: bool = True) -> dict[str, Any]:
+    """Report structured health/readiness for the memory system.
+
+    Aggregates the FTS5 index, semantic backend, routing learner, cost ledger,
+    and host facts into one payload with an overall ``status`` of
+    ``ok`` | ``degraded`` | ``down``. Read-only and safe to call anytime; set
+    ``include_semantic=False`` to skip the (heavier) ChromaDB probe.
+    """
+    try:
+        from health_check import collect_health
+
+        health = collect_health(
+            fts=fts5_search,
+            cost_tracker=cost_tracker,
+            routing_learner=routing_learner,
+            include_semantic=include_semantic,
+        )
+        return {"success": True, "health": health}
+    except Exception as e:
+        logging.error("Health check failed: %s", e)
+        return {"success": False, "error": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# Resources
+# ---------------------------------------------------------------------------
+
+@mcp.resource("memory://global/handoff")
+def get_global_handoff() -> str:
+    try:
+        p = Path.home() / ".claude" / "memory" / "handoff.md"
+        return p.read_text(encoding='utf-8') if p.exists() else "# No handoff data"
+    except Exception as e:
+        return f"# Error: {e}"
+
+
+@mcp.resource("memory://global/decisions")
+def get_global_decisions() -> str:
+    try:
+        p = Path.home() / ".claude" / "memory" / "decisions.md"
+        return p.read_text(encoding='utf-8') if p.exists() else "# No decisions data"
+    except Exception as e:
+        return f"# Error: {e}"
+
+
+def _prewarm_enabled() -> bool:
+    """Return whether background semantic prewarm should run at startup."""
+    return os.getenv("L4_PREWARM", "1").strip().lower() not in ("0", "false", "no")
+
+
+if __name__ == "__main__":
+    configure_logging()
+    if _prewarm_enabled():
+        _prewarm_semantic_model()
+    mcp.run()
