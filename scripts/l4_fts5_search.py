@@ -54,6 +54,10 @@ from ranking import (  # noqa: E402
     sanitize_fts5_query,
 )
 
+# Centralized configuration (stdlib-only, safe to import eagerly).
+# pylint: disable-next=wrong-import-position,import-error
+from l4_config import get_config  # noqa: E402
+
 # BM25 search (optional module)
 try:
     # pylint: disable-next=wrong-import-position,import-error
@@ -140,14 +144,16 @@ class L4FTS5Search:
 
     def __init__(self, db_path: Optional[Path] = None) -> None:
         self.home = Path.home()
+
+        config = get_config()
         if db_path is None:
-            db_path = self.home / ".claude" / "memory_fts5.db"
+            db_path = config.fts5_db_path
 
         self.db_path = db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
-        self.global_memory = self.home / ".claude" / "memory"
-        self.projects_base = self.home / ".claude" / "projects"
+        self.global_memory = config.memory_dir
+        self.projects_base = config.projects_dir
 
         # Per-instance search cache, created lazily on first use (see
         # _cached_search). Storing the lru_cache on the instance — instead of
@@ -619,6 +625,92 @@ def collapse_to_best_per_doc(stream: list[dict]) -> list[dict]:
     return collapsed
 
 
+def build_hybrid_streams(
+    fts_results: list,
+    semantic_results: list[dict],
+    bm25_results: list[dict],
+) -> Tuple[list[dict], list[dict], list[dict]]:
+    """Строит и collapse'ит три сигнальных потока (1 документ = 1 сигнал).
+
+    Единый источник правды для sequential (``cmd_hybrid``), parallel
+    (``cmd_hybrid_parallel``) и runtime (``l4_hybrid_runtime.build_hybrid_results``):
+    все пути строят идентичные потоки. Каждый поток помечается явным
+    ``source_type``, проверяется fail-fast, затем схлопывается до одного
+    лучшего чанка на документ.
+
+    Args:
+        fts_results: результаты FTS5 (``SearchResult`` с .key/.path/.snippet/.rank).
+        semantic_results: сырые dict-хиты семантики.
+        bm25_results: сырые dict-хиты BM25.
+
+    Returns:
+        Кортеж (fts_stream, semantic_stream, bm25_stream) после collapse.
+    """
+    fts_stream = [
+        {
+            "key": res.key,
+            "display_path": res.path,
+            "snippet": res.snippet,
+            "rank": res.rank,
+            "source_type": "fts",
+        }
+        for res in fts_results
+    ]
+
+    semantic_stream = [
+        {
+            **hit,
+            "key": normalize_existing_key(hit.get("key", "")),
+            "source_type": "semantic",
+        }
+        for hit in semantic_results
+    ]
+
+    bm25_stream = [
+        {
+            "key": normalize_existing_key(item["key"]),
+            "snippet": item["snippet"],
+            "rank": item.get("rank", 0),
+            "bm25_score": item.get("bm25_score"),
+            "source_type": "bm25",
+        }
+        for item in bm25_results
+    ]
+
+    # Инварианты (fail-fast вместо assert)
+    _validate_stream_source_type(fts_stream, "fts", "FTS")
+    _validate_stream_source_type(semantic_stream, "semantic", "Semantic")
+    _validate_stream_source_type(bm25_stream, "bm25", "BM25")
+
+    # 1 документ = 1 сигнал
+    fts_stream = collapse_to_best_per_doc(fts_stream)
+    semantic_stream = collapse_to_best_per_doc(semantic_stream)
+    bm25_stream = collapse_to_best_per_doc(bm25_stream)
+
+    return fts_stream, semantic_stream, bm25_stream
+
+
+def rrf_merge_streams(
+    fts_stream: list[dict],
+    semantic_stream: list[dict],
+    bm25_stream: list[dict],
+):
+    """Сливает три collapse'нутых потока через RRF и нормализует score'ы.
+
+    Rerank сознательно НЕ применяется здесь: cross-encoder реранкинг
+    остаётся ответственностью вызывающего (inline в ``cmd_hybrid`` /
+    ``cmd_hybrid_parallel`` / runtime), чтобы сохранить раздельные
+    тайминги Merge/Rerank и контроль enable_rerank.
+    """
+    return normalize_scores(
+        rrf_merge(
+            ("fts", fts_stream),
+            ("semantic", semantic_stream),
+            ("bm25", bm25_stream),
+        )
+    )
+
+
 # ---------------------------------------------------------------------------
 # Hybrid search (FTS + semantic + BM25)
 # ---------------------------------------------------------------------------
@@ -737,47 +829,9 @@ def cmd_hybrid_parallel(fts: L4FTS5Search, query: str, enable_rerank: bool = Tru
 
     fetch_time = time.time() - start_time
 
-    # Формируем потоки с явным source_type
-    fts_stream = [
-        {
-            "key": res.key,
-            "display_path": res.path,
-            "snippet": res.snippet,
-            "rank": res.rank,
-            "source_type": "fts",
-        }
-        for res in fts_results
-    ]
-
-    semantic_stream = [
-        {
-            **hit,
-            "key": normalize_existing_key(hit.get("key", "")),
-            "source_type": "semantic",
-        }
-        for hit in semantic_results
-    ]
-
-    bm25_stream = [
-        {
-            "key": normalize_existing_key(item["key"]),
-            "snippet": item["snippet"],
-            "rank": item.get("rank", 0),
-            "bm25_score": item.get("bm25_score"),
-            "source_type": "bm25",
-        }
-        for item in bm25_results
-    ]
-
-    # Инварианты (fail-fast вместо assert)
-    _validate_stream_source_type(fts_stream, "fts", "FTS")
-    _validate_stream_source_type(semantic_stream, "semantic", "Semantic")
-    _validate_stream_source_type(bm25_stream, "bm25", "BM25")
-
-    # 1 документ = 1 сигнал
-    fts_stream = collapse_to_best_per_doc(fts_stream)
-    semantic_stream = collapse_to_best_per_doc(semantic_stream)
-    bm25_stream = collapse_to_best_per_doc(bm25_stream)
+    fts_stream, semantic_stream, bm25_stream = build_hybrid_streams(
+        fts_results, semantic_results, bm25_results
+    )
 
     print(f"\n[HYBRID SEARCH - PARALLEL] '{query}'")
     print(f"Fetch time: {fetch_time:.3f}s (parallel execution)")
@@ -788,11 +842,7 @@ def cmd_hybrid_parallel(fts: L4FTS5Search, query: str, enable_rerank: bool = Tru
         return
 
     merge_start = time.time()
-    merged = normalize_scores(
-        rrf_merge(
-            ("fts", fts_stream), ("semantic", semantic_stream), ("bm25", bm25_stream)
-        )
-    )
+    merged = rrf_merge_streams(fts_stream, semantic_stream, bm25_stream)
     merge_time = time.time() - merge_start
 
     # Опциональный cross‑encoder реранкинг
@@ -833,47 +883,9 @@ def cmd_hybrid(fts: L4FTS5Search, query: str, enable_rerank: bool = True) -> Non
         except Exception as exc:
             logging.warning("BM25 search failed: %s", exc)
 
-    # Формируем потоки с явным source_type
-    fts_stream = [
-        {
-            "key": res.key,
-            "display_path": res.path,
-            "snippet": res.snippet,
-            "rank": res.rank,
-            "source_type": "fts",
-        }
-        for res in fts_results
-    ]
-
-    semantic_stream = [
-        {
-            **hit,
-            "key": normalize_existing_key(hit.get("key", "")),
-            "source_type": "semantic",
-        }
-        for hit in semantic_results
-    ]
-
-    bm25_stream = [
-        {
-            "key": normalize_existing_key(item["key"]),
-            "snippet": item["snippet"],
-            "rank": item.get("rank", 0),
-            "bm25_score": item.get("bm25_score"),
-            "source_type": "bm25",
-        }
-        for item in bm25_results
-    ]
-
-    # Инварианты (fail-fast вместо assert)
-    _validate_stream_source_type(fts_stream, "fts", "FTS")
-    _validate_stream_source_type(semantic_stream, "semantic", "Semantic")
-    _validate_stream_source_type(bm25_stream, "bm25", "BM25")
-
-    # 1 документ = 1 сигнал
-    fts_stream = collapse_to_best_per_doc(fts_stream)
-    semantic_stream = collapse_to_best_per_doc(semantic_stream)
-    bm25_stream = collapse_to_best_per_doc(bm25_stream)
+    fts_stream, semantic_stream, bm25_stream = build_hybrid_streams(
+        fts_results, semantic_results, bm25_results
+    )
 
     print(f"\n[HYBRID SEARCH] '{query}'")
     print("=" * 70)
@@ -882,11 +894,7 @@ def cmd_hybrid(fts: L4FTS5Search, query: str, enable_rerank: bool = True) -> Non
         print("No results from any engine.\n")
         return
 
-    merged = normalize_scores(
-        rrf_merge(
-            ("fts", fts_stream), ("semantic", semantic_stream), ("bm25", bm25_stream)
-        )
-    )
+    merged = rrf_merge_streams(fts_stream, semantic_stream, bm25_stream)
 
     # Опциональный cross‑encoder реранкинг
     reranker = _get_l4_rerank() if enable_rerank and merged else None
