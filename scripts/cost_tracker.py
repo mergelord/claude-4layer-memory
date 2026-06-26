@@ -61,7 +61,7 @@ def configure_utf8_output() -> None:
 class CostTracker:
     """Token cost tracking with Claude prompt-cache support.
 
-    Prices include cache tiers (creation = 1.25× input, read = 0.10× input)
+    Prices include cache tiers (creation = 1.25x input, read = 0.10x input)
     and degrade safely when models or config keys are missing.
     """
 
@@ -133,7 +133,7 @@ class CostTracker:
 
         Public entry point so other modules (e.g. mcp_server computing a
         routing-learner cost estimate) reuse the same single source of
-        truth as :meth:`track_operation` — never duplicate price math.
+        truth as :meth:`track_operation` -- never duplicate price math.
 
         The Anthropic API returns versioned model IDs (e.g.
         ``claude-opus-4-20250514``) in ``message.model``, but
@@ -152,7 +152,7 @@ class CostTracker:
         # 1. Exact match (short alias "claude-opus-4")
         price = self.prices.get(model)
         if not price:
-            # 2. Prefix match (versioned id "claude-opus-4-20250514" → key "claude-opus-4")
+            # 2. Prefix match (versioned id "claude-opus-4-20250514" -> key "claude-opus-4")
             #    Longest key first to prevent "claude-opus-4" from eating
             #    a hypothetical "claude-opus-4-1" that is its own key.
             for key in sorted(self.prices, key=len, reverse=True):
@@ -568,6 +568,55 @@ class CostTracker:
                 "total_cost": row["total_cost"] or 0.0,
             }
         return grouped
+
+    def daily_budget_usd(self) -> float:
+        """Return the configured daily spend cap in USD (0.0 = disabled).
+
+        Read from the ``L4_DAILY_BUDGET_USD`` environment variable so the cap
+        can be set per-process without code changes. Any unset, blank, or
+        invalid value disables the guardrail by returning ``0.0``.
+        """
+        raw = os.getenv("L4_DAILY_BUDGET_USD", "").strip()
+        if not raw:
+            return 0.0
+        try:
+            value = float(raw)
+        except ValueError:
+            print(
+                f"[WARN] Invalid L4_DAILY_BUDGET_USD={raw!r}; budget disabled",
+                file=sys.stderr,
+            )
+            return 0.0
+        return value if value > 0 else 0.0
+
+    def get_today_spend(self) -> float:
+        """Return total USD spend recorded in the trailing 1-day window."""
+        return float(self.get_stats(days=1).get("total_cost") or 0.0)
+
+    def budget_status(self) -> Dict[str, Any]:
+        """Summarize the daily budget guardrail.
+
+        Returns ``enabled`` plus the configured ``limit_usd`` (0.0 when
+        disabled), ``spent_today_usd``, ``remaining_usd`` and an ``exceeded``
+        flag. When the budget is disabled, ``exceeded`` is always ``False``.
+        """
+        limit = self.daily_budget_usd()
+        spent = self.get_today_spend()
+        if limit <= 0:
+            return {
+                "enabled": False,
+                "limit_usd": 0.0,
+                "spent_today_usd": round(spent, 6),
+                "remaining_usd": None,
+                "exceeded": False,
+            }
+        return {
+            "enabled": True,
+            "limit_usd": round(limit, 6),
+            "spent_today_usd": round(spent, 6),
+            "remaining_usd": round(limit - spent, 6),
+            "exceeded": spent >= limit,
+        }
 
     def print_stats(self, days: int = 7, verbose: bool = False):
         """Print cost statistics to console."""

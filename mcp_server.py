@@ -57,6 +57,39 @@ routing_learner = get_learner()
 tracked_claude = TrackedClaudeClient(cost_tracker=cost_tracker)
 
 
+# ---------------------------------------------------------------------------
+# Input guardrails (P3)
+# ---------------------------------------------------------------------------
+# Defensive caps so a single MCP call can never request an unbounded result
+# set or forward a pathologically large prompt to the model. They are generous
+# enough never to affect normal usage and only clamp abusive/accidental
+# extremes. Kept as plain module constants so tests and operators can reference
+# them directly.
+MAX_RESULT_LIMIT = 100
+MAX_QUERY_CHARS = 2000
+MAX_TASK_CHARS = 100_000
+MAX_CONTEXT_CHARS = 200_000
+MAX_OUTPUT_TOKENS = 8192
+
+
+def _clamp_limit(limit: int) -> int:
+    """Clamp a requested result limit into the inclusive range [1, MAX_RESULT_LIMIT]."""
+    try:
+        value = int(limit)
+    except (TypeError, ValueError):
+        return 10
+    return max(1, min(value, MAX_RESULT_LIMIT))
+
+
+def _clamp_text(text: str, max_chars: int) -> str:
+    """Trim text to at most ``max_chars`` characters (defensive against huge input)."""
+    if not text:
+        return text or ""
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars]
+
+
 def _extract_text(message: Any) -> str:
     content = getattr(message, "content", None)
     if content is None:
@@ -117,6 +150,8 @@ def _prewarm_semantic_model() -> None:
 def search_memory(query: str, limit: int = 10, debug: bool = False) -> dict[str, Any]:
     """Search memory via FTS5 keyword search."""
     try:
+        query = _clamp_text(query, MAX_QUERY_CHARS)
+        limit = _clamp_limit(limit)
         results = fts5_search.search(query, limit)
         response: dict[str, Any] = {
             "success": True, "query": query, "count": len(results),
@@ -148,6 +183,8 @@ def hybrid_search_memory(
     per-stage timing (fetch/merge/rerank, in ms); the default path is unchanged.
     """
     try:
+        query = _clamp_text(query, MAX_QUERY_CHARS)
+        limit = _clamp_limit(limit)
         if debug:
             merged, timing = hybrid_search_timed(
                 fts5_search, query, enable_rerank=rerank
@@ -208,8 +245,23 @@ def get_memory_stats() -> dict[str, Any]:
 
 
 @mcp.tool()
-def reindex_memory() -> dict[str, Any]:
-    """Reindex the FTS5 database."""
+def reindex_memory(confirm: bool = False) -> dict[str, Any]:
+    """Reindex the FTS5 database (destructive full rebuild).
+
+    Rebuilding deletes and recreates the entire FTS5 index, so it is gated
+    behind an explicit ``confirm=True``. Without confirmation this is a safe
+    no-op that reports confirmation is required, preventing an accidental index
+    wipe from a stray tool call.
+    """
+    if not confirm:
+        return {
+            "success": False,
+            "requires_confirmation": True,
+            "error": (
+                "reindex_memory performs a destructive full rebuild of the "
+                "FTS5 index. Call again with confirm=True to proceed."
+            ),
+        }
     try:
         return {"success": True, "indexed_files": fts5_search.reindex_all()}
     except Exception as e:
@@ -319,6 +371,34 @@ def smart_complete(
     """
     chosen_model: str | None = None
     try:
+        task = _clamp_text(task, MAX_TASK_CHARS)
+        context = _clamp_text(context, MAX_CONTEXT_CHARS)
+        max_tokens = max(1, min(int(max_tokens), MAX_OUTPUT_TOKENS))
+
+        # Budget guardrail (P3): if a daily USD cap is configured and already
+        # reached, refuse before spending. Disabled by default -- with no
+        # L4_DAILY_BUDGET_USD set, daily_budget_usd() returns 0.0 and the cost
+        # ledger is never queried here, so the default path is unchanged.
+        budget_limit = cost_tracker.daily_budget_usd()
+        if budget_limit > 0:
+            spent_today = cost_tracker.get_today_spend()
+            if spent_today >= budget_limit:
+                logging.warning(
+                    "smart_complete blocked: daily budget $%.2f reached "
+                    "(spent $%.2f today)",
+                    budget_limit, spent_today,
+                )
+                return {
+                    "success": False,
+                    "error": (
+                        f"Daily budget of ${budget_limit:.2f} reached "
+                        f"(spent ${spent_today:.2f} today); smart_complete is "
+                        "paused. Raise L4_DAILY_BUDGET_USD or wait for the "
+                        "window to roll over."
+                    ),
+                    "budget_exceeded": True,
+                }
+
         prompt = f"Context:\n{context}\n\nTask:\n{task}" if context else task
         context_len = approx_tokens(context) if context else 0
 

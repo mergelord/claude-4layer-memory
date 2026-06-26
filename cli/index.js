@@ -54,6 +54,12 @@ program
   .option('--no-semantic', 'Skip the semantic (ChromaDB) probe')
   .action(require('./commands/doctor'));
 
+program
+  .command('selftest')
+  .description('Run local self-test: health checks + a search smoke test')
+  .option('--no-semantic', 'Skip the semantic (ChromaDB) probe')
+  .action(require('./commands/selftest'));
+
 program.parse(process.argv);
 
 if (!process.argv.slice(2).length) {
