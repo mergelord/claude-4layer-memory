@@ -71,6 +71,7 @@ if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)
 
 from claude_client import estimate_complexity  # noqa: E402  pylint: disable=wrong-import-position
+from l4_config import get_config  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -117,7 +118,7 @@ class RoutingLearner:
             model_name: Sentence-transformers model for embeddings.
         """
         if chroma_path is None:
-            chroma_path = Path.home() / ".claude" / "routing_learner_db"
+            chroma_path = get_config().routing_db_path
 
         chroma_path.mkdir(parents=True, exist_ok=True)
 

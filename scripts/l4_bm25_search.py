@@ -31,6 +31,9 @@ if str(_SCRIPTS_DIR) not in sys.path:
 # pylint: disable-next=wrong-import-position,import-error
 from ranking import make_join_key, sanitize_fts5_query  # noqa: E402
 
+# pylint: disable-next=wrong-import-position,import-error
+from l4_config import get_config  # noqa: E402
+
 # Safe FTS5 query sanitization — single source of truth, imported from
 # :mod:`ranking` (shared with ``l4_fts5_search``).  Extracts \w+ tokens and
 # double-quotes each, neutralising all FTS5 syntax (*, :, ^, -, AND, OR,
@@ -65,7 +68,7 @@ class BM25Result(TypedDict):
 @contextmanager
 def _get_fts5_connection() -> Iterator[sqlite3.Connection]:
     """Получить подключение к FTS5 БД (без зависимости от L4FTS5Search)."""
-    db_path = Path.home() / ".claude" / "memory_fts5.db"
+    db_path = get_config().fts5_db_path
     conn = sqlite3.connect(str(db_path), timeout=30)
     conn.row_factory = sqlite3.Row
     try:
