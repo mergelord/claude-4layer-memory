@@ -75,7 +75,7 @@ def _fts_health(fts: Optional[Any]) -> dict[str, Any]:
     try:
         engine = fts
         if engine is None:
-            from l4_fts5_search import L4FTS5Search
+            from l4_fts5_search import L4FTS5Search  # pylint: disable=import-error
 
             engine = L4FTS5Search()
         stats = engine.stats()
@@ -143,7 +143,7 @@ def _routing_health(learner: Optional[Any]) -> dict[str, Any]:
     try:
         engine = learner
         if engine is None:
-            from routing_learner import get_learner
+            from routing_learner import get_learner  # pylint: disable=import-error
 
             engine = get_learner()
         stats = engine.stats()
@@ -161,7 +161,7 @@ def _costs_health(tracker: Optional[Any]) -> dict[str, Any]:
     try:
         engine = tracker
         if engine is None:
-            from cost_tracker import CostTracker
+            from cost_tracker import CostTracker  # pylint: disable=import-error
 
             engine = CostTracker()
         today = engine.get_stats(days=1)
