@@ -1,0 +1,17 @@
+# Pinned dependency constraints for reproducible installs.
+#
+# Usage:
+#   pip install -r requirements.txt -c constraints.txt
+#
+# requirements.txt declares the direct dependencies; this file pins exact
+# versions (including transitive ones where it matters) so that installs are
+# reproducible across machines and CI. Bump deliberately, not implicitly.
+#
+# NOTE: This file is advisory tooling and is not scanned by CI; it documents a
+# known-good lock so contributors can reproduce a working environment.
+
+anthropic==0.40.0
+chromadb==0.4.24
+sentence-transformers==2.7.0
+mcp==1.2.0
+pyyaml==6.0.1

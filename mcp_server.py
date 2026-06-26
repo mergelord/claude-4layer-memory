@@ -30,7 +30,8 @@ if _SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, _SCRIPTS_DIR)
 
 from l4_fts5_search import L4FTS5Search  # noqa: E402
-from l4_hybrid_search import hybrid_search  # noqa: E402
+from l4_hybrid_search import hybrid_search, hybrid_search_timed  # noqa: E402
+from l4_logging import configure_logging  # noqa: E402
 from cost_tracker import (  # noqa: E402
     CACHE_CREATION_PRICE_KEY,
     CACHE_READ_PRICE_KEY,
@@ -90,8 +91,9 @@ def _prewarm_semantic_model() -> None:
     model is ready before the first real request. Any failure is logged and the
     server continues (the first query just pays the lazy-load cost as before).
 
-    The work is imported and started lazily here — never at module import time —
-    so importing ``mcp_server`` (e.g. in tests) stays side-effect free and fast.
+    The work is imported and started lazily here -- never at module import time
+    -- so importing ``mcp_server`` (e.g. in tests) stays side-effect free and
+    fast.
     """
     def _worker() -> None:
         try:
@@ -136,15 +138,22 @@ def hybrid_search_memory(
     query: str,
     limit: int = 10,
     rerank: bool = True,
+    debug: bool = False,
 ) -> dict[str, Any]:
     """Search memory via hybrid retrieval (FTS5 + semantic + BM25 + RRF).
 
     Unlike ``search_memory`` (FTS5 keyword search only), this uses the full
     hybrid pipeline and returns structured ranking metadata suitable for MCP
-    clients.
+    clients. Set ``debug=True`` to additionally include a ``meta`` block with
+    per-stage timing (fetch/merge/rerank, in ms); the default path is unchanged.
     """
     try:
-        merged = hybrid_search(fts5_search, query, enable_rerank=rerank)
+        if debug:
+            merged, timing = hybrid_search_timed(
+                fts5_search, query, enable_rerank=rerank
+            )
+        else:
+            merged = hybrid_search(fts5_search, query, enable_rerank=rerank)
 
         results = []
         for entry in merged[:limit]:
@@ -168,12 +177,21 @@ def hybrid_search_memory(
                 }
             )
 
-        return {
+        response: dict[str, Any] = {
             "success": True,
             "query": query,
             "count": len(results),
             "results": results,
         }
+        if debug:
+            response["meta"] = {
+                "engine": "hybrid",
+                "rerank": rerank,
+                "limit": limit,
+                "total_candidates": len(merged),
+                "timing_ms": timing,
+            }
+        return response
     except Exception as e:
         logging.error("Hybrid search failed: %s", e)
         return {"success": False, "error": str(e)}
@@ -456,6 +474,7 @@ def _prewarm_enabled() -> bool:
 
 
 if __name__ == "__main__":
+    configure_logging()
     if _prewarm_enabled():
         _prewarm_semantic_model()
     mcp.run()

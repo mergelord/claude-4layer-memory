@@ -38,3 +38,20 @@ def hybrid_search(
         query,
         enable_rerank=enable_rerank,
     )
+
+
+def hybrid_search_timed(
+    fts: L4FTS5Search, query: str, *, enable_rerank: bool = True
+) -> tuple[list[Any], dict[str, Any]]:
+    """Return ``(results, timing_metadata)`` for hybrid search.
+
+    Timing-aware counterpart to :func:`hybrid_search`; delegates to
+    ``l4_hybrid_runtime.build_hybrid_results_timed`` so the MCP layer can expose
+    optional per-stage latency (fetch/merge/rerank) without duplicating the
+    retrieval flow. ``hybrid_search`` remains the untimed default path.
+    """
+    return l4_hybrid_runtime.build_hybrid_results_timed(
+        fts,
+        query,
+        enable_rerank=enable_rerank,
+    )

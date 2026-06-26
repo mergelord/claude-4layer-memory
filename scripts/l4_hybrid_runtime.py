@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path
@@ -170,8 +171,8 @@ def prewarm_semantic_backend() -> bool:
 
     Best-effort: a tiny throwaway query triggers the load; any failure (cold
     cache, missing optional deps, offline) is logged and reported as ``False``
-    so the caller never crashes — the first real query simply pays the lazy-load
-    cost as before.
+    so the caller never crashes -- the first real query simply pays the
+    lazy-load cost as before.
     """
     try:
         _get_semantic_backend().search_all("__prewarm__")
@@ -214,6 +215,68 @@ def _fetch_source_results(
     return fts_results, semantic_results, bm25_results
 
 
+def build_hybrid_results_timed(
+    fts: L4FTS5Search, query: str, *, enable_rerank: bool = True
+) -> tuple[list[Any], dict[str, Any]]:
+    """Return merged hybrid results plus per-stage timing metadata.
+
+    Behaves exactly like :func:`build_hybrid_results` (same streams, same RRF
+    merge, same optional rerank) but also measures the wall-clock cost of each
+    stage so MCP callers can surface optional observability data without
+    changing the default, untimed code path.
+
+    Returns ``(merged, timing)`` where ``timing`` maps ``fetch_ms``,
+    ``merge_ms``, ``rerank_ms`` and ``total_ms`` (floats, milliseconds rounded
+    to 2 dp) plus ``cold_start`` and ``reranked`` booleans. On an empty result
+    the merge/rerank durations are ``0.0`` and ``merged`` is ``[]``.
+    """
+    cold_start = _semantic_backend is None
+
+    fetch_start = time.perf_counter()
+    fts_results, semantic_results, bm25_results = _fetch_source_results(fts, query)
+    fetch_ms = round((time.perf_counter() - fetch_start) * 1000, 2)
+
+    fts_stream, semantic_stream, bm25_stream = l4_fts5_search.build_hybrid_streams(
+        fts_results, semantic_results, bm25_results
+    )
+
+    if not fts_stream and not semantic_stream and not bm25_stream:
+        empty_timing: dict[str, Any] = {
+            "fetch_ms": fetch_ms,
+            "merge_ms": 0.0,
+            "rerank_ms": 0.0,
+            "total_ms": fetch_ms,
+            "cold_start": cold_start,
+            "reranked": False,
+        }
+        return [], empty_timing
+
+    merge_start = time.perf_counter()
+    merged = l4_fts5_search.rrf_merge_streams(
+        fts_stream, semantic_stream, bm25_stream
+    )
+    merge_ms = round((time.perf_counter() - merge_start) * 1000, 2)
+
+    rerank_ms = 0.0
+    reranked = False
+    reranker = get_l4_reranker() if enable_rerank and merged else None
+    if reranker is not None:
+        rerank_start = time.perf_counter()
+        merged = reranker(query, merged[:20])
+        rerank_ms = round((time.perf_counter() - rerank_start) * 1000, 2)
+        reranked = True
+
+    timing: dict[str, Any] = {
+        "fetch_ms": fetch_ms,
+        "merge_ms": merge_ms,
+        "rerank_ms": rerank_ms,
+        "total_ms": round(fetch_ms + merge_ms + rerank_ms, 2),
+        "cold_start": cold_start,
+        "reranked": reranked,
+    }
+    return merged, timing
+
+
 def build_hybrid_results(
     fts: L4FTS5Search, query: str, *, enable_rerank: bool = True
 ) -> list[Any]:
@@ -229,27 +292,12 @@ def build_hybrid_results(
         engine produced a hit. Semantic/BM25 failures degrade to no hits via
         their existing helper boundaries; FTS failures propagate to callers.
 
-    Stream construction and RRF merge are delegated to the single source of
-    truth in :mod:`l4_fts5_search` (``build_hybrid_streams`` +
-    ``rrf_merge_streams``) so the runtime, sequential, and parallel paths all
-    produce identical streams. Reranking stays here so callers keep control of
-    ``enable_rerank``.
+    This is a thin wrapper over :func:`build_hybrid_results_timed` that drops
+    the timing metadata, preserving the original return contract for callers
+    (e.g. the MCP ``hybrid_search_memory`` default path) that do not need
+    observability data.
     """
-    fts_results, semantic_results, bm25_results = _fetch_source_results(fts, query)
-
-    fts_stream, semantic_stream, bm25_stream = l4_fts5_search.build_hybrid_streams(
-        fts_results, semantic_results, bm25_results
+    merged, _timing = build_hybrid_results_timed(
+        fts, query, enable_rerank=enable_rerank
     )
-
-    if not fts_stream and not semantic_stream and not bm25_stream:
-        return []
-
-    merged = l4_fts5_search.rrf_merge_streams(
-        fts_stream, semantic_stream, bm25_stream
-    )
-
-    reranker = get_l4_reranker() if enable_rerank and merged else None
-    if reranker is not None:
-        merged = reranker(query, merged[:20])
-
     return merged

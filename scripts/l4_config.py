@@ -79,6 +79,16 @@ class L4Config:
         return self.home / "routing_learner_db"
 
     @property
+    def logs_dir(self) -> Path:
+        """Structured log output directory (``<home>/logs``).
+
+        Hosts the rotating JSON log written by :mod:`l4_logging`. Like every
+        other path here it is derived from ``home`` so relocating ``L4_HOME``
+        moves logs alongside the rest of the memory state.
+        """
+        return self.home / "logs"
+
+    @property
     def embedding_model(self) -> str:
         """Sentence-transformers model name (``L4_MODEL`` env override)."""
         return os.getenv("L4_MODEL", DEFAULT_MODEL)
