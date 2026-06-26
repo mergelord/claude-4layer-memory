@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "claude-4layer-memory"
+version = "1.6.0"
+description = "4-layer memory system for Claude (FTS5 + semantic + BM25 hybrid search, MCP server)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "anthropic>=0.40.0",
+    "chromadb>=0.4.0",
+    "sentence-transformers>=2.2.0",
+    "mcp[cli]>=1.2.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pylint",
+    "mypy",
+    "ruff",
+    "bandit",
+    "radon",
+    "types-PyYAML",
+]
+
+[tool.setuptools]
+package-dir = { "" = "scripts" }
+py-modules = [
+    "antipattern_checkers",
+    "benchmark_parallel_search",
+    "chunking",
+    "claude_client",
+    "clean_handoffs",
+    "cleanup_system_artifacts",
+    "consistency_checkers",
+    "cost_tracker",
+    "dsm_telegram_monitor",
+    "health_check",
+    "health_memory_size",
+    "l4_bm25_search",
+    "l4_config",
+    "l4_fts5_search",
+    "l4_hybrid_runtime",
+    "l4_hybrid_search",
+    "l4_logging",
+    "l4_rerank",
+    "l4_semantic_global",
+    "memory_lint",
+    "memory_lint_helpers",
+    "ranking",
+    "routing_learner",
+    "scan_repo_encoding",
+    "semantic_search",
+    "skill_creator",
+    "validate_rrf",
+]
