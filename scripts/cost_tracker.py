@@ -21,6 +21,16 @@ from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 from contextlib import contextmanager
 
+# Ensure sibling modules in scripts/ are importable when this module is
+# imported as ``scripts.cost_tracker`` (the test suite adds only the repo
+# root to sys.path, so ``l4_config`` would otherwise be unresolvable).
+_SCRIPTS_DIR = str(Path(__file__).resolve().parent)
+if _SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPTS_DIR)
+
+# pylint: disable-next=wrong-import-position,import-error
+from l4_config import get_config  # noqa: E402
+
 CACHE_CREATION_PRICE_KEY = "cache_creation_input"
 CACHE_READ_PRICE_KEY = "cache_read_input"
 
@@ -81,8 +91,7 @@ class CostTracker:
 
     def __init__(self, db_path: Optional[Path] = None):
         if db_path is None:
-            claude_dir = Path.home() / ".claude"
-            db_path = claude_dir / "memory_costs.db"
+            db_path = get_config().costs_db_path
 
         self.db_path = self._safe_db_path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
