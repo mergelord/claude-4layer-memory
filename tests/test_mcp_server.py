@@ -25,7 +25,7 @@ from claude_client import approx_tokens  # noqa: E402  pylint: disable=wrong-imp
 def test_reindex_memory_returns_dict_with_int_count():
     """reindex_memory must call reindex_all() (not reindex()) and return int count."""
     with patch.object(mcp_server.fts5_search, "reindex_all", return_value=42) as mock:
-        result = mcp_server.reindex_memory()
+        result = mcp_server.reindex_memory(confirm=True)
 
     mock.assert_called_once()
     assert result == {"success": True, "indexed_files": 42}
@@ -36,10 +36,20 @@ def test_reindex_memory_handles_failure():
     with patch.object(
         mcp_server.fts5_search, "reindex_all", side_effect=RuntimeError("boom")
     ):
-        result = mcp_server.reindex_memory()
+        result = mcp_server.reindex_memory(confirm=True)
 
     assert result["success"] is False
     assert "boom" in result["error"]
+
+
+def test_reindex_memory_requires_confirmation():
+    """Unconfirmed reindex_memory must be a safe no-op requiring confirmation."""
+    with patch.object(mcp_server.fts5_search, "reindex_all") as mock:
+        result = mcp_server.reindex_memory()
+
+    mock.assert_not_called()
+    assert result["success"] is False
+    assert result["requires_confirmation"] is True
 
 
 def test_search_memory_returns_results():
