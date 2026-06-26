@@ -10,8 +10,10 @@ Provides access to memory through Model Context Protocol:
 - Cost tracking
 """
 
+import os
 import sys
 import logging
+import threading
 from typing import Any
 from pathlib import Path
 
@@ -77,6 +79,32 @@ def _extract_usage(message: Any) -> dict[str, int]:
         val = getattr(usage, field, 0)
         result[field] = int(val or 0)
     return result
+
+
+def _prewarm_semantic_model() -> None:
+    """Warm the in-process semantic backend in a background daemon thread.
+
+    Loading sentence-transformers + Chroma lazily on the first hybrid query
+    adds multi-second latency to that query. When the server runs as a
+    long-lived process we kick off a best-effort background warm-up so the
+    model is ready before the first real request. Any failure is logged and the
+    server continues (the first query just pays the lazy-load cost as before).
+
+    The work is imported and started lazily here — never at module import time —
+    so importing ``mcp_server`` (e.g. in tests) stays side-effect free and fast.
+    """
+    def _worker() -> None:
+        try:
+            from l4_hybrid_runtime import prewarm_semantic_backend
+
+            prewarm_semantic_backend()
+        except Exception as exc:  # noqa: BLE001
+            logging.warning("Semantic prewarm failed: %s", exc)
+
+    thread = threading.Thread(
+        target=_worker, name="semantic-prewarm", daemon=True
+    )
+    thread.start()
 
 
 # ---------------------------------------------------------------------------
@@ -422,5 +450,12 @@ def get_global_decisions() -> str:
         return f"# Error: {e}"
 
 
+def _prewarm_enabled() -> bool:
+    """Return whether background semantic prewarm should run at startup."""
+    return os.getenv("L4_PREWARM", "1").strip().lower() not in ("0", "false", "no")
+
+
 if __name__ == "__main__":
+    if _prewarm_enabled():
+        _prewarm_semantic_model()
     mcp.run()
