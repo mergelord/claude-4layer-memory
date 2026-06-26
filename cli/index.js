@@ -47,6 +47,13 @@ program
   .description('Show memory statistics')
   .action(require('./commands/stats'));
 
+program
+  .command('doctor')
+  .description('Run health/readiness checks (FTS5, semantic, routing, costs)')
+  .option('--json', 'Output the raw JSON health payload')
+  .option('--no-semantic', 'Skip the semantic (ChromaDB) probe')
+  .action(require('./commands/doctor'));
+
 program.parse(process.argv);
 
 if (!process.argv.slice(2).length) {

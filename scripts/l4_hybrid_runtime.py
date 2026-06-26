@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# pylint: skip-file
-# mypy: ignore-errors
 """Shared return-value hybrid search runtime.
 
 This module centralizes the non-printing hybrid search flow used by runtime
@@ -25,6 +23,10 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
+# The imports below intentionally run after the sys.path bootstrap above so the
+# flat ``scripts/`` modules resolve without an installed package. Suppress only
+# the import-position check for them rather than the whole file.
+# pylint: disable=wrong-import-position
 import l4_fts5_search  # noqa: E402
 from l4_fts5_search import L4FTS5Search  # noqa: E402
 from ranking import normalize_existing_key, normalize_scores, rrf_merge  # noqa: E402
@@ -159,7 +161,7 @@ def fetch_semantic_results(query: str) -> list[dict[str, Any]]:
 
 def get_l4_reranker():
     """Return the optional L4 reranker, preserving lazy import semantics."""
-    return l4_fts5_search._get_l4_rerank()
+    return l4_fts5_search._get_l4_rerank()  # pylint: disable=protected-access
 
 
 def _fetch_bm25_results(query: str) -> list[dict[str, Any]]:
