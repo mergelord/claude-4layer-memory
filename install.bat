@@ -33,8 +33,8 @@ echo [OK] Claude Code directory found
 
 REM Install Python dependencies
 echo.
-echo Installing Python dependencies...
-pip install -r requirements.txt
+echo Installing Python dependencies with constraints.txt...
+pip install -r requirements.txt -c constraints.txt
 if errorlevel 1 (
     echo [ERROR] Failed to install dependencies
     pause

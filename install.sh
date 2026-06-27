@@ -38,8 +38,8 @@ echo -e "${GREEN}[OK]${NC} Claude Code directory found"
 
 # Install Python dependencies
 echo ""
-echo "Installing Python dependencies..."
-pip3 install -r requirements.txt || {
+echo "Installing Python dependencies with constraints.txt..."
+pip3 install -r requirements.txt -c constraints.txt || {
     echo -e "${RED}[ERROR]${NC} Failed to install dependencies"
     exit 1
 }
