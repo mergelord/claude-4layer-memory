@@ -34,7 +34,7 @@ function pylintArgs() {
   return [
     '-m',
     'pylint',
-    'scripts/*.py',
+    'scripts',
     'audit.py',
     '--disable=C0114,C0115,C0116,R0913,R0914,R0915,R0903,R0904,W0718,R1702,C0415,R0902,R0912,R0801',
     '--max-line-length=110',
@@ -93,10 +93,10 @@ function buildSteps(repoRoot, options) {
     steps.push(
       { name: 'Pylint', command: PYTHON_BIN, args: pylintArgs() },
       { name: 'MyPy', command: PYTHON_BIN, args: mypyArgs() },
-      { name: 'Ruff', command: PYTHON_BIN, args: ['-m', 'ruff', 'check', 'scripts/*.py', 'audit.py'] },
+      { name: 'Ruff', command: PYTHON_BIN, args: ['-m', 'ruff', 'check', 'scripts', 'audit.py'] },
       { name: 'Bandit', command: PYTHON_BIN, args: ['-m', 'bandit', '-r', 'scripts/', 'audit.py', '-l', '--skip', 'B404,B603'] },
-      { name: 'Radon complexity', command: PYTHON_BIN, args: ['-m', 'radon', 'cc', 'scripts/*.py', 'audit.py', '-a', '-nb'] },
-      { name: 'Radon maintainability', command: PYTHON_BIN, args: ['-m', 'radon', 'mi', 'scripts/*.py', 'audit.py', '-nb'] }
+      { name: 'Radon complexity', command: PYTHON_BIN, args: ['-m', 'radon', 'cc', 'scripts', 'audit.py', '-a', '-nb'] },
+      { name: 'Radon maintainability', command: PYTHON_BIN, args: ['-m', 'radon', 'mi', 'scripts', 'audit.py', '-nb'] }
     );
   }
 

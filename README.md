@@ -32,6 +32,7 @@
 
 ### Reliability & Hardening
 - **Health checks** - `cm doctor`, MCP `health_check`, and `cm selftest`
+- **Release gate** - `cm release-gate` for repeatable production-readiness checks
 - **Destructive Reindex Guard** - MCP full reindex requires explicit `confirm=True`
 - **Input Guardrails** - result limits and large prompt inputs are clamped
 - **Daily Budget Guard** - optional `L4_DAILY_BUDGET_USD` cap for Anthropic-backed `smart_complete`
@@ -76,6 +77,7 @@ python -m pip install -r requirements-dev.txt
 # Verify repository health quickly
 node cli/index.js selftest --no-semantic
 node cli/index.js doctor --no-semantic
+node cli/index.js release-gate --quick --no-semantic
 
 # Verify installed semantic runtime
 python scripts/l4_semantic_global.py stats
@@ -136,6 +138,10 @@ l4_stats.bat
 # Readiness checks
 node cli/index.js doctor --no-semantic
 node cli/index.js selftest --no-semantic
+node cli/index.js release-gate --quick --no-semantic
+
+# Full release gate before tagging
+node cli/index.js release-gate --no-semantic
 
 # Memory lint
 python scripts/memory_lint.py --layer 1
@@ -193,13 +199,16 @@ See [docs/guides/CONFIGURATION.md](docs/guides/CONFIGURATION.md).
 
 The production release gate is documented in [docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md).
 
-Minimum local gate:
+Fast local gate:
 
 ```bash
-python -m pytest tests/ -v --tb=short
-node cli/index.js selftest --no-semantic
-node cli/index.js doctor --no-semantic
-python scripts/scan_repo_encoding.py
+node cli/index.js release-gate --quick --no-semantic
+```
+
+Full local gate before tagging:
+
+```bash
+node cli/index.js release-gate --no-semantic
 ```
 
 ---
