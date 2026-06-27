@@ -4,7 +4,7 @@
 
 **Enterprise-grade memory management system for Claude Code with hybrid search, automatic skill discovery, and comprehensive quality assurance.**
 
-> ⚠️ **Installation: git-clone only.** This project is **not published to npm**. Install it from a git clone as shown in [Quick Start](#quick-start) — the `cm` CLI runs from the cloned repository. Installing `claude-memory-cli` / `cm` from the npm registry is **not supported**: the Python backend is intentionally excluded from any npm package, so a registry install would be non-functional.
+> ⚠️ **Install from a full repository clone.** The supported setup is a full Git clone plus the repository installer because the CLI, Python backend, hooks, constraints, docs, and release-gate checks live together in this repository. `package.json` is private, and npm registry installation (`npm install -g claude-memory-cli` / `cm`) is not a supported install path.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Version](https://img.shields.io/badge/version-1.6.1-blue.svg)](https://github.com/mergelord/claude-4layer-memory/releases)
@@ -87,7 +87,7 @@ python scripts/l4_semantic_global.py stats
 
 ## 📦 Installation
 
-> Install from a git clone only. `package.json` is marked `private: true`; npm registry install is not supported.
+> Supported install mode: full Git clone plus the repository installer. `package.json` is private; npm registry installation is not supported because runtime scripts, hooks, constraints, and repository tools are required.
 
 ### Prerequisites
 

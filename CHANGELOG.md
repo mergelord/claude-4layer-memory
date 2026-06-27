@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Documentation
+- Refined installation wording to describe the current full-clone plus repository-installer support model and clarify that standalone npm/pip package installs are not supported yet.
+
 ## [1.6.1] - 2026-06-27
 
 ### Added
