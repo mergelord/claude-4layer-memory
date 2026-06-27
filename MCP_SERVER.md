@@ -1,141 +1,205 @@
-# MCP Server для Claude 4-Layer Memory
+# MCP Server for Claude 4-Layer Memory
 
-Model Context Protocol сервер для доступа к системе памяти из любых MCP-совместимых клиентов.
+Model Context Protocol server for accessing the memory system from MCP-compatible clients.
 
-## Возможности
+---
 
-### Tools (функции)
-- `search_memory(query, limit)` - FTS5 keyword поиск
-- `get_memory_stats()` - статистика FTS5 индекса
-- `get_cost_stats(days)` - статистика расходов на операции
-- `reindex_memory()` - переиндексация памяти
+## Capabilities
 
-### Resources (данные)
-- `memory://global/handoff` - HOT memory (последние события)
-- `memory://global/decisions` - WARM memory (важные решения)
+### Memory search tools
 
-## Установка
+| Tool | Purpose | Mutates state |
+| --- | --- | --- |
+| `search_memory(query, limit=10, debug=False)` | FTS5 keyword search. | No |
+| `hybrid_search_memory(query, limit=10, rerank=True, debug=False)` | Hybrid FTS5 + semantic + BM25 + RRF search with optional reranking. | No |
+| `get_memory_stats()` | FTS5 index statistics. | No |
+| `reindex_memory(confirm=False)` | Full FTS5 rebuild. Requires `confirm=True`. | Yes, only with confirmation |
 
-### 1. Установить зависимости
+### Cost tools
 
-```bash
-pip install -r requirements.txt
-```
+| Tool | Purpose | Mutates state |
+| --- | --- | --- |
+| `track_claude_usage(...)` | Record exact Claude token usage. | Yes |
+| `get_cost_stats(days=7)` | Cost statistics. | No |
+| `get_cost_stats_by_metadata(key="task", days=7)` | Cost stats grouped by metadata key. | No |
+| `get_recent_cost_operations(limit=20)` | Recent cost ledger entries. | No |
+| `get_cost_breakdown(days=7)` | Spending breakdown by model/category. | No |
 
-### 2. Настроить Claude Code
+### Code completion / routing tool
 
-Добавить в `~/.claude/settings.json`:
+| Tool | Purpose | Guardrails |
+| --- | --- | --- |
+| `smart_complete(task, context="", max_tokens=4096)` | Anthropic-backed code task execution with routing learner feedback. | Input clamps, daily budget, cost tracking, routing privacy options. |
+
+### Health tool
+
+| Tool | Purpose | Mutates state |
+| --- | --- | --- |
+| `health_check(include_semantic=True)` | Readiness check for FTS5, semantic backend, routing learner, cost ledger, and host facts. | No |
+
+### Resources
+
+| Resource | Purpose |
+| --- | --- |
+| `memory://global/handoff` | HOT memory handoff. |
+| `memory://global/decisions` | WARM memory decisions. |
+
+---
+
+## Safety defaults
+
+### Destructive reindex is gated
+
+`reindex_memory()` without confirmation is a no-op:
 
 ```json
 {
-  "mcpServers": {
-    "claude-4layer-memory": {
-      "command": "python",
-      "args": [
-        "/path/to/claude-4layer-memory/mcp_server.py"
-      ]
-    }
-  }
+  "success": false,
+  "requires_confirmation": true
 }
 ```
 
-**Windows:**
-```json
-{
-  "mcpServers": {
-    "claude-4layer-memory": {
-      "command": "python",
-      "args": [
-        "C:\\path\\to\\claude-4layer-memory\\mcp_server.py"
-      ]
-    }
-  }
-}
-```
-
-### 3. Перезапустить Claude Code
-
-После добавления конфигурации перезапустите Claude Code для подключения MCP сервера.
-
-## Использование
-
-### В Claude Code
-
-После подключения MCP сервера, Claude автоматически получит доступ к tools:
-
-```
-User: Найди в памяти информацию о FTS5 search
-
-Claude: [использует search_memory("FTS5 search")]
-```
-
-### Из других MCP клиентов
-
-Любой MCP-совместимый клиент может подключиться к серверу:
+To rebuild deliberately:
 
 ```python
-from mcp import ClientSession
-
-async with ClientSession("python", ["mcp_server.py"]) as session:
-    result = await session.call_tool("search_memory", {
-        "query": "memory system",
-        "limit": 5
-    })
-    print(result)
+reindex_memory(confirm=True)
 ```
 
-## Тестирование
+### Input clamps
+
+MCP input guardrails cap pathological requests:
+
+| Input | Limit |
+| --- | --- |
+| result limit | 1..100 |
+| query text | 2,000 chars |
+| smart-complete task | 100,000 chars |
+| smart-complete context | 200,000 chars |
+| max output tokens | 8,192 |
+
+### Daily budget
+
+`smart_complete` can be budget-capped:
 
 ```bash
-# Запуск сервера напрямую (для отладки)
-python mcp_server.py
+export L4_DAILY_BUDGET_USD=5
+```
 
-# Проверка tools через MCP CLI
+When today's spend reaches the cap, `smart_complete` refuses before spending and returns `budget_exceeded: true`.
+
+### Routing privacy
+
+To avoid storing raw task text in routing history:
+
+```bash
+export ROUTING_STORE_TASK_TEXT=0
+```
+
+New routing outcomes store a `sha256:...` value instead of raw task text.
+
+---
+
+## Installation
+
+Install dependencies from a full repository clone:
+
+```bash
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt -c constraints.txt
+```
+
+Add the server to Claude Code settings.
+
+Linux/macOS example:
+
+```json
+{
+  "mcpServers": {
+    "claude-4layer-memory": {
+      "command": "python3",
+      "args": ["/path/to/claude-4layer-memory/mcp_server.py"]
+    }
+  }
+}
+```
+
+Windows example:
+
+```json
+{
+  "mcpServers": {
+    "claude-4layer-memory": {
+      "command": "python",
+      "args": ["C:\\path\\to\\claude-4layer-memory\\mcp_server.py"]
+    }
+  }
+}
+```
+
+Restart Claude Code after updating settings.
+
+---
+
+## Environment variables
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `L4_HOME` | `~/.claude` | Relocates memory state, DBs, routing learner state, and logs. |
+| `L4_MODEL` | `paraphrase-multilingual-MiniLM-L12-v2` | Sentence-transformers model. |
+| `L4_PREWARM` | `1` | Enables semantic backend prewarm on server startup. Set `0`, `false`, or `no` to disable. |
+| `L4_LOG_LEVEL` | implementation default | Structured logging verbosity. |
+| `L4_DAILY_BUDGET_USD` | `0` / off | Daily budget for `smart_complete`. |
+| `ROUTING_STORE_TASK_TEXT` | `1` | Set to `0`, `false`, or `no` to hash task text. |
+| `ROUTING_HISTORY_MAX` | `0` / off | Optional routing-history retention limit for pruning. |
+| `ANTHROPIC_API_KEY` | unset | Required only for real `smart_complete` calls. |
+| `HF_TOKEN` | unset | Optional HuggingFace token for model downloads. |
+
+---
+
+## Testing
+
+Run the server directly for debugging:
+
+```bash
+python mcp_server.py
+```
+
+Run via MCP dev tooling:
+
+```bash
 mcp dev mcp_server.py
 ```
 
-## Архитектура
+Run repository smoke checks:
 
-```
-┌─────────────────┐
-│  MCP Client     │  (Claude Code, ChatGPT, VS Code, etc.)
-│  (любой)        │
-└────────┬────────┘
-         │ MCP Protocol
-         │
-┌────────▼────────┐
-│  mcp_server.py  │
-│                 │
-│  Tools:         │
-│  - search       │
-│  - stats        │
-│  - reindex      │
-│                 │
-│  Resources:     │
-│  - handoff      │
-│  - decisions    │
-└────────┬────────┘
-         │
-    ┌────▼─────┬──────────┬──────────┐
-    │          │          │          │
-┌───▼───┐ ┌───▼───┐ ┌───▼───┐ ┌───▼───┐
-│ FTS5  │ │Semantic│ │ Cost  │ │Memory │
-│Search │ │ Search │ │Tracker│ │ Lint  │
-└───────┘ └────────┘ └───────┘ └───────┘
+```bash
+node cli/index.js selftest --no-semantic
+node cli/index.js doctor --no-semantic
+python -m pytest tests/test_mcp_e2e_smoke.py tests/test_p3_guardrails.py -v --tb=short
 ```
 
-## Преимущества MCP
+---
 
-1. **Универсальность** - работает с любым MCP клиентом
-2. **Стандартизация** - единый протокол для всех AI приложений
-3. **Расширяемость** - легко добавлять новые tools и resources
-4. **Безопасность** - контроль доступа через MCP permissions
+## Architecture
 
-## Вдохновлено
+```text
+MCP client
+  -> mcp_server.py
+    -> FTS5 search
+    -> semantic search / ChromaDB
+    -> BM25 / RRF / optional rerank
+    -> cost tracker
+    -> routing learner
+    -> health check
+```
 
-- [Model Context Protocol](https://modelcontextprotocol.io/)
-- [KiloCode MCP Server Marketplace](https://github.com/Kilo-Org/kilocode)
+The server keeps core objects at module scope so long-lived MCP processes can reuse FTS5, cost, routing, and semantic backend state instead of rebuilding them on every call.
 
-## Лицензия
+---
 
-MIT
+## Operational docs
+
+- `docs/OPERATIONS.md`
+- `docs/PRODUCTION_READINESS.md`
+- `docs/INSTALL.md`
+- `docs/guides/CONFIGURATION.md`

@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Documentation
+- Added `docs/PRODUCTION_READINESS.md` with a concrete production release gate, readiness snapshot, and remaining risks.
+- Added `docs/OPERATIONS.md` with install/upgrade, health, logging, reindex, budget, privacy, and incident runbooks.
+- Rewrote `docs/INSTALL.md` to reflect the current Python 3.10+ / git-clone-only baseline and reproducible install path.
+- Rewrote `docs/guides/CONFIGURATION.md` to document `L4_HOME`, logs, P3 guardrail env vars, routing privacy, and backup strategy.
+- Updated `MCP_SERVER.md` to document the current MCP tool surface, safety defaults, and operational checks.
+
+### CI
+- Added non-blocking Ubuntu / Python 3.14 test coverage while keeping Python 3.10-3.13 blocking across Ubuntu, Windows, and macOS.
+
 ## [1.6.0] - 2026-06-23
 
 ### Breaking Changes
@@ -93,7 +105,7 @@
   и `ranking.make_join_key()` теперь сам её вызывает — callers больше не
   могут забыть нормализацию.
 - `_index_single_file` в FTS5 перешел с `str(path)` на `.as_posix()` —
-  исправлены Windows-style backslash ключи (`archive\notes.md`).
+  исправлены Windows-style backslash ключи (`archive\\notes.md`).
 
 ### Operational requirement after upgrade
 - **`l4_search.bat reindex`** (или `python scripts/l4_fts5_search.py reindex`) —
@@ -128,8 +140,8 @@
   старый файл удалён.
 
 ### Fixed
-- роблема с access violation в pyarrow на Python 3.13 (обход через моки).
-- есовместимость старых тестов с новым API (удалены).
+- проблема с access violation в pyarrow на Python 3.13 (обход через моки).
+- несовместимость старых тестов с новым API (удалены).
 
 ### Tooling
 - Создана утилита `paste_to_file.py` для безопасной вставки кода
