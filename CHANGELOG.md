@@ -1,20 +1,24 @@
 # Changelog
 
-## Unreleased
+## [1.6.1] - 2026-06-27
 
-### Documentation
-- Added `docs/PRODUCTION_READINESS.md` with a concrete production release gate, readiness snapshot, and remaining risks.
-- Added `docs/OPERATIONS.md` with install/upgrade, health, logging, reindex, budget, privacy, and incident runbooks.
-- Rewrote `docs/INSTALL.md` to reflect the current Python 3.10+ / git-clone-only baseline and reproducible install path.
-- Rewrote `docs/guides/CONFIGURATION.md` to document `L4_HOME`, logs, P3 guardrail env vars, routing privacy, and backup strategy.
-- Updated `MCP_SERVER.md` to document the current MCP tool surface, safety defaults, and operational checks.
+### Added
+- P4 production-readiness documentation baseline:
+  - `docs/PRODUCTION_READINESS.md` with release gate, readiness snapshot, and remaining risks.
+  - `docs/OPERATIONS.md` with install/upgrade, health, logging, reindex, budget, privacy, and incident runbooks.
+- `cm release-gate` / `node cli/index.js release-gate` for repeatable local production-readiness checks before release tagging.
+  - `--quick` runs guardrail regression tests, EncodingGate scan, selftest, and doctor.
+  - full mode additionally runs the full pytest suite and static quality checks.
+  - `--no-semantic` skips local Chroma/model probes when semantic dependencies are unavailable.
 
-### CI
+### Changed
+- Updated `README.md`, `docs/INSTALL.md`, `docs/guides/CONFIGURATION.md`, and `MCP_SERVER.md` to reflect the current Python 3.10+ / git-clone-only production baseline.
+- `install.sh` and `install.bat` now install runtime dependencies with `constraints.txt` (`pip install -r requirements.txt -c constraints.txt`) so fresh installs use the documented reproducible baseline.
 - Added non-blocking Ubuntu / Python 3.14 test coverage while keeping Python 3.10-3.13 blocking across Ubuntu, Windows, and macOS.
 
-### Maintenance
-- P4-1: `install.sh` and `install.bat` now install runtime dependencies with `constraints.txt` (`pip install -r requirements.txt -c constraints.txt`) so fresh installs use the documented reproducible baseline.
-- P4-2: added `cm release-gate` / `node cli/index.js release-gate` to run repeatable production-readiness checks locally before release tagging.
+### Notes
+- No runtime data migration is required.
+- Known follow-up: CI workflow install steps still use unconstrained `requirements*.txt`; update `.github/workflows/*` to use `-c constraints.txt` when workflow-file edits are available.
 
 ## [1.6.0] - 2026-06-23
 
