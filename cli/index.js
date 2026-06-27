@@ -60,6 +60,15 @@ program
   .option('--no-semantic', 'Skip the semantic (ChromaDB) probe')
   .action(require('./commands/selftest'));
 
+program
+  .command('release-gate')
+  .description('Run production release-gate checks')
+  .option('--quick', 'Run a fast gate: guardrails, selftest, doctor, encoding scan')
+  .option('--no-semantic', 'Skip semantic/Chroma probes in selftest and doctor')
+  .option('--skip-tests', 'Skip pytest checks')
+  .option('--skip-static', 'Skip static quality checks')
+  .action(require('./commands/release-gate'));
+
 program.parse(process.argv);
 
 if (!process.argv.slice(2).length) {

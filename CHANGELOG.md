@@ -14,6 +14,7 @@
 
 ### Maintenance
 - P4-1: `install.sh` and `install.bat` now install runtime dependencies with `constraints.txt` (`pip install -r requirements.txt -c constraints.txt`) so fresh installs use the documented reproducible baseline.
+- P4-2: added `cm release-gate` / `node cli/index.js release-gate` to run repeatable production-readiness checks locally before release tagging.
 
 ## [1.6.0] - 2026-06-23
 

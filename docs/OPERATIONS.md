@@ -29,6 +29,26 @@ python scripts/health_check.py --json --no-semantic
 
 ---
 
+## Release gate
+
+Before tagging a release, run the release gate from a full clone.
+
+Fast gate:
+
+```bash
+node cli/index.js release-gate --quick --no-semantic
+```
+
+Full gate:
+
+```bash
+node cli/index.js release-gate --no-semantic
+```
+
+Drop `--no-semantic` when semantic dependencies and local model cache are available.
+
+---
+
 ## Install / upgrade flow
 
 ### Fresh install

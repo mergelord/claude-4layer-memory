@@ -18,6 +18,11 @@ This document defines what "production ready" means for this repository and how 
 - Local operational smoke test:
   - `cm selftest`
   - health check + FTS5 smoke test
+- Release gate helper:
+  - `cm release-gate --quick --no-semantic`
+  - `cm release-gate --no-semantic`
+  - quick mode runs guardrail regressions, encoding scan, selftest, and doctor
+  - full mode also runs the full pytest suite and static quality checks
 - Search hardening:
   - FTS5 keyword search
   - hybrid search with FTS5 + semantic + BM25 + RRF
@@ -52,7 +57,7 @@ This document defines what "production ready" means for this repository and how 
 | CI dependency reproducibility | Installers enforce `constraints.txt`, but CI workflow install steps still use unconstrained `requirements*.txt`. | Wire `-c constraints.txt` into test/lint workflows when workflow-file edits are available. |
 | Runtime docs drift | Older docs may still reference Python 3.7 or incomplete env flags. | Keep install/config/operations docs aligned with Python 3.10+ and P3 env flags. |
 | Workflow maintainability | Test workflow is expanded into explicit jobs to avoid expression-copy issues. | Accept verbosity or later restore a matrix in a workflow-authorized commit. |
-| Release evidence | Releases should include a repeatable manual verification checklist. | Use the release gate below before tagging. |
+| Release evidence | Releases should include a repeatable manual verification checklist. | Run `cm release-gate --no-semantic` or the manual release gate below before tagging. |
 
 ---
 
@@ -60,7 +65,37 @@ This document defines what "production ready" means for this repository and how 
 
 A release can be tagged as production-ready only after all required gates pass.
 
-### 1. Clean working state
+### Fast local gate
+
+Use this before opening or merging release-prep PRs:
+
+```bash
+node cli/index.js release-gate --quick --no-semantic
+```
+
+If semantic dependencies and local model cache are available:
+
+```bash
+node cli/index.js release-gate --quick
+```
+
+### Full local gate
+
+Use this before tagging:
+
+```bash
+node cli/index.js release-gate --no-semantic
+```
+
+If semantic dependencies and local model cache are available:
+
+```bash
+node cli/index.js release-gate
+```
+
+### Manual equivalent
+
+#### 1. Clean working state
 
 ```bash
 git status --short
@@ -68,7 +103,7 @@ git status --short
 
 Expected: no unintended local changes.
 
-### 2. Install dependencies
+#### 2. Install dependencies
 
 Recommended reproducible install:
 
@@ -80,7 +115,7 @@ python -m pip install -r requirements-dev.txt
 
 If constraints are not used, record that explicitly in release notes.
 
-### 3. Test suite
+#### 3. Test suite
 
 ```bash
 python -m pytest tests/ -v --tb=short
@@ -88,10 +123,10 @@ python -m pytest tests/ -v --tb=short
 
 Expected: pass on supported Python versions.
 
-### 4. Static quality checks
+#### 4. Static quality checks
 
 ```bash
-python -m pylint scripts/*.py audit.py \
+python -m pylint scripts audit.py \
   --disable=C0114,C0115,C0116,R0913,R0914,R0915,R0903,R0904,W0718,R1702,C0415,R0902,R0912,R0801 \
   --max-line-length=110 \
   --good-names=i,j,k,e,f,_,rc
@@ -103,16 +138,16 @@ python -m mypy scripts/ audit.py \
   --allow-untyped-defs \
   --allow-incomplete-defs
 
-ruff check scripts/*.py audit.py
+ruff check scripts audit.py
 bandit -r scripts/ audit.py -l --skip B404,B603
-radon cc scripts/*.py audit.py -a -nb
-radon mi scripts/*.py audit.py -nb
+radon cc scripts audit.py -a -nb
+radon mi scripts audit.py -nb
 python scripts/scan_repo_encoding.py
 ```
 
 Expected: all pass.
 
-### 5. Operational self-test
+#### 5. Operational self-test
 
 ```bash
 node cli/index.js selftest --no-semantic
@@ -131,7 +166,7 @@ Expected:
 - `selftest` exits with code `0`
 - `doctor` reports overall status `ok` or an understood `degraded`, not `down`
 
-### 6. MCP smoke surface
+#### 6. MCP smoke surface
 
 At minimum verify these tools return dictionaries with a real boolean `success` field:
 
@@ -146,7 +181,7 @@ At minimum verify these tools return dictionaries with a real boolean `success` 
 
 Expected: read-only tools do not mutate state; unconfirmed reindex is a no-op.
 
-### 7. Guardrail regression checks
+#### 7. Guardrail regression checks
 
 ```bash
 python -m pytest tests/test_p3_guardrails.py tests/test_mcp_e2e_smoke.py tests/test_soak.py -v --tb=short
@@ -161,7 +196,7 @@ Expected:
 - unconfirmed reindex remains blocked
 - soak test remains within the soft timing boundary
 
-### 8. Documentation check
+#### 8. Documentation check
 
 Before release, verify these docs agree with the current behavior:
 
