@@ -1,554 +1,264 @@
 # Configuration Guide
 
-Complete configuration reference for Claude 4-Layer Memory System.
+Configuration reference for Claude 4-Layer Memory System.
 
 ---
 
-## Table of Contents
+## Configuration model
 
-- [Overview](#overview)
-- [GLOBAL_PROJECTS.md](#global_projectsmd)
-- [Memory Structure](#memory-structure)
-- [Environment Variables](#environment-variables)
-- [Advanced Configuration](#advanced-configuration)
-- [Customization](#customization)
+The system is file-based by default and uses environment variables for deployment/runtime overrides.
+
+Primary files and directories:
+
+| Path | Purpose |
+| --- | --- |
+| `~/.claude/GLOBAL_PROJECTS.md` | Project registry. |
+| `~/.claude/memory/` | Global memory. |
+| `~/.claude/projects/<encoded-project>/memory/` | Project memory. |
+| `~/.claude/memory_fts5.db` | FTS5 index. Regenerable. |
+| `~/.claude/semantic_db_global/` | ChromaDB semantic index. Regenerable. |
+| `~/.claude/memory_costs.db` | Cost ledger. |
+| `~/.claude/routing_learner_db/` | Routing learner state. |
+| `~/.claude/logs/` | Structured logs. |
+
+Set `L4_HOME` to relocate the whole layout.
 
 ---
 
-## Overview
+## `L4_HOME`
 
-Claude 4-Layer Memory System uses file-based configuration with sensible defaults. Most users only need to configure `GLOBAL_PROJECTS.md`.
+`L4_HOME` is the root for memory state, DBs, routing data, and logs.
 
-**Configuration Files:**
-- `~/.claude/GLOBAL_PROJECTS.md` - Project registry (required)
-- `~/.claude/memory/` - Global memory structure
-- `~/.claude/projects/<project>/memory/` - Project memory structure
+Default:
+
+```text
+~/.claude
+```
+
+Example:
+
+```bash
+export L4_HOME=/srv/claude-memory
+```
+
+Derived paths:
+
+| Derived path | Default |
+| --- | --- |
+| memory dir | `~/.claude/memory` |
+| projects dir | `~/.claude/projects` |
+| FTS5 DB | `~/.claude/memory_fts5.db` |
+| semantic DB | `~/.claude/semantic_db_global` |
+| costs DB | `~/.claude/memory_costs.db` |
+| routing DB | `~/.claude/routing_learner_db` |
+| logs | `~/.claude/logs` |
+
+Changing `L4_HOME` does not migrate data. It points the runtime at a different state root.
 
 ---
 
-## GLOBAL_PROJECTS.md
+## Project registry: `GLOBAL_PROJECTS.md`
 
-Central registry of all projects. Used by L4 SEMANTIC for auto-discovery.
+Location:
 
-### Location
+```text
+<L4_HOME>/GLOBAL_PROJECTS.md
+```
 
-**Windows:** `%USERPROFILE%\.claude\GLOBAL_PROJECTS.md`  
-**Linux/Mac:** `~/.claude/GLOBAL_PROJECTS.md`
+Default:
 
-### Format
+```text
+~/.claude/GLOBAL_PROJECTS.md
+```
+
+Recommended entry format:
 
 ```markdown
-# Global Projects Registry
-
-**Last Updated:** 2026-04-18
-
----
-
-## Active Projects
-
-### 1. Project Name
-**Path:** `/path/to/project`
-**Memory:** `~/.claude/projects/encoded-path/memory/`
+### Project Name
+**Path:** `/absolute/path/to/project`
+**Memory:** `~/.claude/projects/encoded-project-path/memory/`
 **Status:** ✅ Active
 
 **Description:**
-Brief project description.
-
-**Key Components:**
-- Component 1
-- Component 2
-
-**Last Changes:**
-- Recent change 1
+Short project description.
 ```
 
-### Required Fields
+Use absolute paths. Keep inactive projects marked or remove them when no longer needed.
 
-| Field | Description | Example |
-|-------|-------------|---------|
-| **Path** | Absolute path to project | `/home/user/projects/my-app` |
-| **Memory** | Path to project memory | `~/.claude/projects/my-app/memory/` |
-| **Status** | Project status | ✅ Active, 🔄 In Development, 📦 Archived |
+---
 
-### Memory Path Encoding
+## Memory path encoding
 
-Convert project path to memory path:
+Common encoding rules:
 
-**Rules:**
 1. Replace `/` with `-`
 2. Replace `:` with `--`
 3. Replace spaces with `-`
 4. Remove leading `/`
 
-**Examples:**
+Examples:
 
-| Project Path | Memory Path |
-|--------------|-------------|
+| Project path | Encoded project memory path |
+| --- | --- |
 | `/home/user/projects/app` | `home-user-projects-app` |
 | `C:\Projects\MyApp` | `C--Projects-MyApp` |
 | `/Users/name/my project` | `Users-name-my-project` |
 
-### Status Icons
-
-| Icon | Status | Meaning |
-|------|--------|---------|
-| ✅ | Active | Currently working on |
-| 🔄 | In Development | Active development |
-| 📦 | Archived | No longer active |
-| ⚠️ | Deprecated | Being phased out |
-| 🚀 | Production | Live in production |
-
-### Example Configuration
-
-```markdown
-## Active Projects
-
-### 1. Web Application
-**Path:** `/home/user/projects/webapp`
-**Memory:** `~/.claude/projects/home-user-projects-webapp/memory/`
-**Status:** ✅ Active
-
-**Description:**
-Main web application with React frontend and Node.js backend.
-
-**Key Components:**
-- React 18 frontend
-- Express.js API
-- PostgreSQL database
-- Redis cache
-
-**Last Changes:**
-- Added authentication system (2026-04-15)
-- Migrated to TypeScript (2026-04-10)
-
 ---
 
-### 2. Mobile App
-**Path:** `/home/user/projects/mobile`
-**Memory:** `~/.claude/projects/home-user-projects-mobile/memory/`
-**Status:** 🔄 In Development
+## Environment variables
 
-**Description:**
-React Native mobile application.
+### Core paths and model
 
----
+| Variable | Default | Description |
+| --- | --- | --- |
+| `L4_HOME` | `~/.claude` | Root for memory state, DBs, routing, and logs. |
+| `L4_MODEL` | `paraphrase-multilingual-MiniLM-L12-v2` | Sentence-transformers embedding model. |
+| `HF_TOKEN` | unset | Optional HuggingFace token for model downloads/rate limits. |
 
-### 3. Legacy System
-**Path:** `/home/user/projects/legacy`
-**Memory:** `~/.claude/projects/home-user-projects-legacy/memory/`
-**Status:** 📦 Archived
-
-**Description:**
-Old system, kept for reference only.
-```
-
----
-
-## Memory Structure
-
-### Global Memory
-
-**Location:** `~/.claude/memory/`
-
-**Structure:**
-```
-memory/
-├── MEMORY.md              # Index file
-├── handoff.md             # HOT layer (24h)
-├── decisions.md           # WARM layer (14d)
-├── archive/               # COLD layer (permanent)
-│   ├── 2026-04/
-│   ├── 2026-03/
-│   └── 2026-02/
-├── outputs/               # Generated reports
-├── user_profile.md        # User preferences
-├── feedback_*.md          # Feedback memories
-├── project_overview.md    # Project summaries
-└── reference_*.md         # Reference materials
-```
-
-### Project Memory
-
-**Location:** `~/.claude/projects/<project>/memory/`
-
-**Structure:**
-```
-memory/
-├── MEMORY.md              # Project index
-├── handoff.md             # Project HOT layer
-├── decisions.md           # Project WARM layer
-├── archive/               # Project COLD layer
-├── semantic_db/           # L4 vector database
-├── outputs/               # Project reports
-├── feedback_*.md          # Project feedback
-└── project_*.md           # Project details
-```
-
-### Memory File Templates
-
-#### MEMORY.md
-
-```markdown
-# Memory Index
-
-## User
-- [User Profile](user_profile.md)
-
-## Feedback
-- [Development Style](feedback_style.md)
-
-## Project
-- [Overview](project_overview.md)
-
-## Reference
-- [Resources](reference_resources.md)
-```
-
-#### handoff.md
-
-```markdown
-# HOT Memory - Handoff
-
-**Last Updated:** [DATE]
-
----
-
-## Events
-
-### [TIMESTAMP] - Event Title
-**What happened:** Description
-**Context:** Relevant context
-**Next steps:** What to do next
-```
-
-#### decisions.md
-
-```markdown
-# WARM Memory - Decisions
-
-**Last Updated:** [DATE]
-
----
-
-## Decisions
-
-### Decision Title
-**Decision:** What was decided
-**Reason:** Why
-**Date:** [DATE]
-
-**Why:**
-- Reasoning
-
-**How to apply:**
-- Guidelines
-```
-
----
-
-## Environment Variables
-
-### L4_MODEL
-
-Override default embedding model.
-
-**Default:** `paraphrase-multilingual-MiniLM-L12-v2`
-
-**Usage:**
-```bash
-export L4_MODEL="sentence-transformers/all-MiniLM-L6-v2"
-python l4_semantic_global.py index-all
-```
-
-**Available models:**
-- `paraphrase-multilingual-MiniLM-L12-v2` (default, multilingual)
-- `all-MiniLM-L6-v2` (English only, faster)
-- `all-mpnet-base-v2` (English only, more accurate)
-
-### HF_TOKEN
-
-HuggingFace API token (optional).
-
-**Purpose:** Faster model downloads, higher rate limits
-
-**Usage:**
-```bash
-export HF_TOKEN="your_token_here"
-```
-
-**Get token:** https://huggingface.co/settings/tokens
-
----
-
-## Advanced Configuration
-
-### Custom Memory Locations
-
-**Override global memory:**
-```bash
-# Not recommended, but possible
-export CLAUDE_MEMORY_DIR="/custom/path/memory"
-```
-
-### Custom Database Location
-
-**Override semantic DB:**
-```bash
-# Not recommended, but possible
-export CLAUDE_SEMANTIC_DB="/custom/path/semantic_db"
-```
-
-### Indexing Options
-
-**Chunk size:**
-
-Edit `l4_semantic_global.py`:
-```python
-def _split_into_chunks(self, content: str, max_chunk_size: int = 500):
-    # Change 500 to your preferred size
-```
-
-**Smaller chunks:** More precise search, larger database  
-**Larger chunks:** More context, smaller database
-
-### Search Options
-
-**Number of results:**
+Example:
 
 ```bash
-# Default: 10 results
-python l4_semantic_global.py search-all "query"
-
-# Custom: Edit script or use Python API
+export L4_MODEL=sentence-transformers/all-MiniLM-L6-v2
 ```
 
----
+### MCP/runtime behavior
 
-## Customization
+| Variable | Default | Description |
+| --- | --- | --- |
+| `L4_PREWARM` | `1` | Enables background semantic backend prewarm when `mcp_server.py` starts. Use `0`, `false`, or `no` to disable. |
+| `L4_LOG_LEVEL` | implementation default | Log level for structured logging. |
+| `ANTHROPIC_API_KEY` | unset | Required only for Anthropic-backed `smart_complete`. |
+| `PYTHON_BIN` | platform default | Python executable used by Node CLI commands. |
 
-### Adding Custom Memory Types
+### Cost guardrails
 
-1. **Create new memory file:**
+| Variable | Default | Description |
+| --- | --- | --- |
+| `L4_DAILY_BUDGET_USD` | `0` / off | Optional daily USD budget for `smart_complete`. When today's spend reaches the cap, calls are blocked before spending. |
+
+Examples:
+
 ```bash
-touch ~/.claude/memory/custom_type.md
+export L4_DAILY_BUDGET_USD=5
+export L4_DAILY_BUDGET_USD=0  # disable
 ```
 
-2. **Add to MEMORY.md:**
-```markdown
-## Custom
-- [Custom Type](custom_type.md) — Description
+### Routing privacy and retention
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `ROUTING_STORE_TASK_TEXT` | `1` | Set `0`, `false`, or `no` to store a `sha256:...` hash instead of raw task text in routing history. |
+| `ROUTING_HISTORY_MAX` | `0` / off | Max routing-history entries used by manual pruning. |
+
+Examples:
+
+```bash
+export ROUTING_STORE_TASK_TEXT=0
+export ROUTING_HISTORY_MAX=1000
 ```
 
-3. **Use frontmatter:**
-```markdown
+Pruning is not automatic by default. The limit is consumed by the routing learner pruning path.
+
 ---
-name: custom_type
-description: Custom memory type
-type: custom
----
 
-# Custom Memory
+## Search/index configuration
 
-Content here...
+### FTS5 index
+
+Default DB:
+
+```text
+<L4_HOME>/memory_fts5.db
 ```
 
-### Custom Filters
+Normal maintenance:
 
-**Edit `l4_semantic_global.py`:**
+```bash
+python scripts/l4_fts5_search.py reindex --incremental
+```
+
+Full rebuild:
+
+```bash
+python scripts/l4_fts5_search.py reindex
+```
+
+MCP full rebuild requires explicit confirmation:
 
 ```python
-def _discover_projects(self) -> list:
-    # Add custom filtering logic
-    if "test" in project_dir.name.lower():
-        print(f"[SKIP] Test project: {project_dir.name}")
-        continue
+reindex_memory(confirm=True)
 ```
 
-### Custom Hooks
+### Semantic index
 
-**Session start hook:**
-```bash
-# ~/.claude/hooks/session-start.sh
-#!/bin/bash
-# Auto-index on session start
-l4_index_all.sh > /dev/null 2>&1 &
+Default DB directory:
+
+```text
+<L4_HOME>/semantic_db_global
 ```
 
-**Session stop hook:**
+Build/rebuild:
+
 ```bash
-# ~/.claude/hooks/session-stop.sh
-#!/bin/bash
-# Auto-index on session end
-l4_index_all.sh > /dev/null 2>&1
+python scripts/l4_semantic_global.py index-all
 ```
 
 ---
 
-## Configuration Examples
+## Logging
 
-### Example 1: Single Project Setup
+Logs live under:
 
-**GLOBAL_PROJECTS.md:**
-```markdown
-### My Project
-**Path:** `/home/user/my-project`
-**Memory:** `~/.claude/projects/home-user-my-project/memory/`
-**Status:** ✅ Active
+```text
+<L4_HOME>/logs/
 ```
 
-**Memory structure:**
-```
-~/.claude/
-├── GLOBAL_PROJECTS.md
-├── memory/
-│   ├── MEMORY.md
-│   ├── handoff.md
-│   └── decisions.md
-└── projects/
-    └── home-user-my-project/
-        └── memory/
-            ├── MEMORY.md
-            ├── handoff.md
-            ├── decisions.md
-            └── semantic_db/
-```
+Use logs for:
 
-### Example 2: Multi-Project Setup
-
-**GLOBAL_PROJECTS.md:**
-```markdown
-### Frontend
-**Path:** `/home/user/frontend`
-**Memory:** `~/.claude/projects/home-user-frontend/memory/`
-**Status:** ✅ Active
-
-### Backend
-**Path:** `/home/user/backend`
-**Memory:** `~/.claude/projects/home-user-backend/memory/`
-**Status:** ✅ Active
-
-### Mobile
-**Path:** `/home/user/mobile`
-**Memory:** `~/.claude/projects/home-user-mobile/memory/`
-**Status:** 🔄 In Development
-```
-
-### Example 3: Team Setup
-
-**Shared GLOBAL_PROJECTS.md (in git):**
-```markdown
-### Team Project
-**Path:** `/team/shared/project`
-**Memory:** `~/.claude/projects/team-shared-project/memory/`
-**Status:** ✅ Active
-```
-
-**Individual memory:** Each team member has their own `~/.claude/memory/`
+- semantic prewarm failures
+- hybrid timing/debug investigation
+- `smart_complete` budget blocks
+- routing learner bookkeeping failures
+- health-check degradation
 
 ---
 
-## Best Practices
+## Backup strategy
 
-### 1. Keep GLOBAL_PROJECTS.md Updated
+Back up user-authored memory/config:
 
-✅ **Do:**
-- Update immediately when adding projects
-- Mark inactive projects
-- Remove deleted projects
-- Keep descriptions current
+- `GLOBAL_PROJECTS.md`
+- `memory/`
+- `projects/*/memory/`
+- any custom config files you created
 
-❌ **Don't:**
-- Leave outdated projects
-- Forget to update memory paths
-- Use relative paths
+Usually exclude regenerable indexes:
 
-### 2. Organize Memory Files
+- `semantic_db*`
+- `memory_fts5.db`
+- `*.sqlite3`
 
-✅ **Do:**
-- Use descriptive filenames
-- Add frontmatter metadata
-- Keep files focused
-- Archive old content
+Example:
 
-❌ **Don't:**
-- Create huge monolithic files
-- Mix unrelated content
-- Forget to update MEMORY.md index
-
-### 3. Regular Maintenance
-
-**Weekly:**
-- Review GLOBAL_PROJECTS.md
-- Check memory file sizes
-- Run cleanup: `l4_cleanup.sh`
-
-**Monthly:**
-- Archive old decisions
-- Review and update descriptions
-- Check disk space
-
-### 4. Backup Strategy
-
-**What to backup:**
-- ✅ `~/.claude/GLOBAL_PROJECTS.md`
-- ✅ `~/.claude/memory/` (except semantic_db)
-- ✅ `~/.claude/projects/*/memory/` (except semantic_db)
-
-**What NOT to backup:**
-- ❌ `semantic_db/` (can be regenerated)
-- ❌ `*.sqlite3` (can be regenerated)
-
-**Backup command:**
 ```bash
 tar -czf claude-memory-backup.tar.gz \
-    --exclude='semantic_db' \
-    --exclude='*.sqlite3' \
-    ~/.claude/memory \
-    ~/.claude/projects/*/memory \
-    ~/.claude/GLOBAL_PROJECTS.md
+  --exclude='semantic_db*' \
+  --exclude='*.sqlite3' \
+  --exclude='memory_fts5.db' \
+  ~/.claude/GLOBAL_PROJECTS.md \
+  ~/.claude/memory \
+  ~/.claude/projects/*/memory
 ```
 
 ---
 
-## Troubleshooting Configuration
+## Best practices
 
-### Projects not discovered
-
-**Problem:** L4 doesn't find projects
-
-**Check:**
-1. GLOBAL_PROJECTS.md exists
-2. Memory path format is correct
-3. Memory directory exists
-4. Run with verbose output
-
-### Wrong memory path
-
-**Problem:** Memory path doesn't match project
-
-**Solution:**
-1. Check encoding rules
-2. Verify path in GLOBAL_PROJECTS.md
-3. Create directory if missing
-
-### Indexing fails
-
-**Problem:** Indexing errors
-
-**Check:**
-1. Memory files are valid markdown
-2. No corrupted files
-3. Sufficient disk space
-4. Python dependencies installed
-
----
-
-## Next Steps
-
-- **Usage Examples:** See [USAGE.md](USAGE.md)
-- **Architecture:** See [ARCHITECTURE.md](../architecture/ARCHITECTURE.md)
-- **Troubleshooting:** See [TROUBLESHOOTING.md](../TROUBLESHOOTING.md)
-
----
-
-**Configuration complete! Start using Claude 4-Layer Memory System!**
+- Keep `GLOBAL_PROJECTS.md` current.
+- Prefer incremental reindex for routine maintenance.
+- Treat full reindex as deliberate maintenance.
+- Use `L4_DAILY_BUDGET_USD` before enabling frequent `smart_complete` use.
+- Use `ROUTING_STORE_TASK_TEXT=0` for privacy-sensitive environments.
+- Run `cm selftest` or `node cli/index.js selftest` after upgrades.
+- Read `CHANGELOG.md` for release-specific reindex requirements.
