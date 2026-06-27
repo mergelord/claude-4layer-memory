@@ -2,7 +2,7 @@
 
 Complete installation instructions for Claude 4-Layer Memory System.
 
-> Installation mode: **git clone only**. The project is not published as a working npm package; the Python backend and repository tools require a full clone.
+> Supported install mode: **full Git clone + repository installer**. The project is currently distributed as a repository, not as a standalone npm or pip package. Keep the clone because repository-local Python backend files, hooks, constraints, docs, and release-gate tooling are part of the supported setup.
 
 ---
 

@@ -53,7 +53,7 @@ This document defines what "production ready" means for this repository and how 
 
 | Area | Risk | Required before final production stamp |
 | --- | --- | --- |
-| Packaging | Project is git-clone install only; npm package is intentionally disabled. | Keep README/install docs explicit and avoid claiming registry install support. |
+| Packaging | Project is currently distributed as a full repository clone plus repository installer; standalone npm/pip packages are intentionally not supported yet. | Keep README/install docs explicit until a real npm package, pip package, or release artifact installer exists. |
 | CI dependency reproducibility | Installers enforce `constraints.txt`, but CI workflow install steps still use unconstrained `requirements*.txt`. | Wire `-c constraints.txt` into test/lint workflows when workflow-file edits are available. |
 | Workflow maintainability | Test workflow is expanded into explicit jobs to avoid expression-copy issues. | Accept verbosity or later restore a matrix in a workflow-authorized commit. |
 | Release evidence | Releases should include a repeatable manual verification checklist. | Run `cm release-gate --no-semantic` or the manual release gate below before tagging. |
@@ -214,8 +214,8 @@ Before release, verify these docs agree with the current behavior:
 - CI blocking versions: **3.10, 3.11, 3.12, 3.13**
 - CI experimental version: **3.14 on Ubuntu**, non-blocking
 - Node.js for CLI wrapper: **14+**
-- Install mode: **git clone only**
-- npm registry install: **not supported**
+- Install mode: **full Git clone + repository installer**
+- Standalone npm/pip package install: **not supported yet**
 
 ---
 
