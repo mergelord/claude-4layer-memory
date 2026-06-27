@@ -1,7 +1,7 @@
 # Production Readiness
 
-Status: **P4 production-readiness hardening in progress**  
-Baseline: `v1.6.0`, after P0-P3 hardening and the non-blocking Python 3.14 CI row.
+Status: **v1.6.1 release candidate**  
+Baseline: `v1.6.1`, after P0-P3 hardening and P4 production-readiness passes.
 
 This document defines what "production ready" means for this repository and how to verify it before tagging a release.
 
@@ -55,7 +55,6 @@ This document defines what "production ready" means for this repository and how 
 | --- | --- | --- |
 | Packaging | Project is git-clone install only; npm package is intentionally disabled. | Keep README/install docs explicit and avoid claiming registry install support. |
 | CI dependency reproducibility | Installers enforce `constraints.txt`, but CI workflow install steps still use unconstrained `requirements*.txt`. | Wire `-c constraints.txt` into test/lint workflows when workflow-file edits are available. |
-| Runtime docs drift | Older docs may still reference Python 3.7 or incomplete env flags. | Keep install/config/operations docs aligned with Python 3.10+ and P3 env flags. |
 | Workflow maintainability | Test workflow is expanded into explicit jobs to avoid expression-copy issues. | Accept verbosity or later restore a matrix in a workflow-authorized commit. |
 | Release evidence | Releases should include a repeatable manual verification checklist. | Run `cm release-gate --no-semantic` or the manual release gate below before tagging. |
 
