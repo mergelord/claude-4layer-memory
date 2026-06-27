@@ -35,6 +35,10 @@ This document defines what "production ready" means for this repository and how 
 - Privacy guardrails:
   - optional routing task-text hashing via `ROUTING_STORE_TASK_TEXT=0`
   - optional routing-history pruning via `ROUTING_HISTORY_MAX`
+- Dependency reproducibility:
+  - `constraints.txt` defines the runtime baseline
+  - install scripts use `pip install -r requirements.txt -c constraints.txt`
+  - docs recommend the same reproducible install path
 - CI coverage:
   - Python tests on Linux, Windows, macOS for Python 3.10-3.13
   - Python 3.14 experimental on Linux, non-blocking
@@ -45,7 +49,7 @@ This document defines what "production ready" means for this repository and how 
 | Area | Risk | Required before final production stamp |
 | --- | --- | --- |
 | Packaging | Project is git-clone install only; npm package is intentionally disabled. | Keep README/install docs explicit and avoid claiming registry install support. |
-| Dependency reproducibility | `constraints.txt` exists but CI and install scripts do not enforce it by default. | Decide whether constraints are advisory or mandatory; if mandatory, wire `-c constraints.txt` into CI/install. |
+| CI dependency reproducibility | Installers enforce `constraints.txt`, but CI workflow install steps still use unconstrained `requirements*.txt`. | Wire `-c constraints.txt` into test/lint workflows when workflow-file edits are available. |
 | Runtime docs drift | Older docs may still reference Python 3.7 or incomplete env flags. | Keep install/config/operations docs aligned with Python 3.10+ and P3 env flags. |
 | Workflow maintainability | Test workflow is expanded into explicit jobs to avoid expression-copy issues. | Accept verbosity or later restore a matrix in a workflow-authorized commit. |
 | Release evidence | Releases should include a repeatable manual verification checklist. | Use the release gate below before tagging. |
