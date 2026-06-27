@@ -81,7 +81,7 @@ The installer:
 
 - checks Python availability
 - checks that `~/.claude` exists
-- installs runtime dependencies from `requirements.txt`
+- installs runtime dependencies from `requirements.txt` constrained by `constraints.txt`
 - creates memory directories under `~/.claude`
 - copies the deployed semantic runtime files into `~/.claude/hooks`
 - copies built-in hooks required by the 4-layer memory flow

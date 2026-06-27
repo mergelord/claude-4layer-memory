@@ -12,6 +12,9 @@
 ### CI
 - Added non-blocking Ubuntu / Python 3.14 test coverage while keeping Python 3.10-3.13 blocking across Ubuntu, Windows, and macOS.
 
+### Maintenance
+- P4-1: `install.sh` and `install.bat` now install runtime dependencies with `constraints.txt` (`pip install -r requirements.txt -c constraints.txt`) so fresh installs use the documented reproducible baseline.
+
 ## [1.6.0] - 2026-06-23
 
 ### Breaking Changes
