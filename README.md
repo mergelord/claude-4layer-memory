@@ -11,7 +11,6 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)](https://github.com/mergelord/claude-4layer-memory)
 [![CI/CD](https://img.shields.io/badge/CI%2FCD-passing-brightgreen.svg)](https://github.com/mergelord/claude-4layer-memory/actions)
-[![Code Quality](https://img.shields.io/badge/code%20quality-10.0%2F10-brightgreen.svg)](https://github.com/mergelord/claude-4layer-memory)
 
 ---
 
@@ -21,62 +20,30 @@
 - **4-Layer Memory Architecture** - HOT (24h) → WARM (14d) → COLD (permanent) → SEMANTIC (indexed)
 - **Dual-Level System** - Global memory (cross-project) + Project memory (project-specific)
 - **Auto-Discovery** - Automatically detects and indexes projects
-- **Smart Filtering** - Protects against indexing system directories (.git, node_modules, etc.)
+- **Smart Filtering** - Protects against indexing system directories (`.git`, `node_modules`, etc.)
 
 ### Advanced Search & Retrieval
-- **Semantic Search** - Find information by meaning, not keywords (multilingual support)
-- **Embedding Gateway** - Intelligent caching layer for embedding operations (reduces API costs by 70%)
-- **Linguistic Triggers** - Automatic context retrieval on natural language signals (inspired by Claude Opus 4.7)
-  - Possessive pronouns: "my project", "our code"
-  - Definite articles: "the script", "the bug"
-  - Past tense: "you recommended", "we discussed"
-  - Bilingual: English + Russian support
+- **Semantic Search** - Find information by meaning, not keywords
+- **Hybrid Repository Search** - FTS5 + semantic + BM25 + RRF, with optional reranking, from a full repo clone
+- **Embedding Gateway** - Caching layer for embedding operations
+- **MCP Server** - Model Context Protocol surface for memory search, health checks, cost tracking, and guarded code completion
 
-> **Repository Tools (require full clone):** Hybrid search, BM25 ranking, parallel search, and cross-encoder reranking are development tools available in the repository but not included in the installed runtime.
-
-### Quality Assurance & Monitoring
-- **EncodingGate (URC-1)** - Automatic mojibake detection and repair for Cyrillic text
-- **Health Monitoring** - Automatic rotation, corruption detection, size limits
-- **System Artifacts Cleanup** - Intelligent removal of C--WINDOWS-system32 and similar artifacts
-- **Skill Creator** - Automatic discovery and documentation of recurring patterns
-
-> **Repository Tools (require full clone):** Memory Lint (two-layer validation system) is a development tool available in the repository but not included in the installed runtime.
+> **Repository tools require a full clone.** Hybrid search, BM25 ranking, parallel search, cross-encoder reranking, memory lint, audit tooling, and MCP development flows are available from the repository but are not part of the flat installed hook runtime.
 
 ### Reliability & Hardening
-- **Timezone-Aware Cost Tracking** - All cost and usage timestamps are stored as timezone-aware UTC
-- **Robust Cost Fallback** - Missing model prices no longer raise `KeyError`; pricing falls back safely
-- **Unified Windows UTF-8 Guard** - Consistent UTF-8 stdout/stderr setup across all modules
-- **BOM-Free UTF-8 Sources** - All sources are clean UTF-8 (no BOM), enforced by the EncodingGate
-- **Path-Traversal Protection** - Unified key contract with path-traversal hardening for memory operations
+- **Health checks** - `cm doctor`, MCP `health_check`, and `cm selftest`
+- **Destructive Reindex Guard** - MCP full reindex requires explicit `confirm=True`
+- **Input Guardrails** - result limits and large prompt inputs are clamped
+- **Daily Budget Guard** - optional `L4_DAILY_BUDGET_USD` cap for Anthropic-backed `smart_complete`
+- **Routing Privacy Controls** - optional task-text hashing and history pruning
+- **Structured Logs** - JSON logs under `<L4_HOME>/logs`
+- **EncodingGate** - mojibake / replacement-character detection for UTF-8 hygiene
+- **Path-Traversal Protection** - hardened key handling for memory operations
 
-> **Repository Tools (require full clone):** Sanitized FTS5 queries, graceful search degradation, and per-instance reranker caching are development features in the repository but not in the installed runtime.
-
-### Developer Experience
-- **Cross-Platform** - Windows, Linux, macOS support with platform-specific optimizations
-- **MCP Server** - Model Context Protocol integration for IDE extensions
-- **CLI Tools** - Comprehensive command-line interface for all operations
-- **Cost Tracking** - Built-in token usage and cost monitoring
-- **Code Quality** - Automated CI/CD with Pylint (10.0/10), MyPy, Ruff, Bandit, and Radon
-  - Comprehensive automated test suite across Python 3.10-3.13 on Windows, Linux, and macOS (12 CI jobs)
-  - Type safety with MyPy strict mode
-  - Security scanning with Bandit
-  - Complexity analysis with Radon
-  - [See Code Quality Guide](docs/CODE_QUALITY.md)
-
----
-
-## 📋 Table of Contents
-
-- [Quick Start](#quick-start)
-- [Installation](#installation)
-- [Architecture](#architecture)
-- [Usage](#usage)
-- [Configuration](#configuration)
-- [Examples](#examples)
-- [Documentation](#documentation)
-- [Contributing](#contributing)
-- [Credits](#credits)
-- [License](#license)
+### CI / Quality
+- Blocking tests on Python 3.10-3.13 across Ubuntu, Windows, and macOS
+- Non-blocking Ubuntu / Python 3.14 experimental job
+- Pylint, MyPy, Ruff, Bandit, Radon, Shellcheck, and encoding scan
 
 ---
 
@@ -87,21 +54,30 @@
 git clone https://github.com/mergelord/claude-4layer-memory.git
 cd claude-4layer-memory
 
-# IMPORTANT: Run pre-installation audit first
+# Install dependencies reproducibly
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt -c constraints.txt
+python -m pip install -r requirements-dev.txt
+
+# IMPORTANT: run pre-installation audit first
 # Windows:
 .\audit.bat
 
-# Linux/Mac:
+# Linux/macOS:
 ./audit.sh
 
 # If audit passes, run installation
 # Windows:
 .\install.bat
 
-# Linux/Mac:
+# Linux/macOS:
 ./install.sh
 
-# Verify installation
+# Verify repository health quickly
+node cli/index.js selftest --no-semantic
+node cli/index.js doctor --no-semantic
+
+# Verify installed semantic runtime
 python scripts/l4_semantic_global.py stats
 ```
 
@@ -109,13 +85,14 @@ python scripts/l4_semantic_global.py stats
 
 ## 📦 Installation
 
-> **Install from a git clone only.** This package is **not published to npm** (`"private": true` in `package.json`). All commands below assume you have cloned the repository and run them from its root. There is no `npm install` path.
+> Install from a git clone only. `package.json` is marked `private: true`; npm registry install is not supported.
 
 ### Prerequisites
 
 - Python 3.10 or higher
-- Claude Code CLI installed
-- 500MB free disk space (for embeddings model)
+- Claude Code CLI installed and initialized so `~/.claude` exists
+- Node.js 14+ for the repository CLI wrapper
+- 500MB+ free disk space for embedding models and local DBs
 
 ### Automatic Installation
 
@@ -130,328 +107,103 @@ chmod +x install.sh
 ./install.sh
 ```
 
-### Manual Installation
-
-1. Install Python dependencies:
-```bash
-pip install -r requirements.txt
-pip install -r requirements-dev.txt
-```
-
-2. Copy scripts to Claude hooks directory:
-```bash
-# Windows
-copy scripts\*.py %USERPROFILE%\.claude\hooks\
-copy scripts\windows\l4_*.bat %USERPROFILE%\.claude\hooks\
-
-# Linux/Mac
-cp scripts/*.py ~/.claude/hooks/
-cp scripts/linux/l4_*.sh ~/.claude/hooks/
-chmod +x ~/.claude/hooks/*.sh
-```
-
-3. Initialize memory structure from the bundled templates:
-```bash
-# Windows
-copy templates\GLOBAL_PROJECTS.md.template %USERPROFILE%\.claude\GLOBAL_PROJECTS.md
-copy templates\MEMORY.md.template %USERPROFILE%\.claude\memory\MEMORY.md
-copy templates\handoff.md.template %USERPROFILE%\.claude\memory\handoff.md
-copy templates\decisions.md.template %USERPROFILE%\.claude\memory\decisions.md
-
-# Linux/Mac
-cp templates/GLOBAL_PROJECTS.md.template ~/.claude/GLOBAL_PROJECTS.md
-cp templates/MEMORY.md.template ~/.claude/memory/MEMORY.md
-cp templates/handoff.md.template ~/.claude/memory/handoff.md
-cp templates/decisions.md.template ~/.claude/memory/decisions.md
-```
-
-4. Build the semantic index:
-```bash
-python scripts/l4_semantic_global.py index-all
-```
-
-See [INSTALL.md](docs/INSTALL.md) for detailed instructions.
-
----
-
-## 🏗️ Architecture
-
-### 4-Layer Memory System
-
-```
-┌──────────────────────────────────────────────┐
-│ Layer 4: SEMANTIC (Vector Search)                       │
-│ ├─ ChromaDB + sentence-transformers                     │
-│ └─ Multilingual semantic search                         │
-├─────────────────────────────────────────────┤
-│ Layer 3: COLD (Permanent Archive)                       │
-│ ├─ archive/ directory                                   │
-│ └─ Long-term storage                                    │
-├─────────────────────────────────────────────┤
-│ Layer 2: WARM (14 days)                                 │
-│ ├─ decisions.md                                         │
-│ └─ Important decisions, architectural choices           │
-├─────────────────────────────────────────────┤
-│ Layer 1: HOT (24 hours)                                 │
-│ ├─ handoff.md                                           │
-│ └─ Recent events, quick context recovery                │
-└───────────────────────────────────────────────┘
-```
-
-### Dual-Level System
-
-**Global Memory** (`~/.claude/memory/`)
-- Cross-project knowledge
-- Development style, principles
-- User profile, global decisions
-
-**Project Memory** (`~/.claude/projects/<project>/memory/`)
-- Project-specific details
-- Implementation decisions
-- Project history
-
-See [ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md) for details.
+For full details, see [docs/INSTALL.md](docs/INSTALL.md).
 
 ---
 
 ## 💡 Usage
 
-### Basic Commands
+### Installed hook runtime
 
 ```bash
 # Index all projects
 l4_index_all.bat  # Windows
-l4_index_all.sh   # Linux/Mac
+l4_index_all.sh   # Linux/macOS
 
 # Search across all projects
 l4_search_all.bat "semantic search query"
 
-# Search in global memory only
+# Search global memory only
 l4_search_global.bat "coding style"
 
-# View statistics
+# View semantic stats
 l4_stats.bat
-
-# Cleanup junk collections
-python l4_semantic_global.py cleanup --dry-run
-python l4_semantic_global.py cleanup
 ```
 
-### Repository Commands (require full clone)
+### Repository-only commands
 
 ```bash
-# Validate memory health
+# Readiness checks
+node cli/index.js doctor --no-semantic
+node cli/index.js selftest --no-semantic
+
+# Memory lint
 python scripts/memory_lint.py --layer 1
+
+# Hybrid search
+python scripts/l4_fts5_search.py hybrid "memory system"
+
+# FTS5 maintenance
+python scripts/l4_fts5_search.py reindex --incremental
 ```
-
-### Adding New Project
-
-1. Add project to `GLOBAL_PROJECTS.md`:
-```markdown
-### My New Project
-**Path:** `C:\Projects\my-project`
-**Memory:** `~/.claude/projects/C--Projects-my-project/memory/`
-```
-
-2. Reindex:
-```bash
-l4_index_all.bat
-```
-
-3. Done! Project is automatically discovered and indexed.
-
-See [USAGE.md](docs/guides/USAGE.md) for more examples.
 
 ---
 
 ## ⚙️ Configuration
 
-### GLOBAL_PROJECTS.md
+Default state root:
 
-Central registry of all projects:
-
-```markdown
-## Active Projects
-
-### 1. Project Name
-**Path:** `C:\path\to\project`
-**Memory:** `~/.claude/projects/C--path-to-project/memory/`
-**Status:** ✅ Active
+```text
+~/.claude
 ```
 
-### Memory Structure
+Set `L4_HOME` to relocate memory state, DBs, routing learner data, and logs.
 
-Customize memory organization in each project:
+Important environment variables:
 
-```
-memory/
-├── MEMORY.md           # Index
-├── handoff.md          # HOT layer
-├── decisions.md        # WARM layer
-├── archive/            # COLD layer
-├── semantic_db/        # L4 layer
-└── outputs/            # Reports
-```
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `L4_HOME` | `~/.claude` | Memory state root. |
+| `L4_MODEL` | `paraphrase-multilingual-MiniLM-L12-v2` | Embedding model. |
+| `L4_PREWARM` | `1` | Semantic prewarm on MCP startup. |
+| `L4_DAILY_BUDGET_USD` | `0` / off | Daily budget for `smart_complete`. |
+| `ROUTING_STORE_TASK_TEXT` | `1` | Set `0` to hash routing task text. |
+| `ROUTING_HISTORY_MAX` | `0` / off | Optional routing-history retention cap. |
 
-See [CONFIGURATION.md](docs/guides/CONFIGURATION.md) for details.
-
----
-
-## 📚 Examples
-
-### Installed Runtime Examples
-
-These commands work from the installed hooks (`~/.claude/hooks/`) after running the installer:
-
-#### Example 1: Cross-Project Learning
-
-```bash
-# Find solutions from other projects
-l4_search_all.bat "how to handle Unicode errors"
-
-# Results from multiple projects:
-# [1] [project-A] decisions.md - Unicode handling solution
-# [2] [project-B] feedback.md - Windows console encoding fix
-```
-
-#### Example 2: Project-Specific Search
-
-```bash
-# Search within a single project's memory
-python scripts/l4_semantic_global.py search-project my-project "API integration"
-```
-
-#### Example 3: Health Check
-
-```bash
-# Check memory size / rotation health
-python scripts/health_memory_size.py
-```
-
-### Repository Tools Examples
-
-These commands require the full repository clone and are not available in the installed runtime:
-
-#### Example 4: Parallel Hybrid Search
-
-```bash
-# Standard hybrid search (sequential)
-python scripts/l4_fts5_search.py hybrid "memory system"
-
-# Parallel hybrid search (2-3x faster)
-python scripts/l4_fts5_search.py hybrid --parallel "memory system"
-
-# Benchmark performance comparison
-python scripts/benchmark_parallel_search.py "memory system"
-
-# Output:
-# Sequential (avg): 2.450s
-# Parallel (avg):   0.890s
-# Speedup: 2.75x
-# Improvement: 63.7%
-```
-
-#### Example 5: Memory Lint Quick Check
-
-```bash
-# Quick check (SessionStart hook - fast)
-python scripts/memory_lint.py --layer 1 --quick
-
-# Full Layer 1 check
-python scripts/memory_lint.py --layer 1
-
-# Full check with semantic analysis
-python scripts/memory_lint.py --layer all
-```
-
-See [examples/](examples/) directory for more.
+See [docs/guides/CONFIGURATION.md](docs/guides/CONFIGURATION.md).
 
 ---
 
 ## 📖 Documentation
 
-- **[Installation Guide](docs/INSTALL.md)** - Detailed installation instructions
-- **[Architecture Overview](docs/architecture/ARCHITECTURE.md)** - System design and components
-- **[Usage Guide](docs/guides/USAGE.md)** - Commands and workflows
-- **[Configuration Guide](docs/guides/CONFIGURATION.md)** - Customization options
-- **[Memory Lint](docs/MEMORY_LINT.md)** - Memory validation and health checks
-- **[EncodingGate](docs/ENCODING_GATE.md)** - Encoding validation and mojibake repair
-- **[System Artifacts](docs/SYSTEM_ARTIFACTS.md)** - Understanding C--WINDOWS-system32 and cleanup
-- **[P1: Embedding Gateway](docs/P1-Embedding-Gateway.md)** - Caching layer for embeddings
-- **[Reranking](docs/RERANKING.md)** - Cross-encoder reranking system
-- **[URC-1](docs/URC-1.md)** - Unicode Repair Contract specification
-- **[API Reference](docs/api/API.md)** - Python API documentation
-- **[FAQ](docs/FAQ.md)** - Frequently asked questions
-- **[Troubleshooting](docs/TROUBLESHOOTING.md)** - Common issues and solutions
+- [Installation Guide](docs/INSTALL.md)
+- [Operations Runbook](docs/OPERATIONS.md)
+- [Production Readiness](docs/PRODUCTION_READINESS.md)
+- [MCP Server](MCP_SERVER.md)
+- [Architecture Overview](docs/architecture/ARCHITECTURE.md)
+- [Usage Guide](docs/guides/USAGE.md)
+- [Configuration Guide](docs/guides/CONFIGURATION.md)
+- [Memory Lint](docs/MEMORY_LINT.md)
+- [EncodingGate](docs/ENCODING_GATE.md)
+- [Troubleshooting](docs/TROUBLESHOOTING.md)
 
 ---
 
-## 🤝 Contributing
+## ✅ Production readiness
 
-Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+The production release gate is documented in [docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md).
 
-### Development Setup
+Minimum local gate:
 
 ```bash
-# Clone repository
-git clone https://github.com/mergelord/claude-4layer-memory.git
-cd claude-4layer-memory
-
-# Install dev dependencies
-pip install -r requirements-dev.txt
-
-# Run tests
-python -m pytest tests/
-
-# Run linters
-python -m pylint scripts/*.py audit.py
-python -m mypy scripts/ audit.py --explicit-package-bases
+python -m pytest tests/ -v --tb=short
+node cli/index.js selftest --no-semantic
+node cli/index.js doctor --no-semantic
+python scripts/scan_repo_encoding.py
 ```
-
----
-
-## 🙏 Credits
-
-This project integrates ideas and concepts from multiple sources:
-
-### Original Authors
-
-- **[qwwiwi](https://github.com/qwwiwi)** - 4-layer memory architecture, HOT/WARM/COLD concept
-  - [public-architecture-claude-code](https://github.com/qwwiwi/public-architecture-claude-code)
-  - [architecture-brain-tests](https://github.com/qwwiwi/architecture-brain-tests)
-  - [edgelab-install](https://github.com/qwwiwi/edgelab-install)
-  - [independence-from-ai](https://github.com/qwwiwi/independence-from-ai)
-  - [second-brain](https://github.com/qwwiwi/second-brain)
-
-- **[cablate](https://github.com/cablate)** - Atomic wiki system for LLMs
-  - [llm-atomic-wiki](https://github.com/cablate/llm-atomic-wiki)
-
-### This Implementation
-
-- **Project Contributors** - Integration, L4 SEMANTIC, auto-discovery, dual-level system, multilingual support, hybrid search, quality assurance
-
-See [CREDITS.md](CREDITS.md) for detailed acknowledgments.
 
 ---
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
----
-
-## 🔗 Links
-
-- **Documentation:** [https://github.com/mergelord/claude-4layer-memory](https://github.com/mergelord/claude-4layer-memory)
-- **Issues:** [https://github.com/mergelord/claude-4layer-memory/issues](https://github.com/mergelord/claude-4layer-memory/issues)
-- **Discussions:** [https://github.com/mergelord/claude-4layer-memory/discussions](https://github.com/mergelord/claude-4layer-memory/discussions)
-
----
-
-## ⭐ Star History
-
-If you find this project useful, please consider giving it a star!
-
----
-
-**Made with ❤️ for the Claude Code community**
+MIT — see [LICENSE](LICENSE).
