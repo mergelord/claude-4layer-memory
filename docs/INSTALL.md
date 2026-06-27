@@ -2,323 +2,318 @@
 
 Complete installation instructions for Claude 4-Layer Memory System.
 
----
-
-## Table of Contents
-
-- [Prerequisites](#prerequisites)
-- [Quick Installation](#quick-installation)
-- [Manual Installation](#manual-installation)
-- [Verification](#verification)
-- [Troubleshooting](#troubleshooting)
-- [Uninstallation](#uninstallation)
+> Installation mode: **git clone only**. The project is not published as a working npm package; the Python backend and repository tools require a full clone.
 
 ---
 
 ## Prerequisites
 
-### Required
+Required:
 
-- **Python 3.7 or higher**
-  - Check: `python --version` or `python3 --version`
-  - Download: https://www.python.org/downloads/
+- Python **3.10 or higher**
+- Git
+- Claude Code CLI installed and initialized so `~/.claude` exists
+- 500MB+ free disk space for local embedding models and ChromaDB state
 
-- **Claude Code CLI**
-  - Must be installed and configured
-  - Directory `~/.claude` should exist
+Recommended:
 
-- **500MB free disk space**
-  - For embeddings model (downloaded automatically)
-
-### Optional
-
-- **Git** (for cloning repository)
-- **Virtual environment** (recommended for Python packages)
+- A virtual environment
+- Reproducible dependency install with `constraints.txt`
+- Node.js 14+ for the `cm` / `claude-memory-cli` wrapper commands from the repo
 
 ---
 
-## Quick Installation
-
-### Windows
-
-1. Download or clone the repository
-2. Open Command Prompt or PowerShell
-3. Navigate to the repository directory
-4. Run the installation script:
-
-```cmd
-install.bat
-```
-
-### Linux / macOS
-
-1. Download or clone the repository
-2. Open Terminal
-3. Navigate to the repository directory
-4. Make the script executable and run:
+## Quick install
 
 ```bash
+git clone https://github.com/mergelord/claude-4layer-memory.git
+cd claude-4layer-memory
+```
+
+Install Python dependencies:
+
+```bash
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt -c constraints.txt
+python -m pip install -r requirements-dev.txt
+```
+
+Run the pre-install audit:
+
+```bash
+# Windows
+.\audit.bat
+
+# Linux/macOS
+./audit.sh
+```
+
+Run the installer:
+
+```bash
+# Windows
+.\install.bat
+
+# Linux/macOS
 chmod +x install.sh
 ./install.sh
 ```
 
-The script will:
-- ✅ Check Python installation
-- ✅ Install dependencies (chromadb, sentence-transformers)
-- ✅ Create directory structure
-- ✅ Copy scripts to `~/.claude/hooks/`
-- ✅ Create configuration templates
-- ✅ Initialize memory structure
-- ✅ Test the installation
+Verify:
+
+```bash
+node cli/index.js selftest --no-semantic
+node cli/index.js doctor --no-semantic
+```
+
+If semantic dependencies and local model download are available:
+
+```bash
+node cli/index.js selftest
+node cli/index.js doctor
+```
 
 ---
 
-## Manual Installation
+## What the installer does
 
-If you prefer manual installation or the automatic script fails:
+The installer:
 
-### Step 1: Install Python Dependencies
+- checks Python availability
+- checks that `~/.claude` exists
+- installs runtime dependencies from `requirements.txt`
+- creates memory directories under `~/.claude`
+- copies the deployed semantic runtime files into `~/.claude/hooks`
+- copies built-in hooks required by the 4-layer memory flow
+- creates template memory files if they do not already exist
+- runs a lightweight semantic stats check
+
+The installed hook runtime is intentionally narrower than the full repository:
+
+- installed runtime: semantic search wrappers and built-in hooks
+- repository-only tools: hybrid FTS5/BM25/rerank pipeline, memory lint, audit tooling, MCP server, CI/dev checks
+
+Run repository-only tools from the cloned repository root.
+
+---
+
+## Manual install
+
+Use this only when the automatic installer is not suitable.
+
+### 1. Install dependencies
 
 ```bash
-pip install chromadb sentence-transformers
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt -c constraints.txt
 ```
 
-Or with Python 3 explicitly:
+### 2. Create directories
 
-```bash
-pip3 install chromadb sentence-transformers
-```
+Linux/macOS:
 
-### Step 2: Create Directory Structure
-
-**Windows:**
-```cmd
-mkdir %USERPROFILE%\.claude\hooks
-mkdir %USERPROFILE%\.claude\memory
-mkdir %USERPROFILE%\.claude\memory\archive
-mkdir %USERPROFILE%\.claude\memory\outputs
-```
-
-**Linux/macOS:**
 ```bash
 mkdir -p ~/.claude/hooks
 mkdir -p ~/.claude/memory/archive
 mkdir -p ~/.claude/memory/outputs
 ```
 
-### Step 3: Copy Scripts
+Windows PowerShell:
 
-**Windows:**
-```cmd
-copy scripts\l4_semantic_global.py %USERPROFILE%\.claude\hooks\
-copy scripts\windows\*.bat %USERPROFILE%\.claude\hooks\
+```powershell
+New-Item -ItemType Directory -Force $env:USERPROFILE\.claude\hooks
+New-Item -ItemType Directory -Force $env:USERPROFILE\.claude\memory\archive
+New-Item -ItemType Directory -Force $env:USERPROFILE\.claude\memory\outputs
 ```
 
-**Linux/macOS:**
+### 3. Copy runtime files
+
+Linux/macOS:
+
 ```bash
 cp scripts/l4_semantic_global.py ~/.claude/hooks/
-cp scripts/linux/*.sh ~/.claude/hooks/
-chmod +x ~/.claude/hooks/*.sh
-chmod +x ~/.claude/hooks/l4_semantic_global.py
+cp scripts/chunking.py ~/.claude/hooks/
+cp scripts/ranking.py ~/.claude/hooks/
+cp scripts/memory_lint_helpers.py ~/.claude/hooks/
+cp scripts/linux/l4_*.sh ~/.claude/hooks/
+cp hooks/git-activity-detector.py ~/.claude/hooks/
+cp hooks/stop_handoff_universal.py ~/.claude/hooks/
+cp hooks/builtin/*.py ~/.claude/hooks/
+chmod +x ~/.claude/hooks/*.py ~/.claude/hooks/*.sh
 ```
 
-### Step 4: Create Configuration Files
+Windows Command Prompt:
 
-**Windows:**
 ```cmd
-copy templates\GLOBAL_PROJECTS.md.template %USERPROFILE%\.claude\GLOBAL_PROJECTS.md
-copy templates\MEMORY.md.template %USERPROFILE%\.claude\memory\MEMORY.md
-copy templates\handoff.md.template %USERPROFILE%\.claude\memory\handoff.md
-copy templates\decisions.md.template %USERPROFILE%\.claude\memory\decisions.md
+copy scripts\l4_semantic_global.py %USERPROFILE%\.claude\hooks\
+copy scripts\chunking.py %USERPROFILE%\.claude\hooks\
+copy scripts\ranking.py %USERPROFILE%\.claude\hooks\
+copy scripts\memory_lint_helpers.py %USERPROFILE%\.claude\hooks\
+copy scripts\windows\l4_*.bat %USERPROFILE%\.claude\hooks\
+copy hooks\git-activity-detector.py %USERPROFILE%\.claude\hooks\
+copy hooks\stop_handoff_universal.py %USERPROFILE%\.claude\hooks\
+copy hooks\builtin\*.py %USERPROFILE%\.claude\hooks\
 ```
 
-**Linux/macOS:**
+### 4. Create templates
+
+Linux/macOS:
+
 ```bash
-cp templates/GLOBAL_PROJECTS.md.template ~/.claude/GLOBAL_PROJECTS.md
-cp templates/MEMORY.md.template ~/.claude/memory/MEMORY.md
-cp templates/handoff.md.template ~/.claude/memory/handoff.md
-cp templates/decisions.md.template ~/.claude/memory/decisions.md
+cp -n templates/GLOBAL_PROJECTS.md.template ~/.claude/GLOBAL_PROJECTS.md
+cp -n templates/MEMORY.md.template ~/.claude/memory/MEMORY.md
+cp -n templates/handoff.md.template ~/.claude/memory/handoff.md
+cp -n templates/decisions.md.template ~/.claude/memory/decisions.md
+```
+
+Windows Command Prompt:
+
+```cmd
+if not exist %USERPROFILE%\.claude\GLOBAL_PROJECTS.md copy templates\GLOBAL_PROJECTS.md.template %USERPROFILE%\.claude\GLOBAL_PROJECTS.md
+if not exist %USERPROFILE%\.claude\memory\MEMORY.md copy templates\MEMORY.md.template %USERPROFILE%\.claude\memory\MEMORY.md
+if not exist %USERPROFILE%\.claude\memory\handoff.md copy templates\handoff.md.template %USERPROFILE%\.claude\memory\handoff.md
+if not exist %USERPROFILE%\.claude\memory\decisions.md copy templates\decisions.md.template %USERPROFILE%\.claude\memory\decisions.md
 ```
 
 ---
 
 ## Verification
 
-### Test L4 SEMANTIC
+Repository-level checks:
 
-**Windows:**
-```cmd
+```bash
+node cli/index.js selftest --no-semantic
+node cli/index.js doctor --no-semantic
+python -m pytest tests/test_smoke.py -v
+```
+
+Installed semantic runtime check:
+
+```bash
+# Linux/macOS
+python ~/.claude/hooks/l4_semantic_global.py stats
+
+# Windows
 python %USERPROFILE%\.claude\hooks\l4_semantic_global.py stats
 ```
 
-**Linux/macOS:**
+Full test suite from the repository root:
+
 ```bash
-python3 ~/.claude/hooks/l4_semantic_global.py stats
+python -m pytest tests/ -v --tb=short
 ```
 
-**Expected output:**
-```
-[INFO] Loading embedding model: paraphrase-multilingual-MiniLM-L12-v2
-[STATS] L4 SEMANTIC Global Statistics:
-   DB path: /home/user/.claude/semantic_db_global
-   Total collections: 1
-   
-   Collections:
-      memory_global: 0 chunks
-         Global memory - knowledge applicable to all projects
-```
+---
 
-### Test Batch/Shell Scripts
+## First index
 
-**Windows:**
-```cmd
-l4_stats.bat
-```
+After adding projects to `~/.claude/GLOBAL_PROJECTS.md`:
 
-**Linux/macOS:**
 ```bash
-l4_stats.sh
+# Linux/macOS
+l4_index_all.sh
+
+# Windows
+l4_index_all.bat
+```
+
+Or directly from the repository:
+
+```bash
+python scripts/l4_semantic_global.py index-all
+```
+
+---
+
+## Upgrade
+
+```bash
+git pull --ff-only
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt -c constraints.txt
+python -m pip install -r requirements-dev.txt
+node cli/index.js selftest --no-semantic
+```
+
+Read `CHANGELOG.md` for release-specific reindex requirements. If required:
+
+```bash
+python scripts/l4_fts5_search.py reindex
+python scripts/l4_semantic_global.py index-all
 ```
 
 ---
 
 ## Troubleshooting
 
-### Python not found
+### Python too old
 
-**Error:** `python: command not found`
+Check:
 
-**Solution:**
-- Install Python 3.7+ from https://www.python.org/
-- On Linux/macOS, try `python3` instead of `python`
-- Ensure Python is in your PATH
-
-### pip install fails
-
-**Error:** `ERROR: Could not find a version that satisfies the requirement chromadb`
-
-**Solution:**
-- Update pip: `pip install --upgrade pip`
-- Try with Python 3 explicitly: `pip3 install chromadb sentence-transformers`
-- Use virtual environment:
-  ```bash
-  python -m venv venv
-  source venv/bin/activate  # Linux/Mac
-  venv\Scripts\activate     # Windows
-  pip install chromadb sentence-transformers
-  ```
-
-### Claude Code directory not found
-
-**Error:** `Claude Code directory not found`
-
-**Solution:**
-- Install Claude Code CLI first
-- Verify `~/.claude` directory exists
-- Run Claude Code at least once to initialize
-
-### Permission denied (Linux/macOS)
-
-**Error:** `Permission denied: './install.sh'`
-
-**Solution:**
 ```bash
-chmod +x install.sh
-./install.sh
+python --version
 ```
+
+Install Python 3.10+ and ensure it is first on `PATH`.
+
+### `~/.claude` does not exist
+
+Run Claude Code once so it initializes its home directory, or create the directory deliberately if you know your target layout.
+
+### Dependency install fails
+
+Try:
+
+```bash
+python -m pip install --upgrade pip setuptools wheel
+python -m pip install -r requirements.txt -c constraints.txt
+```
+
+If a pinned constraint is incompatible with your platform, install without `-c constraints.txt` and record the deviation when debugging.
 
 ### Model download fails
 
-**Error:** `Failed to download model`
+The default sentence-transformers model may require network access on first use. Check network connectivity or set `HF_TOKEN` for HuggingFace access.
 
-**Solution:**
-- Check internet connection
-- Model is ~500MB, ensure sufficient bandwidth
-- Try manual download:
-  ```python
-  from sentence_transformers import SentenceTransformer
-  model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
-  ```
+### Self-test fails
 
-### Scripts not found after installation
+Run:
 
-**Error:** `l4_stats.bat: command not found`
+```bash
+node cli/index.js doctor --no-semantic
+python scripts/health_check.py --json --no-semantic
+```
 
-**Solution:**
-- Ensure scripts are in `~/.claude/hooks/`
-- Add `~/.claude/hooks/` to PATH, or
-- Run with full path: `~/.claude/hooks/l4_stats.sh`
+Then inspect logs under:
+
+```text
+~/.claude/logs/
+```
+
+or under `<L4_HOME>/logs/` if `L4_HOME` is set.
 
 ---
 
-## Uninstallation
+## Uninstall
 
-### Remove Scripts
+Remove installed hooks/scripts only:
 
-**Windows:**
-```cmd
+```bash
+# Linux/macOS
+rm -f ~/.claude/hooks/l4_*.sh
+rm -f ~/.claude/hooks/l4_semantic_global.py
+
+# Windows Command Prompt
 del %USERPROFILE%\.claude\hooks\l4_*.bat
 del %USERPROFILE%\.claude\hooks\l4_semantic_global.py
 ```
 
-**Linux/macOS:**
-```bash
-rm ~/.claude/hooks/l4_*.sh
-rm ~/.claude/hooks/l4_semantic_global.py
-```
+Remove generated indexes and memory data only if you are sure you no longer need them.
 
-### Remove Data (Optional)
+Regenerable data:
 
-**Warning:** This will delete all indexed data!
+- `semantic_db*`
+- `*.sqlite3`
+- `memory_fts5.db`
 
-**Windows:**
-```cmd
-rmdir /s /q %USERPROFILE%\.claude\semantic_db_global
-rmdir /s /q %USERPROFILE%\.claude\memory
-```
-
-**Linux/macOS:**
-```bash
-rm -rf ~/.claude/semantic_db_global
-rm -rf ~/.claude/memory
-```
-
-### Uninstall Python Packages (Optional)
-
-```bash
-pip uninstall chromadb sentence-transformers
-```
-
----
-
-## Next Steps
-
-After successful installation:
-
-1. **Configure Projects**
-   - Edit `~/.claude/GLOBAL_PROJECTS.md`
-   - Add your projects following the template
-
-2. **Index Projects**
-   - Run `l4_index_all.bat` (Windows) or `l4_index_all.sh` (Linux/Mac)
-
-3. **Test Search**
-   - Run `l4_search_all.bat "test query"` (Windows)
-   - Run `l4_search_all.sh "test query"` (Linux/Mac)
-
-4. **Read Documentation**
-   - [Usage Guide](guides/USAGE.md)
-   - [Configuration Guide](guides/CONFIGURATION.md)
-   - [Architecture Overview](architecture/ARCHITECTURE.md)
-
----
-
-## Support
-
-- **Issues:** https://github.com/mergelord/claude-4layer-memory/issues
-- **Discussions:** https://github.com/mergelord/claude-4layer-memory/discussions
-- **Documentation:** https://github.com/mergelord/claude-4layer-memory
-
----
-
-**Installation complete! Happy coding with Claude 4-Layer Memory System!**
+User-authored memory files under `memory/` and `projects/*/memory/` should be backed up before deletion.
