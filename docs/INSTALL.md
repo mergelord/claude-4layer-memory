@@ -4,6 +4,8 @@ Complete installation instructions for Claude 4-Layer Memory System.
 
 > Supported install mode: **full Git clone + repository installer**. The project is currently distributed as a repository, not as a standalone npm or pip package. Keep the clone because repository-local Python backend files, hooks, constraints, docs, and release-gate tooling are part of the supported setup.
 
+For the end-to-end bootstrap flow, see [BOOTSTRAP.md](BOOTSTRAP.md).
+
 ---
 
 ## Prerequisites
@@ -20,6 +22,30 @@ Recommended:
 - A virtual environment
 - Reproducible dependency install with `constraints.txt`
 - Node.js 14+ for the `cm` / `claude-memory-cli` wrapper commands from the repo
+
+---
+
+## Bootstrap story
+
+The supported flow is:
+
+```text
+clone repository
+  -> install Python dependencies with constraints.txt
+  -> install Node dependencies from package.json
+  -> run pre-install audit
+  -> run platform installer
+  -> verify repository health and installed runtime
+```
+
+The repository and installed runtime have different jobs:
+
+| Layer | Purpose |
+| --- | --- |
+| Repository toolchain | release gate, audit, tests, docs, MCP/dev tooling, hybrid search, memory lint |
+| Installed hook runtime | semantic wrappers, built-in Claude Code hooks, templates, local memory directories |
+
+The installer deploys the hook runtime into `~/.claude`. It does not replace the cloned repository.
 
 ---
 
@@ -246,6 +272,17 @@ python -m pip install -r requirements.txt -c constraints.txt
 python -m pip install -r requirements-dev.txt -c constraints.txt
 npm install
 node cli/index.js selftest --no-semantic
+node cli/index.js doctor --no-semantic
+```
+
+Refresh deployed hook files:
+
+```bash
+# Windows
+.\install.bat
+
+# Linux/macOS
+./install.sh
 ```
 
 Read `CHANGELOG.md` for release-specific reindex requirements. If required:

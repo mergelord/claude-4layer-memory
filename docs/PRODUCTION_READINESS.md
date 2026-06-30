@@ -1,7 +1,7 @@
 # Production Readiness
 
-Status: **v1.6.1 release candidate**  
-Baseline: `v1.6.1`, after P0-P3 hardening and P4/P5 production-readiness passes.
+Status: **v1.6.2 production baseline**  
+Baseline: `v1.6.2`, after P0-P5 hardening, CI reproducibility, clean-clone validation, and bootstrap documentation.
 
 This document defines what "production ready" means for this repository and how to verify it before tagging a release.
 
@@ -46,6 +46,10 @@ This document defines what "production ready" means for this repository and how 
   - CI test/lint workflows install Python dependencies through `constraints.txt`
   - release artifacts include `constraints.txt`
   - docs recommend the same reproducible install path
+- Installer/bootstrap story:
+  - supported bootstrap path is documented in `docs/BOOTSTRAP.md`
+  - fresh install flow distinguishes repository toolchain from installed hook runtime
+  - upgrade flow refreshes repo dependencies and then redeploys hook files
 - CI coverage:
   - Python tests on Linux, Windows, macOS for Python 3.10-3.13
   - Python 3.14 experimental on Linux, non-blocking
@@ -55,7 +59,7 @@ This document defines what "production ready" means for this repository and how 
 
 | Area | Risk | Required before final production stamp |
 | --- | --- | --- |
-| Packaging | Project is currently distributed as a full repository clone plus repository installer; standalone npm/pip packages are intentionally not supported yet. | Keep README/install docs explicit until a real npm package, pip package, or release artifact installer exists. |
+| Packaging | Project is currently distributed as a full repository clone plus repository installer; standalone npm/pip packages are intentionally not supported yet. | Keep README/install/bootstrap docs explicit until a real npm package, pip package, or release artifact installer exists. |
 | Dependency baseline upkeep | Installers and CI now enforce `constraints.txt`, so stale pins can break the full matrix instead of drifting silently. | Bump constraints deliberately and require full CI green before release. |
 | Workflow maintainability | Test workflow is expanded into explicit jobs to avoid expression-copy issues. | Accept verbosity or later restore a matrix in a workflow-authorized commit. |
 | Release evidence | Releases should include a repeatable manual verification checklist. | Run `cm release-gate --no-semantic` or the manual release gate below before tagging. |
@@ -209,6 +213,7 @@ Expected:
 Before release, verify these docs agree with the current behavior:
 
 - `README.md`
+- `docs/BOOTSTRAP.md`
 - `docs/INSTALL.md`
 - `docs/guides/CONFIGURATION.md`
 - `docs/OPERATIONS.md`
@@ -239,4 +244,4 @@ For this project, production-ready means:
 5. Privacy-sensitive routing history can avoid storing raw task text.
 6. Health, logs, and self-test give enough signal to debug local installs.
 7. CI covers supported OS/Python combinations.
-8. Docs are accurate about install mode, supported versions, env flags, Node dependencies, and dependency constraints.
+8. Docs are accurate about bootstrap flow, install mode, supported versions, env flags, Node dependencies, and dependency constraints.

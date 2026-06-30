@@ -48,6 +48,12 @@
 
 ## 🚀 Quick Start
 
+Bootstrap path:
+
+```text
+clone -> install repo dependencies -> audit -> install hook runtime -> verify
+```
+
 ```bash
 # Clone the repository
 git clone https://github.com/mergelord/claude-4layer-memory.git
@@ -68,7 +74,7 @@ npm install
 # Linux/macOS:
 ./audit.sh
 
-# If audit passes, run installation
+# If audit passes, deploy the hook runtime
 # Windows:
 .\install.bat
 
@@ -83,6 +89,8 @@ node cli/index.js release-gate --quick --no-semantic
 # Verify installed semantic runtime
 python scripts/l4_semantic_global.py stats
 ```
+
+For the full bootstrap flow, see [docs/BOOTSTRAP.md](docs/BOOTSTRAP.md).
 
 ---
 
@@ -110,7 +118,7 @@ chmod +x install.sh
 ./install.sh
 ```
 
-For full details, see [docs/INSTALL.md](docs/INSTALL.md).
+For full details, see [docs/INSTALL.md](docs/INSTALL.md). For the end-to-end bootstrap story, see [docs/BOOTSTRAP.md](docs/BOOTSTRAP.md).
 
 ---
 
@@ -191,6 +199,7 @@ See [docs/guides/CONFIGURATION.md](docs/guides/CONFIGURATION.md).
 
 ## 📖 Documentation
 
+- [Bootstrap Guide](docs/BOOTSTRAP.md)
 - [Installation Guide](docs/INSTALL.md)
 - [Operations Runbook](docs/OPERATIONS.md)
 - [Production Readiness](docs/PRODUCTION_READINESS.md)

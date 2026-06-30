@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Documentation
+- Added `docs/BOOTSTRAP.md` to describe the supported clone-to-runtime bootstrap flow, upgrade flow, and repository-toolchain vs installed-runtime boundary.
+
 ## [1.6.2] - 2026-06-30
 
 ### Changed
