@@ -1,7 +1,7 @@
 {
   "private": true,
   "name": "claude-memory-cli",
-  "version": "1.6.1",
+  "version": "1.6.2",
   "description": "CLI tool for Claude 4-Layer Memory System - intelligent memory management with semantic search",
   "main": "cli/index.js",
   "bin": {
