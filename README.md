@@ -4,8 +4,6 @@
 
 **Enterprise-grade memory management system for Claude Code with hybrid search, automatic skill discovery, and comprehensive quality assurance.**
 
-> ⚠️ **Install from a full repository clone.** The supported setup is a full Git clone plus the repository installer because the CLI, Python backend, hooks, constraints, docs, and release-gate checks live together in this repository. `package.json` is private, and npm registry installation (`npm install -g claude-memory-cli` / `cm`) is not a supported install path.
-
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Version](https://img.shields.io/badge/version-1.6.2-blue.svg)](https://github.com/mergelord/claude-4layer-memory/releases)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
