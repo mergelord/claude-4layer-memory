@@ -2,8 +2,13 @@
 
 ## Unreleased
 
+### Changed
+- CI workflows now install Python test/lint dependencies through `constraints.txt`, and release artifacts include the constraints baseline.
+- Refreshed the constrained baseline to `chromadb==1.5.9` so constrained CI remains compatible with NumPy 2.x across the supported Python matrix.
+
 ### Documentation
 - Refined installation wording to describe the current full-clone plus repository-installer support model and clarify that standalone npm/pip package installs are not supported yet.
+- Updated production-readiness notes to mark CI dependency reproducibility as implemented.
 
 ## [1.6.1] - 2026-06-27
 
