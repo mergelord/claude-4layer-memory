@@ -1,7 +1,7 @@
 # Production Readiness
 
 Status: **v1.6.1 release candidate**  
-Baseline: `v1.6.1`, after P0-P3 hardening and P4 production-readiness passes.
+Baseline: `v1.6.1`, after P0-P3 hardening and P4/P5 production-readiness passes.
 
 This document defines what "production ready" means for this repository and how to verify it before tagging a release.
 
@@ -43,6 +43,8 @@ This document defines what "production ready" means for this repository and how 
 - Dependency reproducibility:
   - `constraints.txt` defines the runtime baseline
   - install scripts use `pip install -r requirements.txt -c constraints.txt`
+  - CI test/lint workflows install Python dependencies through `constraints.txt`
+  - release artifacts include `constraints.txt`
   - docs recommend the same reproducible install path
 - CI coverage:
   - Python tests on Linux, Windows, macOS for Python 3.10-3.13
@@ -54,7 +56,7 @@ This document defines what "production ready" means for this repository and how 
 | Area | Risk | Required before final production stamp |
 | --- | --- | --- |
 | Packaging | Project is currently distributed as a full repository clone plus repository installer; standalone npm/pip packages are intentionally not supported yet. | Keep README/install docs explicit until a real npm package, pip package, or release artifact installer exists. |
-| CI dependency reproducibility | Installers enforce `constraints.txt`, but CI workflow install steps still use unconstrained `requirements*.txt`. | Wire `-c constraints.txt` into test/lint workflows when workflow-file edits are available. |
+| Dependency baseline upkeep | Installers and CI now enforce `constraints.txt`, so stale pins can break the full matrix instead of drifting silently. | Bump constraints deliberately and require full CI green before release. |
 | Workflow maintainability | Test workflow is expanded into explicit jobs to avoid expression-copy issues. | Accept verbosity or later restore a matrix in a workflow-authorized commit. |
 | Release evidence | Releases should include a repeatable manual verification checklist. | Run `cm release-gate --no-semantic` or the manual release gate below before tagging. |
 
@@ -109,7 +111,7 @@ Recommended reproducible install:
 ```bash
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt -c constraints.txt
-python -m pip install -r requirements-dev.txt
+python -m pip install -r requirements-dev.txt -c constraints.txt
 ```
 
 If constraints are not used, record that explicitly in release notes.
@@ -230,4 +232,4 @@ For this project, production-ready means:
 5. Privacy-sensitive routing history can avoid storing raw task text.
 6. Health, logs, and self-test give enough signal to debug local installs.
 7. CI covers supported OS/Python combinations.
-8. Docs are accurate about install mode, supported versions, and env flags.
+8. Docs are accurate about install mode, supported versions, env flags, and dependency constraints.
