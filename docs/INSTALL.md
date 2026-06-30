@@ -35,7 +35,13 @@ Install Python dependencies:
 ```bash
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt -c constraints.txt
-python -m pip install -r requirements-dev.txt
+python -m pip install -r requirements-dev.txt -c constraints.txt
+```
+
+Install repository CLI dependencies:
+
+```bash
+npm install
 ```
 
 Run the pre-install audit:
@@ -179,7 +185,13 @@ if not exist %USERPROFILE%\.claude\memory\decisions.md copy templates\decisions.
 
 ## Verification
 
-Repository-level checks:
+Repository-level checks require Node dependencies from `package.json`:
+
+```bash
+npm install
+```
+
+Then run:
 
 ```bash
 node cli/index.js selftest --no-semantic
@@ -231,7 +243,8 @@ python scripts/l4_semantic_global.py index-all
 git pull --ff-only
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt -c constraints.txt
-python -m pip install -r requirements-dev.txt
+python -m pip install -r requirements-dev.txt -c constraints.txt
+npm install
 node cli/index.js selftest --no-semantic
 ```
 
@@ -270,6 +283,18 @@ python -m pip install -r requirements.txt -c constraints.txt
 ```
 
 If a pinned constraint is incompatible with your platform, install without `-c constraints.txt` and record the deviation when debugging.
+
+### `Cannot find module 'commander'`
+
+Repository CLI commands require Node dependencies from `package.json`.
+
+Run from the repository root:
+
+```bash
+npm install
+```
+
+Then retry the `node cli/index.js ...` command.
 
 ### Model download fails
 

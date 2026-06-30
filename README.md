@@ -55,10 +55,13 @@
 git clone https://github.com/mergelord/claude-4layer-memory.git
 cd claude-4layer-memory
 
-# Install dependencies reproducibly
+# Install Python dependencies reproducibly
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt -c constraints.txt
-python -m pip install -r requirements-dev.txt
+python -m pip install -r requirements-dev.txt -c constraints.txt
+
+# Install repository CLI dependencies
+npm install
 
 # IMPORTANT: run pre-installation audit first
 # Windows:
@@ -134,6 +137,14 @@ l4_stats.bat
 
 ### Repository-only commands
 
+Install repository CLI dependencies once before using `node cli/index.js ...` commands:
+
+```bash
+npm install
+```
+
+Then run repository checks and tools:
+
 ```bash
 # Readiness checks
 node cli/index.js doctor --no-semantic
@@ -198,6 +209,12 @@ See [docs/guides/CONFIGURATION.md](docs/guides/CONFIGURATION.md).
 ## ✅ Production readiness
 
 The production release gate is documented in [docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md).
+
+Install repository CLI dependencies once:
+
+```bash
+npm install
+```
 
 Fast local gate:
 
