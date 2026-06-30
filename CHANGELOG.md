@@ -9,6 +9,7 @@
 ### Documentation
 - Refined installation wording to describe the current full-clone plus repository-installer support model and clarify that standalone npm/pip package installs are not supported yet.
 - Updated production-readiness notes to mark CI dependency reproducibility as implemented.
+- Documented `npm install` as the required repository CLI dependency step before running `node cli/index.js ...` checks from a clean clone.
 
 ## [1.6.1] - 2026-06-27
 

@@ -66,6 +66,12 @@ This document defines what "production ready" means for this repository and how 
 
 A release can be tagged as production-ready only after all required gates pass.
 
+Install repository CLI dependencies before running `node cli/index.js ...` commands from a clean clone:
+
+```bash
+npm install
+```
+
 ### Fast local gate
 
 Use this before opening or merging release-prep PRs:
@@ -112,6 +118,7 @@ Recommended reproducible install:
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt -c constraints.txt
 python -m pip install -r requirements-dev.txt -c constraints.txt
+npm install
 ```
 
 If constraints are not used, record that explicitly in release notes.
@@ -232,4 +239,4 @@ For this project, production-ready means:
 5. Privacy-sensitive routing history can avoid storing raw task text.
 6. Health, logs, and self-test give enough signal to debug local installs.
 7. CI covers supported OS/Python combinations.
-8. Docs are accurate about install mode, supported versions, env flags, and dependency constraints.
+8. Docs are accurate about install mode, supported versions, env flags, Node dependencies, and dependency constraints.
