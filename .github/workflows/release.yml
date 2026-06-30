@@ -58,5 +58,6 @@ jobs:
           audit.bat
           requirements.txt
           requirements-dev.txt
+          constraints.txt
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
