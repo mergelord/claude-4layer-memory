@@ -2,9 +2,42 @@
 
 ## Status
 
-Design proposal for Issue #11: `Integrate memory_lint_helpers.py during MemoryLinter split`.
+**Deferred. Do not implement speculatively.**
 
-This document does not change the public `memory_lint.py` CLI surface. It defines the target architecture and migration sequence for splitting the monolithic `MemoryLint` class into focused modules while preserving current behavior.
+This document is a backlog design note for Issue #11: `Integrate memory_lint_helpers.py during MemoryLinter split`.
+
+The design below is intentionally **not** an approved immediate migration plan. The current production position is:
+
+- If CI is green, the functionality is not broken, and the implementation fully satisfies current customer production needs, then a structural refactor is premature.
+- A split should happen only after real production usage shows concrete maintenance pain, a confirmed bug, a security/operational blocker, or a customer need that cannot be safely satisfied in the current structure.
+- Until then, keep `memory_lint.py` stable and avoid introducing new modules solely to satisfy theoretical architecture concerns.
+
+This document does not change the public `memory_lint.py` CLI surface and does not require any runtime changes.
+
+## Production decision
+
+The proposed multi-module split is explicitly deferred because its ownership cost is non-trivial:
+
+- more modules to document and keep synchronized;
+- more import boundaries and integration points;
+- more test surfaces for every behavior change;
+- more risk of circular imports or CLI compatibility regressions;
+- more onboarding complexity for future maintainers.
+
+Those costs are not justified while the current code is passing CI, satisfying the production baseline, and has no confirmed runtime failure.
+
+## When to revisit
+
+Revisit this design only if at least one of these triggers appears:
+
+- `memory_lint.py` has a confirmed production bug that is hard to fix safely in the current structure;
+- the current structure blocks a customer-requested feature;
+- repeated changes to Layer 1 / Layer 2 / encoding logic become risky or error-prone;
+- reviewer feedback blocks a release because of the current structure;
+- a security or correctness issue requires isolating part of the implementation;
+- production usage shows real maintenance pain rather than theoretical complexity.
+
+Absent one of these signals, prefer stability over refactoring.
 
 ## Background
 
@@ -28,51 +61,46 @@ This document does not change the public `memory_lint.py` CLI surface. It define
 - `EncodingGate`
 - `EncodingError`
 
-Today, `EncodingGate` is production code and is already imported by `memory_lint.py`. The other helpers are still mostly preparatory. This keeps Issue #11 open and leaves duplicated helper logic inside `MemoryLint`.
+Today, `EncodingGate` is production code and is already imported by `memory_lint.py`. The other helpers are mostly preparatory. That is acceptable while there is no production pressure to split the linter.
 
-## Goals
+## Current default approach
 
-- Keep `memory_lint.py` as the stable CLI entrypoint.
-- Move reusable helper logic out of `MemoryLint` and into focused modules.
-- Make `memory_lint_helpers.py` fully production-consumed instead of partially preparatory.
-- Preserve the existing CLI contract:
-  - `--layer`
-  - `--quick`
-  - `--checklist`
-  - `--report`
-  - `--validate-encoding`
-  - `--repair-mojibake`
-  - `--apply`
-- Preserve current exit-code behavior.
-- Keep changes incremental and easy to review.
+Keep the current structure:
 
-## Non-goals
+- `scripts/memory_lint.py` remains the stable CLI and orchestration implementation.
+- `scripts/memory_lint_helpers.py` remains available helper infrastructure.
+- Do not create new `memory_lint_*` modules without a concrete production trigger.
+- Do not refactor only to remove theoretical duplication.
+- Prefer targeted bug fixes and regression tests over broad structural changes.
 
-- No change to public command names or flags.
-- No rewrite of checker registries already split into `consistency_checkers.py` and `antipattern_checkers.py`.
-- No package publishing change.
-- No semantic behavior changes unless covered by explicit regression tests.
+## Non-goals while deferred
 
-## Proposed module shape
+- No immediate split into new modules.
+- No immediate helper integration PR.
+- No CLI surface changes.
+- No behavior changes to `--layer`, `--quick`, `--checklist`, `--report`, `--validate-encoding`, `--repair-mojibake`, or `--apply`.
+- No attempt to close Issue #11 merely for architectural cleanliness.
+
+## Possible future module shape
+
+If a real trigger appears, the following shape can be reconsidered. This is **not** current work.
 
 ### `scripts/memory_lint.py`
 
-Remains the CLI entrypoint.
+Would remain the CLI entrypoint.
 
-Responsibilities after split:
+Possible responsibilities after a future split:
 
 - parse CLI args
 - resolve memory path
 - dispatch to encoding operations, checklist, or lint layers
 - translate result objects into process exit codes
 
-Target size: small orchestration layer only.
-
 ### `scripts/memory_lint_core.py`
 
-Owns the `MemoryLint` orchestration class.
+Could own the `MemoryLint` orchestration class.
 
-Responsibilities:
+Possible responsibilities:
 
 - load config
 - coordinate Layer 1 and Layer 2 checks
@@ -81,9 +109,7 @@ Responsibilities:
 
 ### `scripts/memory_lint_layer1.py`
 
-Owns deterministic checks.
-
-Candidate functions/classes:
+Could own deterministic checks:
 
 - ghost links
 - orphan files
@@ -95,9 +121,7 @@ Candidate functions/classes:
 
 ### `scripts/memory_lint_layer2.py`
 
-Owns semantic and heuristic checks.
-
-Candidate functions/classes:
+Could own semantic and heuristic checks:
 
 - contradiction prompt construction
 - outdated claims
@@ -107,9 +131,7 @@ Candidate functions/classes:
 
 ### `scripts/memory_lint_checklist.py`
 
-Owns pre-delivery checklist composition.
-
-Candidate functions/classes:
+Could own pre-delivery checklist composition:
 
 - no duplicate memories
 - all links valid
@@ -121,77 +143,46 @@ Candidate functions/classes:
 
 ### `scripts/memory_lint_encoding.py`
 
-Optional thin wrapper around encoding CLI operations.
-
-Candidate functions/classes:
+Could be a thin wrapper around encoding CLI operations:
 
 - `_safe_rglob_md`
 - validate encoding command
 - repair mojibake command
 - repair summary printing
 
-This module should continue to import `EncodingGate` from `memory_lint_helpers.py`.
+This module would continue to import `EncodingGate` from `memory_lint_helpers.py`.
 
-### `scripts/memory_lint_helpers.py`
+## Future migration plan, if justified
 
-Production helper module.
+Only use this plan after a revisit trigger is met.
 
-Target role:
+### Phase 1 — evidence and scope
 
-- `RegexPatterns`: common compiled regexes consumed by link/frontmatter/date extraction
-- `SafeFileOperations`: shared safe read/stat helpers
-- `FrontmatterExtractor`: canonical frontmatter and link extraction helper
-- `ValidationHelpers`: reusable field validation and date extraction helpers
-- `CheckResultHandler`: optional reporting helper for check result formatting
-- `EncodingGate` / `EncodingError`: production encoding guard and cleanup utilities
-
-Once at least the parser/file helpers are wired into production modules, remove the "preparatory" language from the module docstring and update `__all__` to reflect the actual public surface.
-
-## Migration plan
-
-### Phase 1 — design and guardrails
-
-- Add this design document.
-- Keep runtime behavior unchanged.
-- Use this document as the reviewable architectural decision for Issue #11.
+- Identify the concrete bug, blocker, or production maintenance pain.
+- Define the smallest refactor needed to address that specific problem.
+- Keep the public CLI contract unchanged unless a customer requirement says otherwise.
 
 ### Phase 2 — helper integration without moving checks
 
-Low-risk production change:
+If needed, start with the smallest low-risk change:
 
-- Replace `MemoryLint.extract_links()` implementation with `FrontmatterExtractor.extract_links()`.
-- Replace `MemoryLint._extract_frontmatter()` implementation with `FrontmatterExtractor.extract_frontmatter()`.
-- Replace local date regex usage with `ValidationHelpers.extract_dates()` where appropriate.
-- Introduce `SafeFileOperations` for safe reads/stats inside `MemoryLint`.
 - Keep method names on `MemoryLint` for compatibility with existing tests.
+- Delegate parsing helpers where it reduces duplicated logic without changing behavior.
+- Add regression tests proving equivalent behavior.
 
-Expected result:
+### Phase 3 — split only the painful area
 
-- `memory_lint_helpers.py` is no longer mostly preparatory.
-- Issue #11 acceptance criteria starts to be satisfied without large file movement.
+If helper integration is not enough, extract only the component causing real pain. For example:
 
-### Phase 3 — split encoding CLI operations
+- encoding CLI operations if encoding maintenance becomes risky;
+- Layer 1 deterministic checks if those checks require active development;
+- checklist orchestration if checklist behavior starts changing frequently.
 
-- Move `_safe_rglob_md`, `_run_encoding_validation`, `_run_encoding_repair`, and repair helper functions into `memory_lint_encoding.py`.
-- Keep imported wrappers in `memory_lint.py` if needed for backward-compatible tests.
-- Add focused tests for the new module.
+Avoid extracting all layers at once.
 
-### Phase 4 — split Layer 1 deterministic checks
+## Test strategy for any future refactor
 
-- Extract deterministic checks into `memory_lint_layer1.py`.
-- Keep `MemoryLint.run_layer1()` as orchestration.
-- Preserve output text where tests depend on it.
-- Add regression tests for path traversal, unreadable files, and config thresholds.
-
-### Phase 5 — split Layer 2 and checklist
-
-- Extract Layer 2 checks into `memory_lint_layer2.py`.
-- Extract pre-delivery checklist into `memory_lint_checklist.py`.
-- Keep `memory_lint.py --checklist` behavior unchanged.
-
-## Test strategy
-
-Each phase should keep the full suite green and include targeted tests.
+Every future runtime refactor must keep the full suite green and include targeted tests.
 
 Minimum tests:
 
@@ -209,41 +200,30 @@ For helper integration specifically:
 
 - Assert `MemoryLint.extract_links()` returns the same type and values as before.
 - Assert `MemoryLint._extract_frontmatter()` returns the same dict shape as before.
-- Assert helper functions are imported by at least one production-side module.
-- Assert no preparatory/unused warning remains once helpers are wired.
+- Assert any newly production-imported helper has direct regression coverage.
 
-## Acceptance criteria mapping for Issue #11
+## Issue #11 position
 
-Issue #11 criteria and planned satisfaction:
+Issue #11 remains valid as backlog, but should not drive speculative runtime changes.
 
-- `scripts/memory_lint_helpers.py` no longer carries preparatory/unused warning:
-  - complete after Phase 2.
-- At least one production-side module imports public symbols from `memory_lint_helpers.py`:
-  - already true for `EncodingGate`; broaden in Phase 2 for `FrontmatterExtractor`, `SafeFileOperations`, and/or `ValidationHelpers`.
-- `MemoryLinter` no longer holds duplicated helper logic:
-  - addressed incrementally in Phases 2-5.
-- Tests cover helpers in their new home:
-  - existing EncodingGate tests remain; add helper integration tests in Phase 2.
-- No regression in pytest, ruff, pylint, mypy, bandit:
-  - required for each PR.
+Acceptance criteria should be pursued only when the project has a concrete reason to touch `memory_lint.py`:
 
-## Review constraints
+- confirmed production bug;
+- customer-requested feature;
+- release-blocking reviewer feedback;
+- security/correctness issue;
+- repeated maintenance pain.
 
-Keep PRs small:
+Until then, leave the current implementation stable.
 
-1. Design doc only.
-2. Helper integration, no module movement.
-3. Encoding command split.
-4. Layer 1 split.
-5. Layer 2/checklist split.
+## Recommended next production work
 
-Avoid combining architectural movement with behavior changes.
+Do not implement the split now.
 
-## Recommended next PR
+Prefer production-facing, low-risk work:
 
-Implement Phase 2:
-
-- import `FrontmatterExtractor`, `SafeFileOperations`, and optionally `ValidationHelpers` in production code
-- preserve the `MemoryLint` public methods used by tests
-- update `memory_lint_helpers.py` docstring from `PARTIALLY INTEGRATED` to production helper module wording
-- add regression tests proving production imports and equivalent parsing behavior
+- polish GitHub Release notes for `v1.6.2`;
+- validate the real working installation, not only a clean clone;
+- verify README / INSTALL / BOOTSTRAP against actual setup steps;
+- update the GitHub repository description manually;
+- collect production evidence before revisiting architecture.
