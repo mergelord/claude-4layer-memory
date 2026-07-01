@@ -4,6 +4,7 @@
 
 ### Documentation
 - Added `docs/BOOTSTRAP.md` to describe the supported clone-to-runtime bootstrap flow, upgrade flow, and repository-toolchain vs installed-runtime boundary.
+- Marked the MemoryLinter split design as deferred until production usage shows concrete maintenance pain, a confirmed bug, or an operational/customer blocker.
 
 ## [1.6.2] - 2026-06-30
 
